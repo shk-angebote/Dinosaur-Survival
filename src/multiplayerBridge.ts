@@ -112,6 +112,24 @@ class DinoMultiplayerBridge {
   private unsubFirestoreWorld: (() => void) | null = null;
   private cloudSaveTimer: number | null = null;
   private initialized = false;
+  private listeners = new Set<() => void>();
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  private notifyListeners(): void {
+    this.listeners.forEach((fn) => {
+      try {
+        fn();
+      } catch {
+        // ignore listener errors
+      }
+    });
+  }
 
   getSession(): PlayerSession {
     return {
@@ -555,6 +573,7 @@ class DinoMultiplayerBridge {
 
   private emitSession(): void {
     this.callbacks.onSessionChange?.(this.getSession());
+    this.notifyListeners();
   }
 
   private emitWorld(): void {
@@ -564,11 +583,13 @@ class DinoMultiplayerBridge {
       marches: w.marches,
       onlinePlayers: w.onlinePlayers,
     });
+    this.notifyListeners();
   }
 
   private emitChat(): void {
     const w = this.getWorldData();
     this.callbacks.onChatUpdate?.(w.chat);
+    this.notifyListeners();
   }
 }
 

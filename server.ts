@@ -73,7 +73,18 @@ async function startServer() {
   app.use(express.json({ limit: '512kb' }));
 
   const server = http.createServer(app);
-  const wss = new WebSocketServer({ server, path: '/ws' });
+  const wss = new WebSocketServer({ noServer: true });
+
+  server.on('upgrade', (request, socket, head) => {
+    const pathname = (request.url || '').split('?')[0];
+    if (pathname === '/ws') {
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit('connection', ws, request);
+      });
+    } else {
+      socket.destroy();
+    }
+  });
 
   function getOnlineCount(): number {
     let count = 0;
@@ -286,11 +297,60 @@ async function startServer() {
 
   // ==================== FRONTEND AUSLIEFERUNG (VITE DEV ODER PROD DIST) ====================
   if (!isProd) {
+    process.env.DISABLE_HMR = 'true';
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: false,
+        watch: null
+      },
       appType: 'spa'
     });
+
+    // Im Preview-Modus (HMR deaktiviert) verhindert dieser leichtgewichtige @vite/client-Stub
+    // fehlerhafte WebSocket-Verbindungsversuche zu Port 24678, während CSS-Imports weiter funktionieren.
+    app.get('/@vite/client', (_req, res) => {
+      res.type('application/javascript').send(`
+const sheetsMap = new Map();
+export function updateStyle(id, content) {
+  let style = sheetsMap.get(id);
+  if (!style) {
+    style = document.createElement('style');
+    style.setAttribute('type', 'text/css');
+    style.setAttribute('data-vite-dev-id', id);
+    style.textContent = content;
+    document.head.appendChild(style);
+    sheetsMap.set(id, style);
+  } else {
+    style.textContent = content;
+  }
+}
+export function removeStyle(id) {
+  const style = sheetsMap.get(id);
+  if (style) {
+    document.head.removeChild(style);
+    sheetsMap.delete(id);
+  }
+}
+export function createHotContext() {
+  return {
+    data: {},
+    accept() {},
+    acceptExports() {},
+    dispose() {},
+    prune() {},
+    invalidate() {},
+    on() {},
+    off() {},
+    send() {}
+  };
+}
+export function injectQuery(url) { return url; }
+export class ErrorOverlay extends HTMLElement {}
+`);
+    });
+
     app.use(vite.middlewares);
   } else {
     const distDir = path.resolve(__dirname, 'dist');
