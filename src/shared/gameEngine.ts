@@ -12,7 +12,7 @@ import type {
   DinoHuntCombatResponse,
   ResourceKey,
   WorldSettlementDTO
-} from './apiTypes.js';
+} from './apiTypes.ts';
 import {
   BASE_BUILD_SECONDS,
   BUILDING_CONFIGS,
@@ -22,7 +22,7 @@ import {
   WORLD_CHUNK_SIZE,
   WORLD_GRID_COLS,
   WORLD_GRID_ROWS
-} from './gameConfig.js';
+} from './gameConfig.ts';
 
 export const TILE_FREE = 0;
 export const TILE_BLOCKED = 1;

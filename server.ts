@@ -18,8 +18,8 @@ import type {
   WorldChatMessageDTO,
   WorldMarchDTO,
   WorldSettlementDTO,
-} from './src/shared/apiTypes.js';
-import { getPublicGameConfig } from './src/shared/gameConfig.js';
+} from './src/shared/apiTypes.ts';
+import { getPublicGameConfig } from './src/shared/gameConfig.ts';
 import {
   createStaticWorldGrid,
   findFree2x2Spot,
@@ -27,14 +27,14 @@ import {
   resolveAuthoritativeDinoHunt,
   validateBuildingUpgrade,
   validateSettlementPlacement2x2,
-} from './src/shared/gameEngine.js';
+} from './src/shared/gameEngine.ts';
 import {
   FIREBASE_PROJECT_ID,
   issueGuestSessionToken,
   verifyBearerHeader,
   verifyGuestSessionToken,
-} from './src/server/firebaseTokenVerifier.js';
-import { PersistentWorldStore } from './src/server/worldStore.js';
+} from './src/server/firebaseTokenVerifier.ts';
+import { PersistentWorldStore } from './src/server/worldStore.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

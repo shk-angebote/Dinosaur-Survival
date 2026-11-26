@@ -3,7 +3,7 @@
  * Alle Werte werden über GET /api/v1/config ausgeliefert.
  */
 
-import type { HeroRole, ResourceKey } from './apiTypes.js';
+import type { HeroRole, ResourceKey } from './apiTypes.ts';
 
 export const GAME_CONFIG_VERSION = '1.0.0';
 export const MAX_LEVEL = 25;
