@@ -112,6 +112,7 @@ class DinoMultiplayerBridge {
   private guestTokenPromise: Promise<string | null> | null = null;
 
   private tribeName: string = getOrCreateTribeName();
+  private serverAvailable = false;
   private wsConnected = false;
   private cloudSynced = false;
   private syncState: SyncState = 'connecting';
@@ -238,7 +239,7 @@ class DinoMultiplayerBridge {
       (ev) => this.handleRealtimeEvent(ev),
       (connected) => {
         this.wsConnected = connected;
-        this.syncState = connected ? 'synced' : 'offline';
+        this.syncState = connected || this.isCloudLive() ? 'synced' : 'offline';
         this.emitSession();
         if (connected) {
           void this.pushCurrentSettlement(true);
@@ -255,12 +256,17 @@ class DinoMultiplayerBridge {
     this.emitSession();
   }
 
+  private isCloudLive(): boolean {
+    return Boolean(this.firebaseUser && this.cloudSynced);
+  }
+
   private async bootstrapServerState(): Promise<void> {
     try {
       const [world, guestToken] = await Promise.all([
         fetchWorldState(),
         this.firebaseUser ? Promise.resolve(null) : this.ensureGuestToken(),
       ]);
+      this.serverAvailable = true;
       // WebSocket nur verbinden, wenn ein aktiver Spielserver antwortet (verhindert Konsolenfehler auf statischem GitHub Pages)
       this.socket?.connect();
       this.serverOffsetMs = world.serverTimeMs - Date.now();
@@ -304,8 +310,11 @@ class DinoMultiplayerBridge {
 
       await this.pushCurrentSettlement(true);
     } catch {
-      this.syncState = 'offline';
-      this.emitSession();
+      this.serverAvailable = false;
+      if (!this.isCloudLive()) {
+        this.syncState = 'offline';
+        this.emitSession();
+      }
     }
   }
 
@@ -400,6 +409,18 @@ class DinoMultiplayerBridge {
             this.settlementsMap.set(s.uid, s);
           }
         }
+        if (!this.wsConnected) {
+          const recentCutoff = Date.now() - 15 * 60 * 1000;
+          const recentCount = Array.from(this.settlementsMap.values()).filter(
+            (s) => s.updatedAt >= recentCutoff
+          ).length;
+          this.onlinePlayers = Math.max(1, recentCount);
+        }
+        if (!this.cloudSynced) {
+          this.cloudSynced = true;
+          this.syncState = 'synced';
+          this.emitSession();
+        }
         this.emitWorld();
       },
       onMarches: (list) => {
@@ -476,6 +497,7 @@ class DinoMultiplayerBridge {
     stateObj: Record<string, unknown>,
     tokenOverride?: string | null
   ): Promise<void> {
+    if (!this.serverAvailable && !this.wsConnected) return;
     const token = tokenOverride ?? (await this.getActiveBearerToken());
     if (!token) return;
     try {
@@ -542,39 +564,74 @@ class DinoMultiplayerBridge {
     autoAssignIfOccupied?: boolean;
   }): Promise<TeleportResponse | null> {
     const session = this.getSession();
-    const token = await this.getActiveBearerToken();
-    if (!token) return null;
+    let finalTileX = payload.tileX;
+    let finalTileY = payload.tileY;
+    let finalBonfire = payload.bonfireLevel;
+    let finalPower = payload.power;
+    let serverResp: TeleportResponse | null = null;
 
-    try {
-      const resp = await postSettlement(
-        {
-          tribeName: session.tribeName,
-          bonfireLevel: payload.bonfireLevel,
-          power: payload.power,
-          tileX: payload.tileX,
-          tileY: payload.tileY,
-          autoAssignIfOccupied: payload.autoAssignIfOccupied ?? true,
-        },
-        token
-      );
-      if (resp.ok && resp.settlement) {
-        this.settlementsMap.set(resp.settlement.uid, resp.settlement);
-        this.emitWorld();
-        if (this.firebaseUser) {
-          void syncPublicProfileAndSettlement({
-            uid: this.firebaseUser.uid,
-            tribeName: session.tribeName,
-            bonfireLevel: resp.settlement.bonfireLevel,
-            power: resp.settlement.power,
-            tileX: resp.settlement.tileX,
-            tileY: resp.settlement.tileY,
-          }).catch(() => {});
+    if (this.serverAvailable || this.wsConnected) {
+      const token = await this.getActiveBearerToken();
+      if (token) {
+        try {
+          const resp = await postSettlement(
+            {
+              tribeName: session.tribeName,
+              bonfireLevel: payload.bonfireLevel,
+              power: payload.power,
+              tileX: payload.tileX,
+              tileY: payload.tileY,
+              autoAssignIfOccupied: payload.autoAssignIfOccupied ?? true,
+            },
+            token
+          );
+          serverResp = resp;
+          if (resp.ok && resp.settlement) {
+            finalTileX = resp.settlement.tileX;
+            finalTileY = resp.settlement.tileY;
+            finalBonfire = resp.settlement.bonfireLevel;
+            finalPower = resp.settlement.power;
+            this.settlementsMap.set(resp.settlement.uid, resp.settlement);
+            this.emitWorld();
+          }
+        } catch {
+          // Node-Server nicht erreichbar (z. B. statisches GitHub Pages) — Cloud Firestore übernimmt
         }
       }
-      return resp;
-    } catch {
-      return null;
     }
+
+    if (this.firebaseUser) {
+      const fbUid = this.firebaseUser.uid;
+      const localDto: WorldSettlementDTO = {
+        uid: fbUid,
+        tribeName: session.tribeName,
+        bonfireLevel: finalBonfire,
+        power: finalPower,
+        tileX: finalTileX,
+        tileY: finalTileY,
+        chunkKey: `${Math.floor(finalTileX / 12)}_${Math.floor(finalTileY / 9)}`,
+        updatedAt: Date.now(),
+      };
+      this.settlementsMap.set(fbUid, localDto);
+      this.emitWorld();
+      try {
+        await syncPublicProfileAndSettlement({
+          uid: fbUid,
+          tribeName: session.tribeName,
+          bonfireLevel: finalBonfire,
+          power: finalPower,
+          tileX: finalTileX,
+          tileY: finalTileY,
+        });
+        this.cloudSynced = true;
+        this.syncState = 'synced';
+        this.emitSession();
+      } catch {
+        // ignore transient cloud errors
+      }
+    }
+
+    return serverResp;
   }
 
   async teleportSettlement(payload: {
@@ -584,40 +641,65 @@ class DinoMultiplayerBridge {
     tileY: number;
   }): Promise<TeleportResponse> {
     const session = this.getSession();
-    const token = await this.getActiveBearerToken();
-    if (!token) {
-      return { ok: true, serverTimeMs: Date.now() };
-    }
-    try {
-      const resp = await postSettlement(
-        {
-          tribeName: session.tribeName,
-          bonfireLevel: payload.bonfireLevel,
-          power: payload.power,
-          tileX: payload.tileX,
-          tileY: payload.tileY,
-          autoAssignIfOccupied: false,
-        },
-        token
-      );
-      if (resp.ok && resp.settlement) {
-        this.settlementsMap.set(resp.settlement.uid, resp.settlement);
-        this.emitWorld();
-        if (this.firebaseUser) {
-          void syncPublicProfileAndSettlement({
-            uid: this.firebaseUser.uid,
-            tribeName: session.tribeName,
-            bonfireLevel: resp.settlement.bonfireLevel,
-            power: resp.settlement.power,
-            tileX: resp.settlement.tileX,
-            tileY: resp.settlement.tileY,
-          }).catch(() => {});
+    let finalTileX = payload.tileX;
+    let finalTileY = payload.tileY;
+    let finalBonfire = payload.bonfireLevel;
+    let finalPower = payload.power;
+    let resp: TeleportResponse = { ok: true, serverTimeMs: Date.now() };
+
+    if (this.serverAvailable || this.wsConnected) {
+      const token = await this.getActiveBearerToken();
+      if (token) {
+        try {
+          resp = await postSettlement(
+            {
+              tribeName: session.tribeName,
+              bonfireLevel: payload.bonfireLevel,
+              power: payload.power,
+              tileX: payload.tileX,
+              tileY: payload.tileY,
+              autoAssignIfOccupied: false,
+            },
+            token
+          );
+          if (resp.ok && resp.settlement) {
+            finalTileX = resp.settlement.tileX;
+            finalTileY = resp.settlement.tileY;
+            finalBonfire = resp.settlement.bonfireLevel;
+            finalPower = resp.settlement.power;
+            this.settlementsMap.set(resp.settlement.uid, resp.settlement);
+            this.emitWorld();
+          }
+        } catch {
+          resp = { ok: true, serverTimeMs: Date.now() };
         }
       }
-      return resp;
-    } catch {
-      return { ok: true, serverTimeMs: Date.now() };
     }
+
+    if (resp.ok && this.firebaseUser) {
+      const fbUid = this.firebaseUser.uid;
+      this.settlementsMap.set(fbUid, {
+        uid: fbUid,
+        tribeName: session.tribeName,
+        bonfireLevel: finalBonfire,
+        power: finalPower,
+        tileX: finalTileX,
+        tileY: finalTileY,
+        chunkKey: `${Math.floor(finalTileX / 12)}_${Math.floor(finalTileY / 9)}`,
+        updatedAt: Date.now(),
+      });
+      this.emitWorld();
+      void syncPublicProfileAndSettlement({
+        uid: fbUid,
+        tribeName: session.tribeName,
+        bonfireLevel: finalBonfire,
+        power: finalPower,
+        tileX: finalTileX,
+        tileY: finalTileY,
+      }).catch(() => {});
+    }
+
+    return resp;
   }
 
   async broadcastMarch(payload: {
@@ -631,29 +713,31 @@ class DinoMultiplayerBridge {
     durationMs: number;
   }): Promise<void> {
     const session = this.getSession();
-    const token = await this.getActiveBearerToken();
     const now = Date.now() + this.serverOffsetMs;
     const marchId = sanitizeId(payload.marchId || `m_${now}_${Math.floor(Math.random() * 9999)}`);
-    if (token) {
-      try {
-        await postMarch(
-          {
-            marchId,
-            tribeName: session.tribeName,
-            kind: payload.kind,
-            fromX: payload.fromX,
-            fromY: payload.fromY,
-            toX: payload.toX,
-            toY: payload.toY,
-            targetLabel: payload.targetLabel,
-            startedAt: now,
-            endsAt: now + Math.max(4000, payload.durationMs),
-            status: 'active',
-          },
-          token
-        );
-      } catch {
-        // ignore offline broadcast errors
+    if (this.serverAvailable || this.wsConnected) {
+      const token = await this.getActiveBearerToken();
+      if (token) {
+        try {
+          await postMarch(
+            {
+              marchId,
+              tribeName: session.tribeName,
+              kind: payload.kind,
+              fromX: payload.fromX,
+              fromY: payload.fromY,
+              toX: payload.toX,
+              toY: payload.toY,
+              targetLabel: payload.targetLabel,
+              startedAt: now,
+              endsAt: now + Math.max(4000, payload.durationMs),
+              status: 'active',
+            },
+            token
+          );
+        } catch {
+          // ignore offline broadcast errors
+        }
       }
     }
     if (this.firebaseUser) {
@@ -677,9 +761,11 @@ class DinoMultiplayerBridge {
     this.marchesMap.delete(marchId);
     this.emitWorld();
 
-    const token = await this.getActiveBearerToken();
-    if (token) {
-      void postMarch({ marchId, status: 'completed' }, token).catch(() => {});
+    if (this.serverAvailable || this.wsConnected) {
+      const token = await this.getActiveBearerToken();
+      if (token) {
+        void postMarch({ marchId, status: 'completed' }, token).catch(() => {});
+      }
     }
     if (this.firebaseUser) {
       void completeMarchInFirestore(marchId).catch(() => {});
@@ -687,6 +773,7 @@ class DinoMultiplayerBridge {
   }
 
   async validateBuildServer(req: BuildValidationRequest): Promise<BuildValidationResponse | null> {
+    if (!this.serverAvailable && !this.wsConnected) return null;
     try {
       return await postValidateBuild(req);
     } catch {
@@ -695,6 +782,7 @@ class DinoMultiplayerBridge {
   }
 
   async resolveDinoHuntServer(req: DinoHuntCombatRequest): Promise<DinoHuntCombatResponse | null> {
+    if (!this.serverAvailable && !this.wsConnected) return null;
     try {
       return await postDinoHuntCombat(req);
     } catch {
@@ -706,37 +794,70 @@ class DinoMultiplayerBridge {
     const clean = String(text || '').trim().slice(0, 240);
     if (!clean) return { ok: false, error: 'Nachricht ist leer.' };
     const session = this.getSession();
-    const token = await this.getActiveBearerToken();
-    if (!token) return { ok: false, error: 'Keine Serververbindung.' };
-
     const messageId = sanitizeId(`msg_${Date.now()}_${Math.floor(Math.random() * 99999)}`);
-    try {
-      const resp = await postChatMessage(
-        {
-          messageId,
-          tribeName: session.tribeName,
-          bonfireLevel,
-          text: clean,
-        },
-        token
-      );
-      if (resp.ok && resp.message) {
-        this.chatMap.set(resp.message.messageId, resp.message);
-        this.emitChat();
+    let sent = false;
+
+    if (this.serverAvailable || this.wsConnected) {
+      const token = await this.getActiveBearerToken();
+      if (token) {
+        try {
+          const resp = await postChatMessage(
+            {
+              messageId,
+              tribeName: session.tribeName,
+              bonfireLevel,
+              text: clean,
+            },
+            token
+          );
+          if (resp.ok && resp.message) {
+            this.chatMap.set(resp.message.messageId, resp.message);
+            this.emitChat();
+            sent = true;
+          }
+        } catch {
+          // Node-Server nicht erreichbar — Cloud Firestore versuchen
+        }
       }
-      if (this.firebaseUser) {
-        void publishChatToFirestore({
+    }
+
+    if (this.firebaseUser) {
+      try {
+        await publishChatToFirestore({
           messageId,
           uid: this.firebaseUser.uid,
           tribeName: session.tribeName,
           bonfireLevel,
           text: clean,
-        }).catch(() => {});
+        });
+        if (!sent) {
+          this.chatMap.set(messageId, {
+            messageId,
+            uid: this.firebaseUser.uid,
+            tribeName: session.tribeName,
+            bonfireLevel,
+            text: clean,
+            channel: 'world',
+            createdAt: Date.now(),
+          });
+          this.emitChat();
+        }
+        sent = true;
+      } catch (err) {
+        if (!sent) {
+          return {
+            ok: false,
+            error: err instanceof Error ? err.message : 'Cloud-Chat fehlgeschlagen.',
+          };
+        }
       }
-      return { ok: true };
-    } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : 'Senden fehlgeschlagen.' };
     }
+
+    if (sent) return { ok: true };
+    return {
+      ok: false,
+      error: 'Bitte unten links mit Google anmelden, um den Live-Welt-Chat zu nutzen.',
+    };
   }
 
   saveToCloud(stateObj: Record<string, unknown>, immediate = false): void {
@@ -744,18 +865,18 @@ class DinoMultiplayerBridge {
       this.syncState = 'saving';
       this.emitSession();
       try {
-        // 1. Immer auf dem Spielserver dauerhaft sichern (für Gäste & Google-Konten)
+        // 1. Auf dem Spielserver sichern (sofern aktiver Backend-Server erreichbar)
         await this.persistToServer(stateObj);
-        // 2. Bei verknüpftem Google-Konto zusätzlich in Cloud Firestore sichern
+        // 2. Bei verknüpftem Google-Konto direkt in Cloud Firestore sichern (funktioniert auch auf GitHub Pages)
         if (this.firebaseUser) {
           await saveCloudState(this.firebaseUser.uid, this.tribeName, stateObj, 1);
           this.cloudSynced = true;
           this.lastCloudSaveAt = Date.now();
         }
-        this.syncState = this.wsConnected ? 'synced' : 'offline';
+        this.syncState = this.wsConnected || this.isCloudLive() ? 'synced' : 'offline';
       } catch (err) {
         console.error('[Persistenz-Sync Fehler]', err);
-        this.syncState = this.wsConnected ? 'synced' : 'offline';
+        this.syncState = this.wsConnected || this.isCloudLive() ? 'synced' : 'offline';
       }
       this.emitSession();
     };

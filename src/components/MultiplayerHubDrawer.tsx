@@ -51,7 +51,11 @@ export const MultiplayerHubDrawer: React.FC<MultiplayerHubDrawerProps> = ({
     const res = await signInWithGoogle();
     setBusyAuth(false);
     if (res.ok) {
-      setFeedback('Google-Konto verknüpft! Dorf & Spielstand sind jetzt in Cloud Firestore gesichert.');
+      setFeedback('Google-Konto verknüpft! Dorf, Weltkarte & Chat sind jetzt live über Cloud Firestore verbunden.');
+    } else if (res.error?.includes('auth/unauthorized-domain')) {
+      setFeedback(
+        `Domain "${window.location.hostname}" muss in der Firebase Console unter Authentication → Settings → Authorized domains freigegeben werden.`
+      );
     } else {
       setFeedback('Anmeldung abgebrochen oder Popup blockiert.');
     }
@@ -82,17 +86,20 @@ export const MultiplayerHubDrawer: React.FC<MultiplayerHubDrawerProps> = ({
     (a, b) => b.bonfireLevel - a.bonfireLevel || b.power - a.power
   );
 
-  const statusColor = !session.wsConnected
-    ? '#f87171'
-    : !session.isGuest && session.cloudSynced
-    ? '#4ade80'
-    : '#fbbf24';
+  const isCloudLive = !session.isGuest && session.cloudSynced;
+  const isLive = session.wsConnected || isCloudLive;
 
-  const statusLabel = !session.wsConnected
-    ? 'Offline'
-    : !session.isGuest
+  const statusColor = isCloudLive
+    ? '#4ade80'
+    : session.wsConnected
+    ? '#fbbf24'
+    : '#f87171';
+
+  const statusLabel = isCloudLive
     ? 'Cloud'
-    : 'Online';
+    : session.wsConnected
+    ? 'Online'
+    : 'Lokal';
 
   return (
     <>
@@ -154,23 +161,37 @@ export const MultiplayerHubDrawer: React.FC<MultiplayerHubDrawerProps> = ({
           <div className="mp-account-box">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <strong style={{ fontSize: 12.5, color: session.isGuest ? '#fde68a' : '#86efac' }}>
-                {session.isGuest ? 'Gast-Sitzung (Server-gesichert)' : 'Google Cloud-Konto aktiv'}
+                {!session.isGuest
+                  ? 'Google Cloud-Konto aktiv'
+                  : session.wsConnected
+                  ? 'Gast-Sitzung (Server-gesichert)'
+                  : 'Lokaler Gast-Modus'}
               </strong>
               <span style={{ fontSize: 10.5, color: '#a8a29e' }}>
                 {session.syncState === 'saving'
                   ? 'Speichert...'
-                  : session.wsConnected
-                  ? 'Verbunden'
-                  : 'Wiederverbinden...'}
+                  : isLive
+                  ? session.wsConnected
+                    ? 'Verbunden'
+                    : 'Cloud aktiv'
+                  : 'Kein Spielserver'}
               </span>
             </div>
 
             <div style={{ fontSize: 11.5, color: '#c9bfb2', lineHeight: 1.4 }}>
               {session.isGuest ? (
-                <>
-                  Dein Dorf ist auf dem Spielserver gespeichert. Verknüpfe ein Google-Konto für
-                  dauerhafte <strong>Cloud-Firestore-Sicherung</strong> über alle Geräte &amp; Unity.
-                </>
+                session.wsConnected ? (
+                  <>
+                    Dein Dorf ist auf dem Spielserver gespeichert. Verknüpfe ein Google-Konto für
+                    dauerhafte <strong>Cloud-Firestore-Sicherung</strong> über alle Geräte &amp; Unity.
+                  </>
+                ) : (
+                  <>
+                    Auf dieser statischen Seite läuft kein eigener Node-Server. Melde dich mit{' '}
+                    <strong>Google</strong> an, um Cloud-Speicherung, Welt-Chat und andere Spieler
+                    direkt über Firebase live zu verbinden.
+                  </>
+                )
               ) : (
                 <>
                   Angemeldet als <strong>{session.email || session.displayName}</strong>.
