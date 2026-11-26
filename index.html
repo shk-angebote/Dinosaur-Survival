@@ -2155,8 +2155,8 @@
 
       .gear-subtabs {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 5px;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 4px;
         margin-bottom: 10px;
         background: rgba(18, 15, 13, 0.9);
         border: 1px solid var(--border-subtle);
@@ -2166,21 +2166,43 @@
 
       .gear-subtab-btn {
         min-height: 36px;
-        padding: 0 6px;
+        padding: 0 4px;
         border-radius: 8px;
-        font-size: 11px;
+        font-size: 10.5px;
         font-weight: 700;
         color: var(--text-secondary);
         background: transparent;
         border: 1px solid transparent;
         transition: all 0.16s ease;
         white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
       }
 
       .gear-subtab-btn.active {
         background: linear-gradient(180deg, rgba(249, 115, 22, 0.24) 0%, rgba(194, 65, 12, 0.2) 100%);
         border-color: rgba(249, 115, 22, 0.6);
         color: #fed7aa;
+      }
+
+      .subtab-unread {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 15px;
+        height: 15px;
+        padding: 0 4px;
+        border-radius: 999px;
+        background: #ef4444;
+        color: #fff;
+        font-size: 9.5px;
+        font-weight: 800;
+        line-height: 1;
+        flex-shrink: 0;
       }
 
       /* 6 Fähigkeiten (3x PvP + 3x PvE Dinojagd & Wildnis) + Malerei */
@@ -3379,6 +3401,972 @@
         font-size: 17px;
         margin: 0;
       }
+
+      /* ==================== KAMPF-ANIMATIONEN & KAMPF-LOG-POPUP ==================== */
+      .battle-alert-banner {
+        position: absolute;
+        top: calc(var(--hud-h) + 8px);
+        left: 12px;
+        right: 12px;
+        z-index: 64;
+        display: none;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 10px 12px;
+        border-radius: 13px;
+        background: linear-gradient(135deg, rgba(28, 18, 14, 0.96) 0%, rgba(44, 18, 13, 0.96) 100%);
+        border: 1px solid rgba(249, 115, 22, 0.65);
+        box-shadow: 0 12px 28px rgba(0, 0, 0, 0.55);
+        animation: toastIn 200ms var(--ease-out);
+      }
+
+      .battle-alert-banner.visible {
+        display: flex;
+      }
+
+      .battle-alert-banner.victory {
+        border-color: rgba(34, 197, 94, 0.65);
+        background: linear-gradient(135deg, rgba(16, 26, 20, 0.96) 0%, rgba(24, 38, 26, 0.96) 100%);
+      }
+
+      .battle-alert-meta {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        min-width: 0;
+      }
+
+      .battle-alert-icon {
+        width: 34px;
+        height: 34px;
+        border-radius: 10px;
+        background: rgba(15, 11, 9, 0.85);
+        border: 1px solid rgba(245, 239, 230, 0.16);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+
+      .battle-alert-text {
+        min-width: 0;
+      }
+
+      .battle-alert-title {
+        font-size: 12px;
+        font-weight: 800;
+        color: #fef3c7;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .battle-alert-sub {
+        font-size: 10.5px;
+        color: var(--text-secondary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .battle-alert-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+
+      .battle-watch-btn {
+        min-height: 32px;
+        padding: 0 10px;
+        border-radius: 8px;
+        background: linear-gradient(180deg, #f97316 0%, #c2410c 100%);
+        color: #fffaf5;
+        font-size: 11px;
+        font-weight: 800;
+        white-space: nowrap;
+      }
+
+      .battle-dismiss-btn {
+        width: 28px;
+        height: 28px;
+        border-radius: 8px;
+        background: rgba(245, 239, 230, 0.08);
+        color: var(--text-secondary);
+        font-size: 14px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      /* Helden-Reiter: Aktiver Jagd- & Kampf-Banner */
+      .hero-hunt-banner {
+        margin-bottom: 10px;
+        padding: 10px 12px;
+        border-radius: 13px;
+        background: linear-gradient(135deg, rgba(35, 21, 15, 0.94) 0%, rgba(22, 16, 14, 0.96) 100%);
+        border: 1px solid rgba(249, 115, 22, 0.38);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .hero-hunt-banner.victory {
+        border-color: rgba(34, 197, 94, 0.45);
+      }
+
+      .hero-hunt-banner-info {
+        min-width: 0;
+      }
+
+      .hero-hunt-banner-title {
+        font-size: 12px;
+        font-weight: 700;
+        color: #fde68a;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .hero-hunt-banner-sub {
+        font-size: 10.5px;
+        color: var(--text-secondary);
+        margin-top: 2px;
+      }
+
+      /* Kampf-Log Sub-Tab Karten */
+      .battle-log-card {
+        background: var(--surface-basalt);
+        border: 1px solid var(--border-subtle);
+        border-radius: 14px;
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 9px;
+      }
+
+      .battle-log-card.is-unread {
+        border-color: rgba(249, 115, 22, 0.58);
+        background: linear-gradient(180deg, rgba(38, 24, 18, 0.92) 0%, rgba(23, 19, 17, 0.96) 100%);
+      }
+
+      .battle-log-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .battle-log-dino {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        min-width: 0;
+      }
+
+      .battle-log-dino-icon {
+        width: 38px;
+        height: 38px;
+        border-radius: 10px;
+        background: rgba(14, 11, 10, 0.9);
+        border: 1px solid var(--border-subtle);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+
+      .battle-log-title {
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--text-primary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .battle-log-meta-line {
+        font-size: 10.5px;
+        color: var(--text-muted);
+        margin-top: 2px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .battle-outcome-label {
+        font-size: 10.5px;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        padding: 4px 8px;
+        border-radius: 7px;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+
+      .battle-outcome-label.victory {
+        background: rgba(34, 197, 94, 0.16);
+        border: 1px solid rgba(34, 197, 94, 0.45);
+        color: #86efac;
+      }
+
+      .battle-outcome-label.defeat {
+        background: rgba(239, 68, 68, 0.16);
+        border: 1px solid rgba(239, 68, 68, 0.45);
+        color: #fca5a5;
+      }
+
+      .battle-log-squad-line {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding-top: 7px;
+        border-top: 1px solid rgba(245, 239, 230, 0.07);
+        font-size: 11px;
+        color: var(--text-secondary);
+      }
+
+      .battle-log-loot-line {
+        font-size: 11px;
+        color: #fde68a;
+        line-height: 1.4;
+      }
+
+      .battle-log-actions {
+        display: grid;
+        grid-template-columns: 1.35fr 0.85fr;
+        gap: 7px;
+      }
+
+      /* Kampf-Arena Modal Overlay */
+      .battle-modal-backdrop {
+        position: absolute;
+        inset: 0;
+        z-index: 76;
+        background: rgba(5, 4, 4, 0.86);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 12px;
+      }
+
+      .battle-modal-backdrop.open {
+        display: flex;
+        animation: fadeIn 180ms var(--ease-out);
+      }
+
+      .battle-modal {
+        width: 100%;
+        max-width: 392px;
+        max-height: 92%;
+        background: linear-gradient(180deg, #1b1512 0%, #120e0c 100%);
+        border: 1px solid rgba(245, 158, 11, 0.38);
+        border-radius: 18px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        box-shadow: 0 22px 48px rgba(0, 0, 0, 0.75);
+      }
+
+      .battle-modal-head {
+        padding: 12px 14px 10px;
+        border-bottom: 1px solid rgba(245, 239, 230, 0.08);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .battle-modal-title {
+        font-family: var(--font-display);
+        font-size: 15px;
+        font-weight: 700;
+        color: #fef3c7;
+        margin: 0;
+      }
+
+      .battle-modal-sub {
+        font-size: 11px;
+        color: var(--text-secondary);
+        margin-top: 2px;
+      }
+
+      .battle-head-controls {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+
+      .battle-speed-btn {
+        min-height: 30px;
+        padding: 0 8px;
+        border-radius: 8px;
+        background: rgba(245, 239, 230, 0.08);
+        border: 1px solid var(--border-subtle);
+        color: #fde68a;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .battle-modal-body {
+        padding: 12px 14px 14px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 11px;
+      }
+
+      /* Visuelle Kampf-Bühne */
+      .battle-arena {
+        position: relative;
+        border-radius: 14px;
+        padding: 12px 10px 11px;
+        background:
+          radial-gradient(circle at 50% 90%, rgba(234, 88, 12, 0.24) 0%, transparent 62%),
+          linear-gradient(180deg, #120d0b 0%, #241610 56%, #18110e 100%);
+        border: 1px solid rgba(245, 158, 11, 0.22);
+        overflow: hidden;
+      }
+
+      .battle-arena.shake {
+        animation: arenaShake 260ms ease-out;
+      }
+
+      .battle-round-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 10.5px;
+        color: var(--text-secondary);
+        margin-bottom: 10px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .battle-round-indicator {
+        font-family: var(--font-mono);
+        font-weight: 700;
+        color: #fbbf24;
+      }
+
+      .battle-stage-grid {
+        position: relative;
+        display: grid;
+        grid-template-columns: 1fr 44px 1fr;
+        align-items: center;
+        gap: 6px;
+        min-height: 128px;
+      }
+
+      .battle-side {
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+        position: relative;
+        z-index: 2;
+      }
+
+      .battle-hero-stack {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+
+      .battle-hero-token {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 7px;
+        border-radius: 9px;
+        background: rgba(16, 13, 11, 0.88);
+        border: 1px solid var(--hero-col, rgba(245, 239, 230, 0.2));
+        transition: transform 180ms var(--ease-out), opacity 180ms ease;
+      }
+
+      .battle-hero-token.is-attacking {
+        animation: heroLunge 360ms cubic-bezier(0.16, 1, 0.3, 1);
+        box-shadow: 0 0 14px rgba(251, 191, 36, 0.45);
+      }
+
+      .battle-hero-token.is-hit {
+        animation: actorHitShake 280ms ease-out;
+        filter: brightness(1.35);
+      }
+
+      .battle-hero-token.is-shield {
+        box-shadow: 0 0 16px rgba(96, 165, 250, 0.65);
+      }
+
+      .battle-hero-icon {
+        width: 22px;
+        height: 22px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+
+      .battle-hero-label {
+        min-width: 0;
+        line-height: 1.15;
+      }
+
+      .battle-hero-name {
+        font-size: 10.5px;
+        font-weight: 700;
+        color: var(--text-primary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .battle-hero-role {
+        font-size: 9px;
+        color: var(--text-muted);
+      }
+
+      .battle-troop-footnote {
+        font-size: 9.5px;
+        color: var(--text-secondary);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .battle-vs-center {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 2;
+      }
+
+      .battle-vs-mark {
+        font-family: var(--font-display);
+        font-size: 15px;
+        font-weight: 800;
+        color: #f97316;
+        letter-spacing: 0.08em;
+        text-shadow: 0 0 12px rgba(249, 115, 22, 0.55);
+      }
+
+      .battle-dino-stage {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 10px 6px;
+        border-radius: 12px;
+        background: radial-gradient(circle at 50% 45%, rgba(239, 68, 68, 0.16) 0%, rgba(16, 12, 10, 0.85) 75%);
+        border: 1px solid rgba(239, 68, 68, 0.34);
+        position: relative;
+        transition: transform 220ms var(--ease-out), opacity 260ms ease;
+      }
+
+      .battle-dino-stage.is-attacking {
+        animation: dinoLunge 360ms cubic-bezier(0.16, 1, 0.3, 1);
+        box-shadow: 0 0 18px rgba(239, 68, 68, 0.5);
+      }
+
+      .battle-dino-stage.is-hit {
+        animation: actorHitShake 280ms ease-out;
+        filter: brightness(1.45);
+      }
+
+      .battle-dino-stage.is-defeated {
+        opacity: 0.38;
+        transform: translateY(8px) rotate(12deg) scale(0.9);
+        filter: grayscale(0.75);
+      }
+
+      .battle-dino-name {
+        font-size: 11px;
+        font-weight: 700;
+        color: #fecaca;
+        text-align: center;
+        line-height: 1.2;
+      }
+
+      .battle-dino-pwr {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        color: var(--text-muted);
+      }
+
+      /* HP-Leisten mit explizitem Text & Zahlen */
+      .battle-hp-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-top: 10px;
+      }
+
+      .battle-hp-box {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .battle-hp-meta {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 10px;
+        color: var(--text-secondary);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .battle-hp-track {
+        height: 8px;
+        border-radius: 999px;
+        background: rgba(10, 8, 7, 0.9);
+        border: 1px solid rgba(245, 239, 230, 0.12);
+        overflow: hidden;
+      }
+
+      .battle-hp-fill {
+        height: 100%;
+        width: 100%;
+        transform-origin: left center;
+        transition: transform 320ms cubic-bezier(0.16, 1, 0.3, 1);
+      }
+
+      .battle-hp-fill.squad {
+        background: linear-gradient(90deg, #16a34a 0%, #4ade80 100%);
+      }
+
+      .battle-hp-fill.dino {
+        background: linear-gradient(90deg, #b91c1c 0%, #f87171 100%);
+      }
+
+      /* FX-Layer (Projektile, Hiebe, schwebender Schaden) */
+      .battle-fx-layer {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        z-index: 6;
+        overflow: hidden;
+      }
+
+      .battle-proj {
+        position: absolute;
+        top: 46%;
+        height: 4px;
+        width: 44px;
+        border-radius: 999px;
+        opacity: 0;
+      }
+
+      .battle-proj.to-dino {
+        left: 26%;
+        background: linear-gradient(90deg, transparent 0%, #fbbf24 55%, #fff 100%);
+        box-shadow: 0 0 12px #f59e0b;
+        animation: projToDino 300ms ease-out forwards;
+      }
+
+      .battle-proj.to-squad {
+        right: 26%;
+        background: linear-gradient(270deg, transparent 0%, #f87171 55%, #fef08a 100%);
+        box-shadow: 0 0 12px #ef4444;
+        animation: projToSquad 300ms ease-out forwards;
+      }
+
+      .battle-slash {
+        position: absolute;
+        width: 56px;
+        height: 56px;
+        top: 32%;
+        opacity: 0;
+      }
+
+      .battle-slash.on-dino {
+        right: 16%;
+        animation: slashPop 320ms ease-out forwards;
+      }
+
+      .battle-slash.on-squad {
+        left: 16%;
+        animation: slashPop 320ms ease-out forwards;
+      }
+
+      .battle-dmg-float {
+        position: absolute;
+        top: 26%;
+        font-family: var(--font-mono);
+        font-size: 14px;
+        font-weight: 800;
+        white-space: nowrap;
+        text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
+        animation: dmgFloatUp 700ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      }
+
+      .battle-dmg-float.on-dino { right: 14%; color: #fde047; }
+      .battle-dmg-float.on-dino.crit { color: #fb923c; font-size: 16px; }
+      .battle-dmg-float.on-squad { left: 12%; color: #fca5a5; }
+      .battle-dmg-float.on-squad.shield { color: #93c5fd; }
+
+      /* Live Kampf-Log Feed */
+      .battle-log-feed {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        max-height: 168px;
+        overflow-y: auto;
+        padding-right: 2px;
+      }
+
+      .battle-log-entry {
+        padding: 7px 9px;
+        border-radius: 9px;
+        background: rgba(15, 12, 10, 0.85);
+        border: 1px solid rgba(245, 239, 230, 0.08);
+        font-size: 11px;
+        line-height: 1.38;
+        color: var(--text-secondary);
+        animation: fadeIn 180ms var(--ease-out);
+      }
+
+      .battle-log-entry.squad {
+        border-color: rgba(251, 191, 36, 0.24);
+      }
+
+      .battle-log-entry.dino {
+        border-color: rgba(239, 68, 68, 0.24);
+      }
+
+      .battle-log-entry-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+        margin-bottom: 2px;
+      }
+
+      .battle-log-actor {
+        font-weight: 700;
+        color: var(--text-primary);
+      }
+
+      .battle-log-dmg {
+        font-family: var(--font-mono);
+        font-size: 10.5px;
+        font-weight: 700;
+      }
+
+      /* Kampf-Ergebnis & Beute-Kasten */
+      .battle-result-card {
+        padding: 11px 12px;
+        border-radius: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        animation: fadeIn 220ms var(--ease-out);
+      }
+
+      .battle-result-card.victory {
+        background: linear-gradient(135deg, rgba(22, 101, 52, 0.26) 0%, rgba(16, 28, 20, 0.92) 100%);
+        border: 1px solid rgba(34, 197, 94, 0.5);
+      }
+
+      .battle-result-card.defeat {
+        background: linear-gradient(135deg, rgba(153, 27, 27, 0.26) 0%, rgba(28, 16, 16, 0.92) 100%);
+        border: 1px solid rgba(239, 68, 68, 0.5);
+      }
+
+      .battle-result-title {
+        font-family: var(--font-display);
+        font-size: 15px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .battle-result-card.victory .battle-result-title { color: #86efac; }
+      .battle-result-card.defeat .battle-result-title { color: #fca5a5; }
+
+      .battle-loot-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        font-size: 11px;
+        color: #fef3c7;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .battle-loot-entry {
+        padding: 4px 8px;
+        border-radius: 7px;
+        background: rgba(12, 9, 8, 0.72);
+        border: 1px solid rgba(245, 239, 230, 0.14);
+      }
+
+      .battle-modal-footer {
+        display: flex;
+        gap: 7px;
+        padding-top: 2px;
+      }
+
+      .battle-modal-footer > * {
+        flex: 1;
+        min-height: 40px;
+        font-size: 12px;
+      }
+
+      @keyframes heroLunge {
+        0% { transform: translateX(0) scale(1); }
+        42% { transform: translateX(22px) scale(1.06); }
+        100% { transform: translateX(0) scale(1); }
+      }
+
+      @keyframes dinoLunge {
+        0% { transform: translateX(0) scale(1); }
+        42% { transform: translateX(-22px) scale(1.07); }
+        100% { transform: translateX(0) scale(1); }
+      }
+
+      @keyframes actorHitShake {
+        0%, 100% { transform: translateX(0); }
+        25% { transform: translateX(-6px); }
+        55% { transform: translateX(6px); }
+        80% { transform: translateX(-3px); }
+      }
+
+      @keyframes arenaShake {
+        0%, 100% { transform: translateX(0); }
+        25% { transform: translateX(-4px); }
+        60% { transform: translateX(4px); }
+      }
+
+      @keyframes projToDino {
+        0% { opacity: 0.95; transform: translateX(0) scaleX(0.6); }
+        70% { opacity: 1; transform: translateX(130px) scaleX(1.1); }
+        100% { opacity: 0; transform: translateX(155px) scaleX(0.4); }
+      }
+
+      @keyframes projToSquad {
+        0% { opacity: 0.95; transform: translateX(0) scaleX(0.6); }
+        70% { opacity: 1; transform: translateX(-130px) scaleX(1.1); }
+        100% { opacity: 0; transform: translateX(-155px) scaleX(0.4); }
+      }
+
+      @keyframes slashPop {
+        0% { opacity: 0; transform: scale(0.45) rotate(-18deg); }
+        35% { opacity: 1; transform: scale(1.15) rotate(8deg); }
+        100% { opacity: 0; transform: scale(1.3) rotate(16deg); }
+      }
+
+      @keyframes dmgFloatUp {
+        0% { opacity: 0; transform: translateY(10px) scale(0.85); }
+        20% { opacity: 1; transform: translateY(0) scale(1.06); }
+        85% { opacity: 1; transform: translateY(-22px) scale(1); }
+        100% { opacity: 0; transform: translateY(-30px) scale(0.95); }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .battle-hero-token.is-attacking,
+        .battle-hero-token.is-hit,
+        .battle-dino-stage.is-attacking,
+        .battle-dino-stage.is-hit,
+        .battle-arena.shake,
+        .battle-proj,
+        .battle-slash,
+        .battle-dmg-float {
+          animation: none !important;
+        }
+      }
+      /* =====================================================================
+         MULTIPLAYER: FREMDE SIEDLUNGEN, WELT-CHAT & CLOUD-KONTO
+         ===================================================================== */
+      .wm-node.other-settlement .wm-pin-ring {
+        border-color: rgba(56, 189, 248, 0.85);
+        background: radial-gradient(circle at 35% 30%, rgba(14, 116, 144, 0.92), rgba(15, 23, 42, 0.96));
+        box-shadow: 0 0 14px rgba(56, 189, 248, 0.35);
+      }
+      .wm-node.other-settlement .wm-pin-lvl {
+        background: #0284c7;
+        color: #f0f9ff;
+      }
+      .wm-node.other-settlement .wm-nameplate {
+        border-color: rgba(56, 189, 248, 0.45);
+        color: #bae6fd;
+      }
+      .wm-march-line.other-player {
+        stroke: #38bdf8;
+        stroke-width: 2;
+        stroke-dasharray: 5 5;
+        opacity: 0.78;
+      }
+      .mp-chat-fab {
+        position: fixed;
+        right: 12px;
+        bottom: calc(var(--nav-h, 66px) + 12px);
+        z-index: 42;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 36px;
+        padding: 0 12px;
+        border-radius: 10px;
+        border: 1px solid rgba(245, 158, 11, 0.42);
+        background: linear-gradient(180deg, rgba(30, 24, 21, 0.94), rgba(17, 14, 12, 0.96));
+        color: #f5efe6;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+      }
+      .mp-chat-fab:active {
+        transform: translateY(1px);
+      }
+      .mp-chat-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 18px;
+        height: 18px;
+        padding: 0 5px;
+        border-radius: 6px;
+        background: #ea580c;
+        color: #fff;
+        font-size: 10px;
+        font-weight: 800;
+      }
+      .mp-chat-drawer {
+        position: fixed;
+        right: 12px;
+        bottom: calc(var(--nav-h, 66px) + 56px);
+        width: min(360px, calc(100vw - 24px));
+        height: min(400px, 56vh);
+        z-index: 65;
+        display: none;
+        flex-direction: column;
+        border-radius: 14px;
+        border: 1px solid rgba(245, 158, 11, 0.36);
+        background: rgba(16, 13, 12, 0.97);
+        box-shadow: 0 18px 40px rgba(0, 0, 0, 0.68);
+        overflow: hidden;
+        backdrop-filter: blur(10px);
+      }
+      .mp-chat-drawer.open {
+        display: flex;
+      }
+      .mp-chat-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 12px;
+        border-bottom: 1px solid rgba(245, 239, 230, 0.1);
+        background: rgba(28, 22, 19, 0.95);
+      }
+      .mp-chat-title {
+        font-size: 13px;
+        font-weight: 800;
+        color: #fde68a;
+        letter-spacing: 0.02em;
+      }
+      .mp-chat-online {
+        font-size: 11px;
+        color: #86efac;
+        margin-left: 8px;
+        font-weight: 600;
+      }
+      .mp-chat-list {
+        flex: 1;
+        overflow-y: auto;
+        padding: 10px 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .mp-chat-msg {
+        padding: 7px 9px;
+        border-radius: 9px;
+        background: rgba(34, 28, 24, 0.85);
+        border: 1px solid rgba(245, 239, 230, 0.07);
+        font-size: 12px;
+        line-height: 1.38;
+        color: #e7e2d9;
+      }
+      .mp-chat-msg.is-mine {
+        background: rgba(124, 45, 18, 0.35);
+        border-color: rgba(245, 158, 11, 0.32);
+      }
+      .mp-chat-msg-meta {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+        margin-bottom: 3px;
+        font-size: 10.5px;
+      }
+      .mp-chat-sender {
+        font-weight: 700;
+        color: #fbbf24;
+      }
+      .mp-chat-lvl {
+        color: #a8a29e;
+        font-weight: 600;
+      }
+      .mp-chat-form {
+        display: flex;
+        gap: 6px;
+        padding: 8px 10px;
+        border-top: 1px solid rgba(245, 239, 230, 0.1);
+        background: rgba(22, 18, 15, 0.96);
+      }
+      .mp-chat-input {
+        flex: 1;
+        min-width: 0;
+        height: 36px;
+        padding: 0 10px;
+        border-radius: 8px;
+        border: 1px solid rgba(245, 239, 230, 0.16);
+        background: rgba(12, 10, 9, 0.9);
+        color: #f5efe6;
+        font-size: 12.5px;
+        outline: none;
+      }
+      .mp-chat-input:focus {
+        border-color: #f59e0b;
+      }
+      .mp-chat-send {
+        height: 36px;
+        padding: 0 12px;
+        border-radius: 8px;
+        border: 1px solid rgba(251, 191, 36, 0.45);
+        background: linear-gradient(180deg, #d97706, #b45309);
+        color: #fff;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .mp-account-box {
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: rgba(28, 22, 19, 0.92);
+        border: 1px solid rgba(245, 158, 11, 0.28);
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .mp-tribe-row {
+        display: flex;
+        gap: 6px;
+      }
+      .mp-tribe-input {
+        flex: 1;
+        min-width: 0;
+        height: 36px;
+        padding: 0 10px;
+        border-radius: 8px;
+        border: 1px solid rgba(245, 239, 230, 0.18);
+        background: rgba(12, 10, 9, 0.85);
+        color: #f5efe6;
+        font-size: 12.5px;
+      }
     </style>
   </head>
   <body>
@@ -3428,6 +4416,9 @@
 
         <!-- TOASTS -->
         <div class="toast-stack" id="toastStack" aria-live="polite"></div>
+
+        <!-- LIVE DINO-GEFECHT BANNER -->
+        <div class="battle-alert-banner" id="battleAlertBanner" aria-live="polite"></div>
 
         <!-- MAIN SWITCHABLE CONTENT -->
         <main class="main-viewport">
@@ -3610,6 +4601,35 @@
         <div class="center-modal-backdrop" id="centerModalBackdrop" role="dialog" aria-modal="true">
           <div class="center-modal" id="centerModalContent"></div>
         </div>
+
+        <!-- KAMPF-ANIMATION & KAMPF-LOG POPUP -->
+        <div class="battle-modal-backdrop" id="battleModalBackdrop" role="dialog" aria-modal="true" aria-label="Jagdkampf-Animation und Kampf-Log">
+          <div class="battle-modal" id="battleModalContent"></div>
+        </div>
+
+        <!-- WELT-CHAT (MULTIPLAYER) -->
+        <button class="mp-chat-fab" id="btnWorldChatFab" aria-label="Welt-Chat öffnen">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <span>Welt-Chat</span>
+          <span class="mp-chat-badge" id="mpChatUnreadBadge" style="display:none;">0</span>
+        </button>
+
+        <aside class="mp-chat-drawer" id="worldChatDrawer" aria-label="Gemeinsamer Welt-Chat">
+          <div class="mp-chat-head">
+            <div>
+              <span class="mp-chat-title">Welt-Chat</span>
+              <span class="mp-chat-online" id="mpChatOnlineLabel">1 online</span>
+            </div>
+            <button class="close-btn" id="btnCloseWorldChat" aria-label="Welt-Chat schließen" style="width:28px;height:28px;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
+          <div class="mp-chat-list" id="mpChatList"></div>
+          <form class="mp-chat-form" id="mpChatForm" autocomplete="off">
+            <input class="mp-chat-input" id="mpChatInput" type="text" maxlength="240" placeholder="Nachricht an alle Stämme..." />
+            <button class="mp-chat-send" type="submit">Senden</button>
+          </form>
+        </aside>
 
         <!-- TITLE SCREEN (GAME SHELL) -->
         <div class="title-screen" id="titleScreen">
@@ -4854,6 +5874,57 @@
               gain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
               osc.start(now);
               osc.stop(now + 0.15);
+            } else if (type === 'hit') {
+              osc.type = 'triangle';
+              osc.frequency.setValueAtTime(210, now);
+              osc.frequency.exponentialRampToValueAtTime(72, now + 0.09);
+              gain.gain.setValueAtTime(0.09, now);
+              gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+              osc.start(now);
+              osc.stop(now + 0.11);
+            } else if (type === 'crit') {
+              osc.type = 'sawtooth';
+              osc.frequency.setValueAtTime(340, now);
+              osc.frequency.exponentialRampToValueAtTime(590, now + 0.08);
+              osc.frequency.exponentialRampToValueAtTime(220, now + 0.16);
+              gain.gain.setValueAtTime(0.075, now);
+              gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+              osc.start(now);
+              osc.stop(now + 0.19);
+            } else if (type === 'roar') {
+              osc.type = 'sawtooth';
+              osc.frequency.setValueAtTime(128, now);
+              osc.frequency.exponentialRampToValueAtTime(64, now + 0.24);
+              gain.gain.setValueAtTime(0.065, now);
+              gain.gain.exponentialRampToValueAtTime(0.001, now + 0.27);
+              osc.start(now);
+              osc.stop(now + 0.28);
+            } else if (type === 'victory') {
+              [293, 370, 440, 587].forEach((freq, i) => {
+                const o = ctx.createOscillator();
+                const g = ctx.createGain();
+                o.type = 'triangle';
+                o.connect(g);
+                g.connect(ctx.destination);
+                o.frequency.setValueAtTime(freq, now + i * 0.085);
+                g.gain.setValueAtTime(0.075, now + i * 0.085);
+                g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.085 + 0.28);
+                o.start(now + i * 0.085);
+                o.stop(now + i * 0.085 + 0.3);
+              });
+            } else if (type === 'defeat') {
+              [220, 185, 146].forEach((freq, i) => {
+                const o = ctx.createOscillator();
+                const g = ctx.createGain();
+                o.type = 'sawtooth';
+                o.connect(g);
+                g.connect(ctx.destination);
+                o.frequency.setValueAtTime(freq, now + i * 0.12);
+                g.gain.setValueAtTime(0.045, now + i * 0.12);
+                g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.12 + 0.25);
+                o.start(now + i * 0.12);
+                o.stop(now + i * 0.12 + 0.27);
+              });
             }
           }
         };
@@ -4995,6 +6066,7 @@
             worldNodes: createInitialWorldNodes(),
             worldDinos: createInitialWorldDinos(),
             bestiary: createInitialBestiary(),
+            huntLogs: [],            // [{ id, timestamp, speciesId, dinoLevel, victory, rounds, ... }]
             worldMarches: [],        // [{ id, kind: 'gather'|'hunt', ... }]
             homeTile: { ...DEFAULT_HOME_TILE },
             heroes: createInitialHeroes(),
@@ -5110,22 +6182,50 @@
           return WORLD_STATIC_GRID[gy * WORLD_GRID_COLS + gx];
         }
 
-        // Client-seitige Validierung für alle 4 Kacheln des 2x2-Siedlungs-Blocks
+        // Gemeinsamer Multiplayer-Weltzustand (aus Node.js WebSocket-Server + Cloud Firestore)
+        const mpWorld = {
+          session: null,
+          settlements: [],
+          marches: [],
+          chat: [],
+          onlinePlayers: 1,
+          chatOpen: false,
+          unreadChat: 0,
+          lastSeenChatId: null
+        };
+
+        // Client-seitige Validierung für alle 4 Kacheln des 2x2-Siedlungs-Blocks (inkl. fremder Spielerdörfer)
         function validateGhost2x2(anchorX, anchorY) {
           const cells = [];
           let valid = true;
           let blockedReason = '';
+          const ownUid = mpWorld.session ? mpWorld.session.uid : null;
 
           for (let dy = 0; dy < 2; dy++) {
             for (let dx = 0; dx < 2; dx++) {
               const tx = anchorX + dx;
               const ty = anchorY + dy;
-              const st = getWorldTileState(tx, ty);
+              let st = getWorldTileState(tx, ty);
+              let otherOwner = null;
+              if (st === TILE_FREE && Array.isArray(mpWorld.settlements)) {
+                for (const s of mpWorld.settlements) {
+                  if (ownUid && s.uid === ownUid) continue;
+                  if (tx >= s.tileX && tx <= s.tileX + 1 && ty >= s.tileY && ty <= s.tileY + 1) {
+                    st = TILE_OCCUPIED;
+                    otherOwner = s.tribeName || 'Fremdstamm';
+                    break;
+                  }
+                }
+              }
               const isFree = st === TILE_FREE;
               if (!isFree) {
                 valid = false;
                 if (!blockedReason) {
-                  blockedReason = st === TILE_BLOCKED ? 'Hindernis (Vulkan / Höhle / Klippe)' : 'Belegt (Sammelstelle / Fremdlager)';
+                  blockedReason = otherOwner
+                    ? `Belegt durch ${otherOwner}`
+                    : st === TILE_BLOCKED
+                    ? 'Hindernis (Vulkan / Höhle / Klippe)'
+                    : 'Belegt (Sammelstelle / Fremdlager)';
                 }
               }
               cells.push({ x: tx, y: ty, state: st, free: isFree });
@@ -5140,7 +6240,8 @@
         let openSheet = null; // { type: 'building' | 'research' | 'worldNode' | 'ownSettlement', id: string, subTab?: string }
         let lastWoodEmptyWarned = false;
         let heroFilter = 'all';
-        let heroSubTab = 'heroes'; // 'heroes' | 'gear'
+        let heroSubTab = 'heroes'; // 'heroes' | 'skills' | 'gear' | 'battles'
+        let battleLogFilter = 'all'; // 'all' | 'victory' | 'defeat'
         let selectedGearHeroId = 'torv';
         let gearBagShowAll = false;
         let lastGearDrops = [];
@@ -5153,6 +6254,14 @@
           heroIds: [],
           troops: { slinger: 0, clubman: 0, dinorider: 0 }
         };
+        const battleAnimState = {
+          active: false,
+          battleId: null,
+          speed: 1,
+          timers: [],
+          finished: false
+        };
+        let battleBannerTimer = null;
 
         // Kamera-Zustand für die verschiebbare Weltkarte
         const worldCam = {
@@ -5191,6 +6300,9 @@
             localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
           } catch (e) {
             // Ignoriere Quota-Fehler still
+          }
+          if (window.DinoMultiplayer) {
+            window.DinoMultiplayer.saveToCloud(state, false);
           }
         }
 
@@ -5292,6 +6404,8 @@
             if (!Array.isArray(merged.completedTechs)) merged.completedTechs = [];
             if (!Array.isArray(merged.activeExpeditions)) merged.activeExpeditions = [];
             if (!Array.isArray(merged.worldMarches)) merged.worldMarches = [];
+            if (!Array.isArray(merged.huntLogs)) merged.huntLogs = [];
+            merged.huntLogs = merged.huntLogs.slice(0, 20);
             return merged;
           } catch (e) {
             return null;
@@ -6701,7 +7815,7 @@
           const travelSec = getWorldMarchTravelSec(def);
           const powerInfo = computeHuntSquadPower(validHeroes, sendTroops, species);
 
-          state.worldMarches.push({
+          const huntMarchObj = {
             id: `hunt_${now}_${Math.floor(Math.random() * 999)}`,
             kind: 'hunt',
             dinoId: def.id,
@@ -6714,8 +7828,54 @@
             startedAt: now,
             phaseEndsAt: now + travelSec * 1000,
             travelSec,
-            outcome: null
-          });
+            outcome: null,
+            serverCombat: null
+          };
+          state.worldMarches.push(huntMarchObj);
+
+          // Multiplayer: Marsch auf gemeinsamer Weltkarte senden + autoritative Server-Kampfberechnung anfordern
+          if (window.DinoMultiplayer) {
+            const home = getHomePos();
+            window.DinoMultiplayer.broadcastMarch({
+              marchId: huntMarchObj.id,
+              kind: 'hunt',
+              fromX: home.xPct,
+              fromY: home.yPct,
+              toX: def.xPct,
+              toY: def.yPct,
+              targetLabel: `${species.name} St.${dState.level}`,
+              durationMs: travelSec * 1000
+            });
+            const heroPayload = validHeroes
+              .map((hId) => {
+                const hDef = HEROES_LIST.find((h) => h.id === hId);
+                const hSt = state.heroes && state.heroes[hId];
+                if (!hDef) return null;
+                return {
+                  id: hDef.id,
+                  name: hDef.name,
+                  shortName: hDef.shortName || hDef.name.split(' ')[0],
+                  role: hDef.role,
+                  rarity: hDef.rarity,
+                  color: hDef.color || '#f59e0b',
+                  level: (hSt && hSt.level) || 1,
+                  skillName: (hDef.skills && hDef.skills[0] && hDef.skills[0].name) || 'Sturmangriff'
+                };
+              })
+              .filter(Boolean);
+            window.DinoMultiplayer.resolveDinoHuntServer({
+              dinoId: def.id,
+              speciesId: species.id,
+              dinoLevel: dState.level,
+              squadPower: powerInfo.total,
+              heroes: heroPayload,
+              troops: { ...sendTroops }
+            }).then((srvRes) => {
+              if (srvRes && typeof srvRes.victory === 'boolean') {
+                huntMarchObj.serverCombat = srvRes;
+              }
+            });
+          }
 
           SoundFX.play('horn');
           showToast(`Jagdtrupp (${validHeroes.length} Helden, ${totalSoldiers} Soldaten) marschiert gegen ${species.name} St. ${dState.level}!`, 'ok');
@@ -6724,18 +7884,191 @@
           renderAll();
         }
 
+        function buildDinoBattleLog({
+          march,
+          arriveTs,
+          species,
+          dinoPower,
+          ratio,
+          victory,
+          troopsSent,
+          troopsLost,
+          lostTotal,
+          resources,
+          items,
+          xp,
+          newlyDiscovered
+        }) {
+          const heroEntries = (march.heroes || [])
+            .map((hId) => {
+              const def = HEROES_LIST.find((h) => h.id === hId);
+              const hs = state.heroes && state.heroes[hId];
+              if (!def || !hs) return null;
+              const rMeta = RARITY_META[def.rarity] || RARITY_META.rare;
+              const pveDefs = (HERO_SKILLS_MAP[def.id] && HERO_SKILLS_MAP[def.id].pve) || [];
+              const skillName = (pveDefs[0] && pveDefs[0].name) || 'Urzeit-Angriff';
+              return {
+                id: def.id,
+                name: def.name,
+                shortName: def.name.split(' ')[0],
+                role: def.role,
+                rarity: def.rarity,
+                color: rMeta.color,
+                level: hs.level || 1,
+                skillName
+              };
+            })
+            .filter(Boolean);
+
+          const counterMatched = heroEntries.some((h) => h.role === species.counterRole);
+          const totalSent = (troopsSent.slinger || 0) + (troopsSent.clubman || 0) + (troopsSent.dinorider || 0);
+          const squadHpMax = Math.max(400, Math.round(march.squadPower * 1.15));
+          const dinoHpMax = Math.max(360, Math.round(dinoPower * 1.2));
+
+          // End-HP realistisch anhand Ausgang und Verhältnis berechnen
+          const targetSquadEndPct = victory
+            ? Math.max(24, Math.min(96, Math.round(92 - Math.min(0.68, Math.max(0, 1.45 - ratio) * 0.72) * 100 - lostTotal * 2)))
+            : Math.max(8, Math.min(20, 16 - Math.min(8, lostTotal)));
+          const targetDinoEndPct = victory ? 0 : Math.max(18, Math.min(62, Math.round((1 - Math.min(0.82, ratio * 0.85)) * 100)));
+
+          const totalRounds = victory ? (ratio >= 1.45 ? 4 : 5) : 5;
+          const squadAttackCount = Math.ceil(totalRounds / 2);
+          const dinoAttackCount = Math.floor(totalRounds / 2);
+
+          const totalDinoDmg = Math.round(((100 - targetDinoEndPct) / 100) * dinoHpMax);
+          const totalSquadDmg = Math.round(((100 - targetSquadEndPct) / 100) * squadHpMax);
+
+          const rounds = [];
+          let curSquadHp = squadHpMax;
+          let curDinoHp = dinoHpMax;
+          let squadHitsDone = 0;
+          let dinoHitsDone = 0;
+          const dinoStrengths = Array.isArray(species.strengths) && species.strengths.length ? species.strengths : ['Prankenhieb', 'Urzeit-Brüllen'];
+          const tankHero = heroEntries.find((h) => h.role === 'Tank');
+
+          for (let r = 1; r <= totalRounds; r++) {
+            const isSquadTurn = r % 2 === 1 || (victory && r === totalRounds);
+            if (isSquadTurn) {
+              squadHitsDone++;
+              const isLastSquadHit = squadHitsDone >= squadAttackCount || (victory && r === totalRounds);
+              const hero = heroEntries.length ? heroEntries[(squadHitsDone - 1) % heroEntries.length] : null;
+              const share = isLastSquadHit
+                ? Math.max(40, curDinoHp - Math.round((targetDinoEndPct / 100) * dinoHpMax))
+                : Math.max(45, Math.round((totalDinoDmg / Math.max(1, squadAttackCount)) * (0.85 + Math.random() * 0.35)));
+              const dmg = Math.min(curDinoHp, share);
+              curDinoHp = Math.max(0, curDinoHp - dmg);
+              if (victory && r === totalRounds) curDinoHp = 0;
+
+              const isCrit = Boolean(
+                (hero && hero.role === species.counterRole) ||
+                  (isLastSquadHit && victory) ||
+                  Math.random() < 0.34
+              );
+              const actorName = hero ? hero.name : 'Jagdtrupp';
+              const actorRole = hero ? hero.role : 'Truppe';
+              const actionName = hero
+                ? squadHitsDone === 1 || isCrit
+                  ? hero.skillName
+                  : `${hero.role}-Vorstoß`
+                : 'Soldaten-Salve';
+              const counterNote = hero && hero.role === species.counterRole ? ' (Konter-Bonus!)' : '';
+              const logText =
+                victory && r === totalRounds
+                  ? `${actorName} setzt „${actionName}“ ein und bezwingt ${species.name} mit ${fmtNum(dmg)} Schaden!${counterNote}`
+                  : `${actorName} trifft mit „${actionName}“ für ${fmtNum(dmg)} Schaden${isCrit ? ' — Kritischer Treffer!' : '.'}${counterNote}`;
+
+              rounds.push({
+                round: r,
+                actorSide: 'squad',
+                heroId: hero ? hero.id : null,
+                actorName,
+                actorRole,
+                actionName,
+                damage: dmg,
+                isCrit,
+                isShield: false,
+                squadHp: curSquadHp,
+                dinoHp: curDinoHp,
+                squadHpPct: Math.max(0, Math.round((curSquadHp / squadHpMax) * 100)),
+                dinoHpPct: Math.max(0, Math.round((curDinoHp / dinoHpMax) * 100)),
+                logText
+              });
+            } else {
+              dinoHitsDone++;
+              const isLastDinoHit = dinoHitsDone >= dinoAttackCount;
+              const targetFloorHp = Math.round((targetSquadEndPct / 100) * squadHpMax);
+              const rawShare = isLastDinoHit
+                ? Math.max(25, curSquadHp - targetFloorHp)
+                : Math.max(30, Math.round((totalSquadDmg / Math.max(1, dinoAttackCount)) * (0.82 + Math.random() * 0.34)));
+              const isShield = Boolean(tankHero && (dinoHitsDone === 1 || Math.random() < 0.55));
+              const dmg = Math.min(Math.max(15, curSquadHp - targetFloorHp), isShield ? Math.round(rawShare * 0.82) : rawShare);
+              curSquadHp = Math.max(targetFloorHp, curSquadHp - Math.max(0, dmg));
+
+              const dinoMove = dinoStrengths[(dinoHitsDone - 1) % dinoStrengths.length];
+              const shieldText = isShield && tankHero ? ` ${tankHero.shortName} fängt den Stoß ab!` : '';
+              const logText = `${species.name} greift mit „${dinoMove}“ an (${fmtNum(Math.max(0, dmg))} Schaden).${shieldText}`;
+
+              rounds.push({
+                round: r,
+                actorSide: 'dino',
+                heroId: isShield && tankHero ? tankHero.id : null,
+                actorName: species.name,
+                actorRole: 'Dino',
+                actionName: dinoMove,
+                damage: Math.max(0, dmg),
+                isCrit: !isShield && !victory,
+                isShield,
+                squadHp: curSquadHp,
+                dinoHp: curDinoHp,
+                squadHpPct: Math.max(0, Math.round((curSquadHp / squadHpMax) * 100)),
+                dinoHpPct: Math.max(0, Math.round((curDinoHp / dinoHpMax) * 100)),
+                logText
+              });
+            }
+          }
+
+          return {
+            id: `battle_${arriveTs}_${Math.floor(Math.random() * 9999)}`,
+            timestamp: arriveTs,
+            dinoId: march.dinoId,
+            speciesId: species.id,
+            speciesName: species.name,
+            speciesAccent: species.accent,
+            weaknessTip: species.weaknessTip || '',
+            dinoLevel: march.dinoLevel,
+            dinoPower,
+            squadPower: march.squadPower,
+            counterMatched,
+            victory,
+            heroes: heroEntries,
+            troopsSent,
+            troopsLost,
+            totalSent,
+            lostTotal,
+            squadHpMax,
+            dinoHpMax,
+            rounds,
+            resources,
+            items,
+            xp,
+            newlyDiscovered,
+            read: false
+          };
+        }
+
         function resolveDinoHuntCombat(march, arriveTs) {
           const def = getWorldDinoDef(march.dinoId);
           const dState = getWorldDinoState(march.dinoId);
           const species = getDinoSpecies(march.speciesId);
           if (!def || !dState || !species) {
-            return { victory: false, resources: {}, items: {}, xp: 0, lostTotal: 0, newlyDiscovered: false };
+            return { victory: false, resources: {}, items: {}, xp: 0, lostTotal: 0, newlyDiscovered: false, battleId: null };
           }
 
-          const dinoPower = getDinoCombatPower(species, march.dinoLevel);
+          const srv = march.serverCombat;
+          const dinoPower = srv ? srv.dinoPower : getDinoCombatPower(species, march.dinoLevel);
           const ratio = march.squadPower / Math.max(1, dinoPower);
           const winChance = ratio >= 1.0 ? 1.0 : ratio >= 0.72 ? (ratio - 0.65) / 0.35 : 0.08;
-          const victory = Math.random() <= winChance;
+          const victory = srv ? srv.victory : Math.random() <= winChance;
 
           const newlyDiscovered = victory
             ? recordBestiaryHunt(species.id, march.dinoLevel)
@@ -6745,44 +8078,96 @@
           const items = {};
           let xp = 0;
           let lostTotal = 0;
+          const troopsSent = {
+            slinger: (march.troops && march.troops.slinger) || 0,
+            clubman: (march.troops && march.troops.clubman) || 0,
+            dinorider: (march.troops && march.troops.dinorider) || 0
+          };
+          const troopsLost = { slinger: 0, clubman: 0, dinorider: 0 };
 
-          // Leichte Truppenverluste nur bei knappen Gefechten oder Niederlage
-          const lossRate = victory ? (ratio >= 1.35 ? 0 : Math.min(0.22, (1.35 - ratio) * 0.32)) : 0.25;
-          if (lossRate > 0 && march.troops) {
+          if (srv && srv.troopsLost) {
             for (const key of Object.keys(TROOP_DEFS)) {
-              const sent = march.troops[key] || 0;
-              if (sent <= 0) continue;
-              const lost = Math.min(sent, Math.floor(sent * lossRate));
+              const sent = (march.troops && march.troops[key]) || 0;
+              const lost = Math.min(sent, Math.max(0, Math.floor(srv.troopsLost[key] || 0)));
               if (lost > 0) {
                 march.troops[key] = sent - lost;
                 state.troops[key] = Math.max(0, (state.troops[key] || 0) - lost);
+                troopsLost[key] = lost;
                 lostTotal += lost;
+              }
+            }
+          } else {
+            // Lokaler Fallback falls Server offline
+            const lossRate = victory ? (ratio >= 1.35 ? 0 : Math.min(0.22, (1.35 - ratio) * 0.32)) : 0.25;
+            if (lossRate > 0 && march.troops) {
+              for (const key of Object.keys(TROOP_DEFS)) {
+                const sent = march.troops[key] || 0;
+                if (sent <= 0) continue;
+                const lost = Math.min(sent, Math.floor(sent * lossRate));
+                if (lost > 0) {
+                  march.troops[key] = sent - lost;
+                  state.troops[key] = Math.max(0, (state.troops[key] || 0) - lost);
+                  troopsLost[key] = lost;
+                  lostTotal += lost;
+                }
               }
             }
           }
 
           if (victory) {
-            const lvlScale = 1 + (march.dinoLevel - species.levelRange[0]) * 0.14;
-            for (const entry of species.lootTable) {
-              if (Math.random() * 100 <= entry.chancePct) {
-                const rawQty = entry.min + Math.random() * (entry.max - entry.min);
-                const qty = Math.max(1, Math.round(entry.resKey ? rawQty * lvlScale : rawQty));
-                if (entry.resKey) {
-                  resources[entry.resKey] = (resources[entry.resKey] || 0) + qty;
-                } else if (entry.itemKey) {
-                  items[entry.itemKey] = (items[entry.itemKey] || 0) + qty;
+            if (srv && srv.resources && srv.items) {
+              Object.assign(resources, srv.resources);
+              Object.assign(items, srv.items);
+              xp = srv.xp || march.dinoLevel * 35;
+              dState.respawnAt = arriveTs + def.respawnSec * 1000;
+              dState.level = srv.nextDinoLevel || march.dinoLevel;
+            } else {
+              const lvlScale = 1 + (march.dinoLevel - species.levelRange[0]) * 0.14;
+              for (const entry of species.lootTable) {
+                if (Math.random() * 100 <= entry.chancePct) {
+                  const rawQty = entry.min + Math.random() * (entry.max - entry.min);
+                  const qty = Math.max(1, Math.round(entry.resKey ? rawQty * lvlScale : rawQty));
+                  if (entry.resKey) {
+                    resources[entry.resKey] = (resources[entry.resKey] || 0) + qty;
+                  } else if (entry.itemKey) {
+                    items[entry.itemKey] = (items[entry.itemKey] || 0) + qty;
+                  }
                 }
               }
-            }
-            xp = march.dinoLevel * 35;
+              xp = march.dinoLevel * 35;
 
-            // Dino auf Respawn setzen und beim nächsten Erscheinen neues Level aus species.levelRange wählen
-            dState.respawnAt = arriveTs + def.respawnSec * 1000;
-            const [minL, maxL] = species.levelRange;
-            dState.level = minL + Math.floor(Math.random() * (maxL - minL + 1));
+              dState.respawnAt = arriveTs + def.respawnSec * 1000;
+              const [minL, maxL] = species.levelRange;
+              dState.level = minL + Math.floor(Math.random() * (maxL - minL + 1));
+            }
           }
 
-          return { victory, resources, items, xp, lostTotal, newlyDiscovered };
+          const battleLog = buildDinoBattleLog({
+            march,
+            arriveTs,
+            species,
+            dinoPower,
+            ratio,
+            victory,
+            troopsSent,
+            troopsLost,
+            lostTotal,
+            resources,
+            items,
+            xp,
+            newlyDiscovered
+          });
+          if (srv && Array.isArray(srv.rounds) && srv.rounds.length > 0) {
+            battleLog.rounds = srv.rounds;
+            battleLog.squadHpMax = srv.squadHpMax || battleLog.squadHpMax;
+            battleLog.dinoHpMax = srv.dinoHpMax || battleLog.dinoHpMax;
+            battleLog.serverAuthoritative = true;
+          }
+          if (!Array.isArray(state.huntLogs)) state.huntLogs = [];
+          state.huntLogs.unshift(battleLog);
+          if (state.huntLogs.length > 20) state.huntLogs.length = 20;
+
+          return { victory, resources, items, xp, lostTotal, newlyDiscovered, battleId: battleLog.id };
         }
 
         function launchWorldMarch(nodeId) {
@@ -6815,8 +8200,9 @@
           const targetAmount = nState.remaining;
           const gatherSec = getWorldGatherDurationSec(def, targetAmount);
 
+          const gatherId = `wm_${now}_${Math.floor(Math.random() * 999)}`;
           state.worldMarches.push({
-            id: `wm_${now}_${Math.floor(Math.random() * 999)}`,
+            id: gatherId,
             kind: 'gather',
             nodeId: def.id,
             workers: def.workersNeeded,
@@ -6828,6 +8214,20 @@
             targetAmount,
             carriedAmount: 0
           });
+
+          if (window.DinoMultiplayer) {
+            const home = getHomePos();
+            window.DinoMultiplayer.broadcastMarch({
+              marchId: gatherId,
+              kind: 'gather',
+              fromX: home.xPct,
+              fromY: home.yPct,
+              toX: def.xPct,
+              toY: def.yPct,
+              targetLabel: def.name,
+              durationMs: (travelSec * 2 + gatherSec) * 1000
+            });
+          }
 
           SoundFX.play('horn');
           showToast(`${def.workersNeeded} Sammler marschieren zu „${def.name}“!`, 'ok');
@@ -6909,6 +8309,7 @@
           // 2. Laufende Sammel- & Jagdmärsche fortschreiben
           const remainingMarches = [];
           let deliveredAny = false;
+          let freshLiveBattleId = null;
 
           for (const march of state.worldMarches || []) {
             if (march.kind === 'hunt') {
@@ -6920,6 +8321,10 @@
                 if (march.phase === 'marching_out') {
                   const startT = march.phaseEndsAt;
                   march.outcome = resolveDinoHuntCombat(march, startT);
+                  march.battleId = march.outcome && march.outcome.battleId ? march.outcome.battleId : null;
+                  if (!silentReport && march.battleId) {
+                    freshLiveBattleId = march.battleId;
+                  }
                   march.phase = 'marching_back';
                   march.startedAt = startT;
                   march.phaseEndsAt = startT + march.travelSec * 1000;
@@ -7025,6 +8430,10 @@
           state.worldMarches = remainingMarches;
           if (deliveredAny) {
             SoundFX.play('complete');
+          }
+          if (freshLiveBattleId && !silentReport) {
+            const bLog = getBattleLogById(freshLiveBattleId);
+            if (bLog) handleLiveDinoBattleTriggered(bLog);
           }
         }
 
@@ -7694,7 +9103,7 @@
           setTabDot('navWorldHint', activeM);
 
           const inv = state.inventory || {};
-          let heroActionCount = inv.gearChest || 0;
+          let heroActionCount = (inv.gearChest || 0) + getUnreadBattleCount();
           for (const h of HEROES_LIST) {
             const hs = state.heroes && state.heroes[h.id];
             if (!hs) continue;
@@ -7959,20 +9368,73 @@
 
           const pvpPaint = (state.inventory && state.inventory.pvpPaint) || 0;
           const pvePaint = (state.inventory && state.inventory.pvePaint) || 0;
+          const huntLogs = Array.isArray(state.huntLogs) ? state.huntLogs : [];
+          const unreadBattles = getUnreadBattleCount();
+          const activeHuntMarches = (state.worldMarches || []).filter((m) => m.kind === 'hunt');
+          const newestBattle = huntLogs[0] || null;
+
+          // Live-Jagdtrupp- oder Kampf-Banner im Helden-Reiter
+          if (activeHuntMarches.length > 0) {
+            const m = activeHuntMarches[0];
+            const sp = getDinoSpecies(m.speciesId);
+            const rem = Math.max(0, (m.phaseEndsAt - Date.now()) / 1000);
+            const hasBattle = Boolean(m.battleId);
+            html += `
+              <div class="hero-hunt-banner ${m.outcome && m.outcome.victory ? 'victory' : ''}">
+                <div class="hero-hunt-banner-info">
+                  <div class="hero-hunt-banner-title">
+                    ${hasBattle ? (m.outcome && m.outcome.victory ? `Sieg über ${sp ? sp.name : 'Saurier'} St. ${m.dinoLevel}!` : `Rückzug von ${sp ? sp.name : 'Saurier'} St. ${m.dinoLevel}`) : `Jagdtrupp unterwegs: ${sp ? sp.name : 'Saurier'} St. ${m.dinoLevel}`}
+                  </div>
+                  <div class="hero-hunt-banner-sub">
+                    ${hasBattle ? `Heimkehr in ${fmtClock(rem)} · Kampfbericht bereit` : `Eintreffen in ${fmtClock(rem)} · ${(m.heroes || []).length} Helden`}
+                  </div>
+                </div>
+                ${
+                  hasBattle
+                    ? `<button class="battle-watch-btn" data-open-battle="${m.battleId}">Kampf ansehen</button>`
+                    : `<button class="jump-btn" data-goto-world-dino="${m.dinoId}">Auf Karte</button>`
+                }
+              </div>
+            `;
+          } else if (newestBattle && !newestBattle.read) {
+            html += `
+              <div class="hero-hunt-banner ${newestBattle.victory ? 'victory' : ''}">
+                <div class="hero-hunt-banner-info">
+                  <div class="hero-hunt-banner-title">
+                    Neues Gefecht: ${newestBattle.speciesName} St. ${newestBattle.dinoLevel} (${newestBattle.victory ? 'Sieg' : 'Niederlage'})
+                  </div>
+                  <div class="hero-hunt-banner-sub">
+                    ${newestBattle.heroes.map((h) => h.shortName).join(', ') || 'Jagdtrupp'} · ${newestBattle.rounds.length} Runden
+                  </div>
+                </div>
+                <button class="battle-watch-btn" data-open-battle="${newestBattle.id}">Abspielen</button>
+              </div>
+            `;
+          }
 
           html += `
             <div class="gear-subtabs" role="tablist">
               <button class="gear-subtab-btn ${heroSubTab === 'heroes' ? 'active' : ''}" data-hero-subtab="heroes">
-                Helden (${unlockedCount}/${HEROES_LIST.length})
+                Helden (${unlockedCount})
               </button>
               <button class="gear-subtab-btn ${heroSubTab === 'skills' ? 'active' : ''}" data-hero-subtab="skills">
-                Fähigkeiten (6)
+                Skills
               </button>
               <button class="gear-subtab-btn ${heroSubTab === 'gear' ? 'active' : ''}" data-hero-subtab="gear">
-                Ausrüstung (${bag.length})
+                Gear (${bag.length})
+              </button>
+              <button class="gear-subtab-btn ${heroSubTab === 'battles' ? 'active' : ''}" data-hero-subtab="battles">
+                <span>Kämpfe</span>
+                ${unreadBattles > 0 ? `<span class="subtab-unread">${unreadBattles}</span>` : huntLogs.length > 0 ? `<span class="mono" style="opacity:0.75;">(${huntLogs.length})</span>` : ''}
               </button>
             </div>
           `;
+
+          if (heroSubTab === 'battles') {
+            html += buildHeroBattleLogSubTabHTML(huntLogs, activeHuntMarches);
+            container.innerHTML = html;
+            return;
+          }
 
           if (heroSubTab === 'skills') {
             const sortedHeroes = [...HEROES_LIST].sort((a, b) => {
@@ -9141,9 +10603,11 @@
           renderWorldMap();
         }
 
-        function confirmTeleportGhost() {
+        async function confirmTeleportGhost() {
           if (!teleportGhost.active) return;
-          const check = validateGhost2x2(teleportGhost.anchorX, teleportGhost.anchorY);
+          const targetX = teleportGhost.anchorX;
+          const targetY = teleportGhost.anchorY;
+          const check = validateGhost2x2(targetX, targetY);
           if (!check.valid) {
             SoundFX.play('error');
             showToast(`Ungültige Position: ${check.reason}`, 'err');
@@ -9155,8 +10619,25 @@
             showToast('Kein Siedlungs-Teleport-Item mehr im Inventar.', 'err');
             return;
           }
+
+          // Serverseitige atomare 2x2-Prüfung gegen andere Spielerdörfer
+          if (window.DinoMultiplayer) {
+            const srvResp = await window.DinoMultiplayer.teleportSettlement({
+              bonfireLevel: state.buildings.bonfire.level,
+              power: computeVillagePowerMp(),
+              tileX: targetX,
+              tileY: targetY
+            });
+            if (srvResp && !srvResp.ok) {
+              SoundFX.play('error');
+              showToast(srvResp.reason || 'Diese 2×2-Fläche wurde gerade belegt.', 'err');
+              renderWorldMap();
+              return;
+            }
+          }
+
           state.inventory.teleportItem -= 1;
-          state.homeTile = { x: teleportGhost.anchorX, y: teleportGhost.anchorY };
+          state.homeTile = { x: targetX, y: targetY };
           teleportGhost.active = false;
           teleportGhost.dragging = false;
           const home = getHomePos();
@@ -9281,23 +10762,49 @@
             `;
           }
 
-          // 1. Marker auf der Weltkarte (Eigene Siedlung + 10 Sammelstellen + 10 wilde Dinos)
+          // 1. Marker auf der Weltkarte (Eigene Siedlung + Fremde Spielerdörfer + Sammelstellen + wilde Dinos)
           const markersEl = document.getElementById('worldMapMarkers');
           const bfLvl = state.buildings.bonfire.level;
+          const ownUid = mpWorld.session ? mpWorld.session.uid : null;
+          const ownTribeLabel = escapeHtmlMp((mpWorld.session && mpWorld.session.tribeName) || 'Meine Siedlung');
           let markersHtml = `
             <button
               class="wm-node own-settlement"
               data-wm-home="1"
               style="left:${home.xPct}%; top:${home.yPct}%;"
-              aria-label="Meine Siedlung Stufe ${bfLvl}"
+              aria-label="${ownTribeLabel} Stufe ${bfLvl}"
             >
               <div class="wm-pin-ring">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#86efac" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2c2.5 3.6 5 6.4 5 10a5 5 0 1 1-10 0c0-3.6 2.5-6.4 5-10Z"/><path d="M5 21h14"/></svg>
                 <span class="wm-pin-lvl">St.${bfLvl}</span>
               </div>
-              <span class="wm-nameplate">Meine Siedlung</span>
+              <span class="wm-nameplate">${ownTribeLabel}</span>
             </button>
           `;
+
+          // Andere echte Spielerdörfer auf der gemeinsamen Weltkarte
+          for (const pl of mpWorld.settlements || []) {
+            if (ownUid && pl.uid === ownUid) continue;
+            const pxX = (pl.tileX + 1) * WORLD_TILE_SIZE;
+            const pxY = (pl.tileY + 1) * WORLD_TILE_SIZE;
+            const xPct = (pxX / WORLD_MAP_WIDTH) * 100;
+            const yPct = (pxY / WORLD_MAP_HEIGHT) * 100;
+            const safeName = escapeHtmlMp(pl.tribeName || 'Fremdstamm');
+            markersHtml += `
+              <button
+                class="wm-node other-settlement"
+                data-wm-player="${escapeHtmlMp(pl.uid)}"
+                style="left:${xPct.toFixed(2)}%; top:${yPct.toFixed(2)}%;"
+                aria-label="Spielerstamm ${safeName} Stufe ${pl.bonfireLevel}"
+              >
+                <div class="wm-pin-ring">
+                  <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#7dd3fc" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20h18"/><path d="M5 20L12 5l7 15"/><path d="M10 20v-5h4v5"/></svg>
+                  <span class="wm-pin-lvl">St.${pl.bonfireLevel}</span>
+                </div>
+                <span class="wm-nameplate">${safeName}</span>
+              </button>
+            `;
+          }
 
           for (const def of WORLD_NODES) {
             const nState = getWorldNodeState(def.id);
@@ -9407,6 +10914,21 @@
               svgHtml += `<circle cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="3.4" fill="#4ade80" />`;
             }
           }
+          // Fremde Spielermärsche auf der gemeinsamen Weltkarte einzeichnen
+          for (const om of mpWorld.marches || []) {
+            if (ownUid && om.uid === ownUid) continue;
+            if (om.status !== 'active') continue;
+            const sx1 = (om.fromX / 100) * WORLD_MAP_WIDTH;
+            const sy1 = (om.fromY / 100) * WORLD_MAP_HEIGHT;
+            const sx2 = (om.toX / 100) * WORLD_MAP_WIDTH;
+            const sy2 = (om.toY / 100) * WORLD_MAP_HEIGHT;
+            const dur = Math.max(1000, (om.endsAt || now + 10000) - (om.startedAt || now));
+            const p = Math.min(1, Math.max(0, (now - (om.startedAt || now)) / dur));
+            const cx = sx1 + (sx2 - sx1) * p;
+            const cy = sy1 + (sy2 - sy1) * p;
+            svgHtml += `<line class="wm-march-line other-player" x1="${sx1.toFixed(1)}" y1="${sy1.toFixed(1)}" x2="${sx2.toFixed(1)}" y2="${sy2.toFixed(1)}" />`;
+            svgHtml += `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="6.5" fill="#0f172a" stroke="#38bdf8" stroke-width="2" />`;
+          }
           document.getElementById('worldMarchSvg').innerHTML = svgHtml;
 
           // 3. Interaktive Minimap aktualisieren
@@ -9434,6 +10956,12 @@
             const dState = getWorldDinoState(dDef.id);
             const col = dState.respawnAt > now ? '#57534e' : '#ef4444';
             miniHtml += `<circle cx="${(dDef.xPct * 1.6).toFixed(1)}" cy="${(dDef.yPct * 0.9).toFixed(1)}" r="2.2" fill="${col}" />`;
+          }
+          for (const pl of mpWorld.settlements || []) {
+            if (ownUid && pl.uid === ownUid) continue;
+            const mxPct = (((pl.tileX + 1) * WORLD_TILE_SIZE) / WORLD_MAP_WIDTH) * 100;
+            const myPct = (((pl.tileY + 1) * WORLD_TILE_SIZE) / WORLD_MAP_HEIGHT) * 100;
+            miniHtml += `<circle cx="${(mxPct * 1.6).toFixed(1)}" cy="${(myPct * 0.9).toFixed(1)}" r="3.1" fill="#38bdf8" stroke="#082f49" stroke-width="0.9" />`;
           }
           miniHtml += `<circle cx="${(home.xPct * 1.6).toFixed(1)}" cy="${(home.yPct * 0.9).toFixed(1)}" r="3.6" fill="#4ade80" stroke="#052e16" stroke-width="1" />`;
           const sx = 160 / WORLD_MAP_WIDTH;
@@ -9486,6 +11014,8 @@
                       ${
                         m.phase !== 'marching_back'
                           ? `<button class="wm-recall-btn" data-wm-recall="${m.id}">Zurück</button>`
+                          : m.battleId
+                          ? `<button class="battle-watch-btn" data-open-battle="${m.battleId}">Kampf-Log</button>`
                           : `<span class="mono" style="font-size:11px; color:var(--state-ok); font-weight:700;">Heimweg</span>`
                       }
                     </div>
@@ -10341,6 +11871,592 @@
           document.getElementById('centerModalBackdrop').classList.remove('open');
         }
 
+        /* =====================================================================
+           11B. KAMPF-ANIMATIONEN & KAMPF-LOG-POPUPS (HELDEN-REITER & DINOJAGD)
+           ===================================================================== */
+        function getBattleLogById(battleId) {
+          if (!battleId || !Array.isArray(state.huntLogs)) return null;
+          return state.huntLogs.find((b) => b.id === battleId) || null;
+        }
+
+        function getUnreadBattleCount() {
+          if (!Array.isArray(state.huntLogs)) return 0;
+          return state.huntLogs.filter((b) => !b.read).length;
+        }
+
+        function markAllBattlesRead() {
+          if (!Array.isArray(state.huntLogs)) return;
+          let changed = false;
+          for (const b of state.huntLogs) {
+            if (!b.read) {
+              b.read = true;
+              changed = true;
+            }
+          }
+          if (changed) {
+            saveState();
+            renderHUD();
+            if (activeTab === 'heroes') renderHeroesTab();
+          }
+        }
+
+        function fmtBattleTimeAgo(ts) {
+          const diffSec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+          if (diffSec < 60) return `vor ${diffSec}s`;
+          if (diffSec < 3600) return `vor ${Math.floor(diffSec / 60)}m`;
+          if (diffSec < 86400) return `vor ${Math.floor(diffSec / 3600)} Std.`;
+          return `vor ${Math.floor(diffSec / 86400)} Tg.`;
+        }
+
+        function formatBattleLootSummary(battle) {
+          const parts = [];
+          for (const [rk, rv] of Object.entries(battle.resources || {})) {
+            if (rv > 0) parts.push(`+${fmtNum(rv)} ${RESOURCE_LABELS[rk] || rk}`);
+          }
+          for (const [ik, iv] of Object.entries(battle.items || {})) {
+            if (iv > 0) {
+              const itDef = INVENTORY_ITEMS.find((x) => x.id === ik);
+              parts.push(`+${iv} ${itDef ? itDef.name : ik}`);
+            }
+          }
+          if (battle.xp > 0) parts.push(`+${fmtNum(battle.xp)} Helden-XP`);
+          return parts;
+        }
+
+        function buildHeroBattleLogSubTabHTML(huntLogs, activeHuntMarches) {
+          const wins = huntLogs.filter((b) => b.victory).length;
+          const losses = huntLogs.length - wins;
+          const totalXp = huntLogs.reduce((acc, b) => acc + (b.xp || 0), 0);
+          const unreadCount = getUnreadBattleCount();
+
+          let html = `
+            <div class="summary-strip" style="margin-bottom:10px;">
+              <span>Siege: <strong class="mono" style="color:#86efac;">${wins}</strong> · Niederlagen: <strong class="mono" style="color:#fca5a5;">${losses}</strong></span>
+              <span>XP-Beute: <strong class="mono" style="color:#60a5fa;">+${fmtNum(totalXp)}</strong></span>
+            </div>
+          `;
+
+          if (activeHuntMarches.length > 0) {
+            html += `<div class="card-list" style="margin-bottom:10px;">`;
+            const now = Date.now();
+            for (const m of activeHuntMarches) {
+              const sp = getDinoSpecies(m.speciesId);
+              const rem = Math.max(0, (m.phaseEndsAt - now) / 1000);
+              const soldCnt = (m.troops?.slinger || 0) + (m.troops?.clubman || 0) + (m.troops?.dinorider || 0);
+              const heroNames = (m.heroes || [])
+                .map((id) => {
+                  const hd = HEROES_LIST.find((x) => x.id === id);
+                  return hd ? hd.name.split(' ')[0] : id;
+                })
+                .join(', ');
+              html += `
+                <div class="battle-log-card is-unread">
+                  <div class="battle-log-head">
+                    <div class="battle-log-dino">
+                      <div class="battle-log-dino-icon">${sp ? getDinoIconSVG(sp.id, 24, sp.accent) : ''}</div>
+                      <div style="min-width:0;">
+                        <div class="battle-log-title">${sp ? sp.name : 'Saurier'} (St. ${m.dinoLevel})</div>
+                        <div class="battle-log-meta-line">
+                          ${m.phase === 'marching_out' ? `Hinmarsch · Kampf in ${fmtClock(rem)}` : `Rückmarsch · Ankunft in ${fmtClock(rem)}`}
+                        </div>
+                      </div>
+                    </div>
+                    ${
+                      m.battleId
+                        ? `<button class="battle-watch-btn" data-open-battle="${m.battleId}">Kampf abspielen</button>`
+                        : `<button class="jump-btn" data-goto-world-dino="${m.dinoId}">Karte</button>`
+                    }
+                  </div>
+                  <div class="battle-log-squad-line">
+                    <span>Helden: ${heroNames || 'Keine'}</span>
+                    <span class="mono">${soldCnt} Soldaten · Macht ${fmtNum(m.squadPower || 0)}</span>
+                  </div>
+                </div>
+              `;
+            }
+            html += `</div>`;
+          }
+
+          html += `
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;">
+              <div class="filter-row" role="tablist" style="margin-bottom:0;flex:1;">
+                <button class="filter-btn ${battleLogFilter === 'all' ? 'active' : ''}" data-battle-filter="all">Alle (${huntLogs.length})</button>
+                <button class="filter-btn ${battleLogFilter === 'victory' ? 'active' : ''}" data-battle-filter="victory">Siege (${wins})</button>
+                <button class="filter-btn ${battleLogFilter === 'defeat' ? 'active' : ''}" data-battle-filter="defeat">Niederlagen (${losses})</button>
+              </div>
+              ${unreadCount > 0 ? `<button class="jump-btn" data-mark-battles-read="1">Alle gelesen</button>` : ''}
+            </div>
+          `;
+
+          const filtered = huntLogs.filter((b) => {
+            if (battleLogFilter === 'victory') return b.victory;
+            if (battleLogFilter === 'defeat') return !b.victory;
+            return true;
+          });
+
+          if (filtered.length === 0) {
+            html += `
+              <div class="stat-box" style="display:flex;flex-direction:column;gap:10px;align-items:flex-start;">
+                <div style="font-size:13px;font-weight:700;color:var(--text-primary);">
+                  ${huntLogs.length === 0 ? 'Noch keine Dino-Gefechte aufgezeichnet' : 'Keine Gefechte in diesem Filter'}
+                </div>
+                <p class="info-line" style="margin:0;">
+                  Entsende auf der Weltkarte einen Jagdtrupp (bis zu 3 Helden + Soldaten) gegen einen wilden Dino, um hier die animierten Kampfberichte abzuspielen.
+                </p>
+                <button class="btn-primary" data-goto-worldmap="1">Zur Weltkarte (Dinos jagen)</button>
+              </div>
+            `;
+            return html;
+          }
+
+          html += `<div class="card-list">`;
+          for (const b of filtered) {
+            const lootParts = formatBattleLootSummary(b);
+            const heroNames = b.heroes.length ? b.heroes.map((h) => h.shortName).join(', ') : 'Nur Soldaten';
+            html += `
+              <div class="battle-log-card ${b.read ? '' : 'is-unread'}">
+                <div class="battle-log-head">
+                  <div class="battle-log-dino">
+                    <div class="battle-log-dino-icon">${getDinoIconSVG(b.speciesId, 24, b.speciesAccent || '#fca5a5')}</div>
+                    <div style="min-width:0;">
+                      <div class="battle-log-title">${b.speciesName} · St. ${b.dinoLevel}</div>
+                      <div class="battle-log-meta-line">
+                        ${fmtBattleTimeAgo(b.timestamp)} · ${b.rounds.length} Runden · Macht ${fmtNum(b.squadPower)} vs ${fmtNum(b.dinoPower)}
+                      </div>
+                    </div>
+                  </div>
+                  <span class="battle-outcome-label ${b.victory ? 'victory' : 'defeat'}">
+                    ${b.victory ? 'SIEG' : 'NIEDERLAGE'}
+                  </span>
+                </div>
+                <div class="battle-log-squad-line">
+                  <span>Helden: ${heroNames}</span>
+                  <span class="mono">${b.totalSent} Soldaten${b.lostTotal > 0 ? ` (−${b.lostTotal})` : ' (0 Verluste)'}</span>
+                </div>
+                <div class="battle-log-loot-line">
+                  ${
+                    b.victory
+                      ? `Beute: ${lootParts.length ? lootParts.join(' · ') : 'Keine Beute'}${b.newlyDiscovered ? ' · Neu im Bestiarium!' : ''}`
+                      : `<span style="color:#fca5a5;">Rückzug nach hartem Gefecht${b.weaknessTip ? ` · Tipp: ${b.weaknessTip}` : ''}</span>`
+                  }
+                </div>
+                <div class="battle-log-actions">
+                  <button class="btn-primary" style="min-height:38px;font-size:12px;" data-open-battle="${b.id}">Kampf abspielen</button>
+                  <button class="btn-secondary" style="min-height:38px;font-size:12px;" data-open-battle-instant="${b.id}">Kampf-Log</button>
+                </div>
+              </div>
+            `;
+          }
+          html += `</div>`;
+          return html;
+        }
+
+        function hideBattleAlertBanner() {
+          const banner = document.getElementById('battleAlertBanner');
+          if (banner) {
+            banner.classList.remove('visible');
+            banner.innerHTML = '';
+          }
+          if (battleBannerTimer) {
+            clearTimeout(battleBannerTimer);
+            battleBannerTimer = null;
+          }
+        }
+
+        function showBattleAlertBanner(battle) {
+          const banner = document.getElementById('battleAlertBanner');
+          if (!banner || !battle) return;
+          if (battleBannerTimer) clearTimeout(battleBannerTimer);
+
+          banner.className = `battle-alert-banner visible ${battle.victory ? 'victory' : ''}`;
+          banner.innerHTML = `
+            <div class="battle-alert-meta">
+              <div class="battle-alert-icon">${getDinoIconSVG(battle.speciesId, 22, battle.speciesAccent || '#fca5a5')}</div>
+              <div class="battle-alert-text">
+                <div class="battle-alert-title">
+                  Gefecht: ${battle.speciesName} St. ${battle.dinoLevel} (${battle.victory ? 'Sieg!' : 'Rückzug'})
+                </div>
+                <div class="battle-alert-sub">
+                  ${battle.heroes.map((h) => h.shortName).join(', ') || 'Jagdtrupp'} · ${battle.rounds.length} Runden
+                </div>
+              </div>
+            </div>
+            <div class="battle-alert-actions">
+              <button class="battle-watch-btn" data-open-battle="${battle.id}">Ansehen</button>
+              <button class="battle-dismiss-btn" data-dismiss-battle-banner="1" aria-label="Hinweis schließen">×</button>
+            </div>
+          `;
+
+          battleBannerTimer = setTimeout(() => {
+            hideBattleAlertBanner();
+          }, 9500);
+        }
+
+        function handleLiveDinoBattleTriggered(battle) {
+          if (!battle) return;
+          const centerOpen = document.getElementById('centerModalBackdrop').classList.contains('open');
+          if (activeTab === 'heroes' && !centerOpen && !battleAnimState.active) {
+            openBattleReplayModal(battle.id, { animate: true });
+          } else {
+            showBattleAlertBanner(battle);
+          }
+          renderHUD();
+          if (activeTab === 'heroes') renderHeroesTab();
+        }
+
+        function clearBattleAnimTimers() {
+          for (const t of battleAnimState.timers) clearTimeout(t);
+          battleAnimState.timers = [];
+        }
+
+        function closeBattleModal() {
+          clearBattleAnimTimers();
+          battleAnimState.active = false;
+          battleAnimState.battleId = null;
+          battleAnimState.finished = false;
+          const backdrop = document.getElementById('battleModalBackdrop');
+          if (backdrop) backdrop.classList.remove('open');
+        }
+
+        function renderBattleLogEntryHTML(round) {
+          const isSquad = round.actorSide === 'squad';
+          const dmgLabel = round.isShield
+            ? `−${fmtNum(round.damage)} GEBLOCKT`
+            : round.isCrit
+            ? `−${fmtNum(round.damage)} KRIT!`
+            : `−${fmtNum(round.damage)}`;
+          const dmgCol = isSquad ? (round.isCrit ? '#fb923c' : '#fde047') : round.isShield ? '#93c5fd' : '#fca5a5';
+          return `
+            <div class="battle-log-entry ${isSquad ? 'squad' : 'dino'}">
+              <div class="battle-log-entry-head">
+                <span class="battle-log-actor">R${round.round} · ${round.actorName} (${round.actionName})</span>
+                <span class="battle-log-dmg" style="color:${dmgCol};">${dmgLabel}</span>
+              </div>
+              <div>${round.logText}</div>
+            </div>
+          `;
+        }
+
+        function buildBattleOutcomeHTML(battle) {
+          const lootParts = formatBattleLootSummary(battle);
+          const lossText =
+            battle.lostTotal > 0
+              ? `Truppenverluste: ${battle.lostTotal} von ${battle.totalSent} Soldaten`
+              : `Verlustfrei (${battle.totalSent}/${battle.totalSent} Soldaten unverletzt)`;
+          return `
+            <div class="battle-result-card ${battle.victory ? 'victory' : 'defeat'}">
+              <div class="battle-result-title">
+                <span>${battle.victory ? 'SIEG ÜBER DEN SAURIER!' : 'JAGDTRUPP IM RÜCKZUG'}</span>
+                <span class="mono" style="font-size:11px;">${battle.rounds.length} Runden</span>
+              </div>
+              <div style="font-size:11px;color:var(--text-secondary);">
+                ${lossText}${battle.counterMatched ? ' · Klassen-Konter aktiv (+15%)' : ''}
+              </div>
+              ${
+                battle.victory
+                  ? `
+                    <div class="battle-loot-grid">
+                      ${
+                        lootParts.length
+                          ? lootParts.map((p) => `<span class="battle-loot-entry">${p}</span>`).join('')
+                          : `<span class="battle-loot-entry">Erfahrung gesammelt</span>`
+                      }
+                      ${battle.newlyDiscovered ? `<span class="battle-loot-entry" style="border-color:rgba(251,191,36,0.55);color:#fde047;">Neu im Bestiarium!</span>` : ''}
+                    </div>
+                  `
+                  : `
+                    <div style="font-size:11px;color:#fecaca;line-height:1.4;">
+                      ${battle.weaknessTip ? `Taktik-Hinweis: ${battle.weaknessTip}` : 'Stärke deine Helden mit Gear oder trainiere mehr Soldaten für den nächsten Versuch.'}
+                    </div>
+                  `
+              }
+            </div>
+          `;
+        }
+
+        function updateBattleArenaHP(battle, squadHp, dinoHp) {
+          const sqPct = Math.max(0, Math.min(100, Math.round((squadHp / Math.max(1, battle.squadHpMax)) * 100)));
+          const dnPct = Math.max(0, Math.min(100, Math.round((dinoHp / Math.max(1, battle.dinoHpMax)) * 100)));
+          const sqFill = document.getElementById('battleSquadHpFill');
+          const dnFill = document.getElementById('battleDinoHpFill');
+          const sqTxt = document.getElementById('battleSquadHpText');
+          const dnTxt = document.getElementById('battleDinoHpText');
+          if (sqFill) sqFill.style.transform = `scaleX(${(sqPct / 100).toFixed(3)})`;
+          if (dnFill) dnFill.style.transform = `scaleX(${(dnPct / 100).toFixed(3)})`;
+          if (sqTxt) sqTxt.textContent = `${fmtNum(squadHp)}/${fmtNum(battle.squadHpMax)} (${sqPct}%)`;
+          if (dnTxt) dnTxt.textContent = `${fmtNum(dinoHp)}/${fmtNum(battle.dinoHpMax)} (${dnPct}%)`;
+        }
+
+        function spawnBattleFx(round) {
+          const fxLayer = document.getElementById('battleFxLayer');
+          if (!fxLayer || prefersReducedMotion) return;
+          const isSquad = round.actorSide === 'squad';
+
+          // Projektil / Ansturm-Spur
+          const proj = document.createElement('div');
+          proj.className = `battle-proj ${isSquad ? 'to-dino' : 'to-squad'}`;
+          fxLayer.appendChild(proj);
+
+          // Treffer-Hieb SVG
+          const slash = document.createElement('div');
+          slash.className = `battle-slash ${isSquad ? 'on-dino' : 'on-squad'}`;
+          const strokeCol = isSquad ? (round.isCrit ? '#fb923c' : '#fde047') : round.isShield ? '#60a5fa' : '#f87171';
+          slash.innerHTML = `<svg viewBox="0 0 64 64" width="56" height="56" fill="none"><path d="M12 52 L52 12 M18 40 L44 14 M24 50 L50 24" stroke="${strokeCol}" stroke-width="4" stroke-linecap="round"/></svg>`;
+          fxLayer.appendChild(slash);
+
+          // Schwebender Schadenswert
+          const dmgEl = document.createElement('div');
+          dmgEl.className = `battle-dmg-float ${isSquad ? 'on-dino' : 'on-squad'} ${round.isCrit ? 'crit' : ''} ${round.isShield ? 'shield' : ''}`;
+          dmgEl.textContent = round.isShield
+            ? `BLOCK −${fmtNum(round.damage)}`
+            : round.isCrit
+            ? `−${fmtNum(round.damage)} KRIT!`
+            : `−${fmtNum(round.damage)}`;
+          fxLayer.appendChild(dmgEl);
+
+          const cleanupTimer = setTimeout(() => {
+            proj.remove();
+            slash.remove();
+            dmgEl.remove();
+          }, 760);
+          battleAnimState.timers.push(cleanupTimer);
+        }
+
+        function finishBattlePresentation(battle, silentSound = false) {
+          clearBattleAnimTimers();
+          battleAnimState.finished = true;
+
+          const lastRound = battle.rounds[battle.rounds.length - 1];
+          if (lastRound) {
+            updateBattleArenaHP(battle, lastRound.squadHp, lastRound.dinoHp);
+          }
+
+          const roundInd = document.getElementById('battleRoundIndicator');
+          if (roundInd) {
+            roundInd.textContent = battle.victory ? 'GEFECHT BEENDET · SIEG' : 'GEFECHT BEENDET · RÜCKZUG';
+          }
+
+          const dinoStage = document.getElementById('battleDinoStage');
+          if (dinoStage && battle.victory) {
+            dinoStage.classList.add('is-defeated');
+          }
+
+          const feed = document.getElementById('battleLogFeed');
+          if (feed) {
+            feed.innerHTML = battle.rounds.map((r) => renderBattleLogEntryHTML(r)).join('');
+            feed.scrollTop = feed.scrollHeight;
+          }
+
+          const outcomeSlot = document.getElementById('battleOutcomeSlot');
+          if (outcomeSlot) {
+            outcomeSlot.innerHTML = buildBattleOutcomeHTML(battle);
+          }
+
+          const skipBtn = document.getElementById('btnBattleSkip');
+          if (skipBtn) skipBtn.style.display = 'none';
+          const replayBtn = document.getElementById('btnBattleReplay');
+          if (replayBtn) replayBtn.style.display = 'inline-flex';
+
+          if (!silentSound) {
+            SoundFX.play(battle.victory ? 'victory' : 'defeat');
+          }
+        }
+
+        function playBattleRoundStep(battle, idx) {
+          if (!battleAnimState.active || battleAnimState.battleId !== battle.id) return;
+          if (idx >= battle.rounds.length) {
+            finishBattlePresentation(battle, false);
+            return;
+          }
+
+          const round = battle.rounds[idx];
+          const isSquad = round.actorSide === 'squad';
+          const arena = document.getElementById('battleArena');
+          const dinoStage = document.getElementById('battleDinoStage');
+          const roundInd = document.getElementById('battleRoundIndicator');
+          const heroTokens = Array.from(document.querySelectorAll('.battle-hero-token'));
+
+          if (roundInd) {
+            roundInd.textContent = `Runde ${round.round} / ${battle.rounds.length}`;
+          }
+
+          // Vorherige Animationsklassen entfernen
+          if (arena) arena.classList.remove('shake');
+          if (dinoStage) dinoStage.classList.remove('is-attacking', 'is-hit');
+          heroTokens.forEach((el) => el.classList.remove('is-attacking', 'is-hit', 'is-shield'));
+
+          // Force reflow für sauberen Neustart der Keyframes
+          if (arena) void arena.offsetWidth;
+
+          if (isSquad) {
+            const actingToken =
+              heroTokens.find((el) => el.dataset.battleHeroId === round.heroId) || heroTokens[0];
+            if (actingToken) actingToken.classList.add('is-attacking');
+            if (dinoStage) dinoStage.classList.add('is-hit');
+            if (round.isCrit && arena) arena.classList.add('shake');
+            SoundFX.play(round.isCrit ? 'crit' : 'hit');
+          } else {
+            if (dinoStage) dinoStage.classList.add('is-attacking');
+            heroTokens.forEach((el) => {
+              if (round.isShield && el.dataset.battleHeroId === round.heroId) {
+                el.classList.add('is-shield');
+              } else {
+                el.classList.add('is-hit');
+              }
+            });
+            if (arena) arena.classList.add('shake');
+            SoundFX.play('roar');
+          }
+
+          spawnBattleFx(round);
+          updateBattleArenaHP(battle, round.squadHp, round.dinoHp);
+
+          const feed = document.getElementById('battleLogFeed');
+          if (feed) {
+            feed.insertAdjacentHTML('beforeend', renderBattleLogEntryHTML(round));
+            feed.scrollTop = feed.scrollHeight;
+          }
+
+          const stepDelay = battleAnimState.speed === 2 ? 430 : 820;
+          const nextTimer = setTimeout(() => playBattleRoundStep(battle, idx + 1), stepDelay);
+          battleAnimState.timers.push(nextTimer);
+        }
+
+        function openBattleReplayModal(battleId, opts = { animate: true }) {
+          const battle = getBattleLogById(battleId);
+          if (!battle) return;
+
+          hideBattleAlertBanner();
+          clearBattleAnimTimers();
+
+          if (!battle.read) {
+            battle.read = true;
+            saveState();
+            renderHUD();
+            if (activeTab === 'heroes') renderHeroesTab();
+          }
+
+          battleAnimState.active = true;
+          battleAnimState.battleId = battle.id;
+          battleAnimState.finished = false;
+
+          const shouldAnimate = Boolean(opts && opts.animate !== false) && !prefersReducedMotion;
+          const heroTokensHtml = battle.heroes.length
+            ? battle.heroes
+                .map(
+                  (h) => `
+                    <div class="battle-hero-token" data-battle-hero-id="${h.id}" style="--hero-col:${h.color};">
+                      <div class="battle-hero-icon">${getHeroRoleIconSVG(h.role, h.color)}</div>
+                      <div class="battle-hero-label">
+                        <div class="battle-hero-name">${h.shortName}</div>
+                        <div class="battle-hero-role">${h.role} · Lv.${h.level}</div>
+                      </div>
+                    </div>
+                  `
+                )
+                .join('')
+            : `
+                <div class="battle-hero-token" data-battle-hero-id="squad">
+                  <div class="battle-hero-label">
+                    <div class="battle-hero-name">Stammes-Trupp</div>
+                    <div class="battle-hero-role">${battle.totalSent} Soldaten</div>
+                  </div>
+                </div>
+              `;
+
+          const troopsNote = [];
+          if (battle.troopsSent.slinger > 0) troopsNote.push(`${battle.troopsSent.slinger} Schleud.`);
+          if (battle.troopsSent.clubman > 0) troopsNote.push(`${battle.troopsSent.clubman} Keulen`);
+          if (battle.troopsSent.dinorider > 0) troopsNote.push(`${battle.troopsSent.dinorider} Reiter`);
+
+          const content = document.getElementById('battleModalContent');
+          content.innerHTML = `
+            <div class="battle-modal-head">
+              <div style="min-width:0;">
+                <h3 class="battle-modal-title">Jagd-Gefecht · ${battle.speciesName}</h3>
+                <div class="battle-modal-sub">St. ${battle.dinoLevel} · Macht ${fmtNum(battle.squadPower)} vs ${fmtNum(battle.dinoPower)}</div>
+              </div>
+              <div class="battle-head-controls">
+                <button class="battle-speed-btn" data-battle-speed="1">${battleAnimState.speed}×</button>
+                <button class="close-btn" data-battle-close="1" aria-label="Kampfbericht schließen">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="battle-modal-body">
+              <div class="battle-arena" id="battleArena">
+                <div class="battle-round-bar">
+                  <span class="battle-round-indicator" id="battleRoundIndicator">
+                    ${shouldAnimate ? 'Gefecht beginnt...' : battle.victory ? 'GEFECHT BEENDET · SIEG' : 'GEFECHT BEENDET · RÜCKZUG'}
+                  </span>
+                  <span>${battle.counterMatched ? 'Konter +15%' : 'Standard-Formation'}</span>
+                </div>
+                <div class="battle-stage-grid">
+                  <div class="battle-side">
+                    <div class="battle-hero-stack">${heroTokensHtml}</div>
+                    <div class="battle-troop-footnote">${troopsNote.join(' · ') || `${battle.totalSent} Soldaten`}</div>
+                  </div>
+                  <div class="battle-vs-center">
+                    <span class="battle-vs-mark">VS</span>
+                  </div>
+                  <div class="battle-side">
+                    <div class="battle-dino-stage" id="battleDinoStage">
+                      ${getDinoIconSVG(battle.speciesId, 52, battle.speciesAccent || '#fca5a5')}
+                      <div class="battle-dino-name">${battle.speciesName}</div>
+                      <div class="battle-dino-pwr">St. ${battle.dinoLevel} · ${fmtNum(battle.dinoPower)}</div>
+                    </div>
+                  </div>
+                  <div class="battle-fx-layer" id="battleFxLayer"></div>
+                </div>
+                <div class="battle-hp-row">
+                  <div class="battle-hp-box">
+                    <div class="battle-hp-meta">
+                      <span>Jagdtrupp</span>
+                      <span class="mono" id="battleSquadHpText">${fmtNum(battle.squadHpMax)}/${fmtNum(battle.squadHpMax)} (100%)</span>
+                    </div>
+                    <div class="battle-hp-track">
+                      <div class="battle-hp-fill squad" id="battleSquadHpFill"></div>
+                    </div>
+                  </div>
+                  <div class="battle-hp-box">
+                    <div class="battle-hp-meta">
+                      <span>Saurier</span>
+                      <span class="mono" id="battleDinoHpText">${fmtNum(battle.dinoHpMax)}/${fmtNum(battle.dinoHpMax)} (100%)</span>
+                    </div>
+                    <div class="battle-hp-track">
+                      <div class="battle-hp-fill dino" id="battleDinoHpFill"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="battle-log-feed" id="battleLogFeed" aria-live="polite"></div>
+              <div id="battleOutcomeSlot"></div>
+
+              <div class="battle-modal-footer">
+                <button class="btn-secondary" id="btnBattleSkip" data-battle-skip="1" style="${shouldAnimate ? '' : 'display:none;'}">Überspringen</button>
+                <button class="btn-secondary" id="btnBattleReplay" data-battle-replay="${battle.id}" style="${shouldAnimate ? 'display:none;' : ''}">Nochmal</button>
+                ${
+                  activeTab !== 'heroes' || heroSubTab !== 'battles'
+                    ? `<button class="btn-secondary" data-battle-goto-log="1">Kampf-Log</button>`
+                    : ''
+                }
+                <button class="btn-primary" data-battle-close="1">Schließen</button>
+              </div>
+            </div>
+          `;
+
+          document.getElementById('battleModalBackdrop').classList.add('open');
+
+          if (shouldAnimate) {
+            updateBattleArenaHP(battle, battle.squadHpMax, battle.dinoHpMax);
+            const startTimer = setTimeout(() => playBattleRoundStep(battle, 0), 260);
+            battleAnimState.timers.push(startTimer);
+          } else {
+            finishBattlePresentation(battle, true);
+          }
+        }
+
         function showOfflineReport(report) {
           const gains = Object.entries(report.gained)
             .filter(([, v]) => v !== 0)
@@ -10370,12 +12486,142 @@
           `);
         }
 
+        function escapeHtmlMp(str) {
+          return String(str || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+        }
+
+        function computeVillagePowerMp() {
+          let total = 0;
+          for (const id of BUILDING_ORDER) {
+            const b = state.buildings && state.buildings[id];
+            if (b) total += (b.level || 1) * (id === 'bonfire' ? 180 : 65);
+          }
+          if (state.troops) {
+            total += (state.troops.slinger || 0) * 14;
+            total += (state.troops.clubman || 0) * 20;
+            total += (state.troops.dinorider || 0) * 34;
+          }
+          if (state.heroes) {
+            for (const h of Object.values(state.heroes)) {
+              if (h && h.unlocked) total += (h.level || 1) * 45 + (h.stars || 1) * 90;
+            }
+          }
+          return Math.max(100, Math.round(total));
+        }
+
+        function renderWorldChatUI() {
+          const listEl = document.getElementById('mpChatList');
+          const onlineEl = document.getElementById('mpChatOnlineLabel');
+          const badgeEl = document.getElementById('mpChatUnreadBadge');
+          const ownUid = mpWorld.session ? mpWorld.session.uid : null;
+
+          if (onlineEl) {
+            const count = Math.max(1, mpWorld.onlinePlayers || 1);
+            onlineEl.textContent = `${count} ${count === 1 ? 'Stamm' : 'Stämme'} online`;
+          }
+          if (badgeEl) {
+            if (mpWorld.unreadChat > 0 && !mpWorld.chatOpen) {
+              badgeEl.style.display = 'inline-flex';
+              badgeEl.textContent = mpWorld.unreadChat > 99 ? '99+' : String(mpWorld.unreadChat);
+            } else {
+              badgeEl.style.display = 'none';
+            }
+          }
+          if (!listEl) return;
+          const msgs = mpWorld.chat || [];
+          if (msgs.length === 0) {
+            listEl.innerHTML = '<div style="font-size:12px;color:#a8a29e;text-align:center;margin-top:24px;">Noch keine Nachrichten im Welt-Chat.</div>';
+            return;
+          }
+          listEl.innerHTML = msgs
+            .map((m) => {
+              const isMine = ownUid && m.uid === ownUid;
+              const d = new Date(m.createdAt || Date.now());
+              const timeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+              return `
+                <div class="mp-chat-msg ${isMine ? 'is-mine' : ''}">
+                  <div class="mp-chat-msg-meta">
+                    <span class="mp-chat-sender">${escapeHtmlMp(m.tribeName || 'Stamm')} <span class="mp-chat-lvl">· Feuer St.${m.bonfireLevel || 1}</span></span>
+                    <span class="mp-chat-lvl mono">${timeStr}</span>
+                  </div>
+                  <div>${escapeHtmlMp(m.text)}</div>
+                </div>
+              `;
+            })
+            .join('');
+          listEl.scrollTop = listEl.scrollHeight;
+        }
+
+        function toggleWorldChatDrawer(forceOpen) {
+          const drawer = document.getElementById('worldChatDrawer');
+          if (!drawer) return;
+          mpWorld.chatOpen = typeof forceOpen === 'boolean' ? forceOpen : !mpWorld.chatOpen;
+          drawer.classList.toggle('open', mpWorld.chatOpen);
+          if (mpWorld.chatOpen) {
+            mpWorld.unreadChat = 0;
+            if (mpWorld.chat.length > 0) {
+              mpWorld.lastSeenChatId = mpWorld.chat[mpWorld.chat.length - 1].messageId;
+            }
+            renderWorldChatUI();
+          }
+        }
+
         function openSettingsModal() {
           const nextRot = getBonfireSecondReq(state.buildings.bonfire.level);
           const rotName = BUILDINGS[nextRot.buildingId].name;
+          const sess = (window.DinoMultiplayer && window.DinoMultiplayer.getSession()) || {
+            isGuest: true,
+            email: null,
+            tribeName: 'Glutstamm',
+            cloudSynced: false,
+            onlinePlayers: 1
+          };
+          const safeTribe = escapeHtmlMp(sess.tribeName || 'Glutstamm');
+          const accountHtml = sess.isGuest
+            ? `
+              <div class="mp-account-box">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+                  <strong style="font-size:12.5px;color:#fde68a;">Konto &amp; Cloud-Sicherung</strong>
+                  <span style="font-size:11px;color:#fbbf24;">Gast-Modus</span>
+                </div>
+                <div style="font-size:11.5px;color:var(--text-secondary);">
+                  Du spielst sofort online als Gast. Verknüpfe dein Google-Konto, um dein Dorf dauerhaft in der Cloud (und für die spätere Unity-Version) zu sichern.
+                </div>
+                <div class="mp-tribe-row">
+                  <input class="mp-tribe-input" id="mpTribeNameInput" type="text" maxlength="28" value="${safeTribe}" placeholder="Stammesname" />
+                  <button class="btn-secondary" id="btnMpSaveTribeName" style="min-height:36px;padding:0 12px;">Name</button>
+                </div>
+                <button class="btn-primary" id="btnMpGoogleSignIn" style="min-height:40px;">Mit Google-Konto verknüpfen &amp; sichern</button>
+              </div>
+            `
+            : `
+              <div class="mp-account-box">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+                  <strong style="font-size:12.5px;color:#86efac;">Cloud-Konto aktiv</strong>
+                  <span style="font-size:11px;color:#86efac;">${escapeHtmlMp(sess.email || 'Google verknüpft')}</span>
+                </div>
+                <div style="font-size:11.5px;color:var(--text-secondary);">
+                  Dein Spielstand wird automatisch in Cloud Firestore gesichert und steht geräteübergreifend sowie später in Unity bereit.
+                </div>
+                <div class="mp-tribe-row">
+                  <input class="mp-tribe-input" id="mpTribeNameInput" type="text" maxlength="28" value="${safeTribe}" placeholder="Stammesname" />
+                  <button class="btn-secondary" id="btnMpSaveTribeName" style="min-height:36px;padding:0 12px;">Name</button>
+                </div>
+                <div class="btn-row">
+                  <button class="btn-secondary" id="btnMpForceCloudSave">Jetzt sichern</button>
+                  <button class="btn-secondary" id="btnMpSignOut">Abmelden</button>
+                </div>
+              </div>
+            `;
+
           openCenterModal(`
             <h3>Lager-Einstellungen</h3>
-            <p class="info-line">Spielstand wird automatisch lokal im Browser gespeichert.</p>
+            ${accountHtml}
             <div class="stat-box">
               <div class="stat-label">Nächste Signalfeuer-Regel (St. ${state.buildings.bonfire.level} → ${Math.min(MAX_LEVEL, state.buildings.bonfire.level + 1)})</div>
               <div style="font-size:12.5px; color:var(--text-primary); margin-top:4px;">
@@ -10655,6 +12901,15 @@
               openOwnSettlementSheet();
               return;
             }
+            const playerBtn = e.target.closest('[data-wm-player]');
+            if (playerBtn) {
+              const pl = (mpWorld.settlements || []).find((s) => s.uid === playerBtn.dataset.wmPlayer);
+              if (pl) {
+                SoundFX.play('tap');
+                showToast(`${pl.tribeName} · Signalfeuer St. ${pl.bonfireLevel} · Macht ${pl.power} · Grid [${pl.tileX}, ${pl.tileY}]`, 'info');
+              }
+              return;
+            }
             const nodeBtn = e.target.closest('[data-wm-node]');
             if (nodeBtn) {
               SoundFX.play('tap');
@@ -10699,6 +12954,13 @@
           });
 
           document.getElementById('wmMarchBar').addEventListener('click', (e) => {
+            const openBattleBtn = e.target.closest('[data-open-battle]');
+            if (openBattleBtn) {
+              e.stopPropagation();
+              SoundFX.play('tap');
+              openBattleReplayModal(openBattleBtn.dataset.openBattle, { animate: true });
+              return;
+            }
             const recallBtn = e.target.closest('[data-wm-recall]');
             if (recallBtn) {
               e.stopPropagation();
@@ -10728,6 +12990,48 @@
 
           // Helden-Tab Klicks
           document.getElementById('heroesContainer').addEventListener('click', (e) => {
+            const openBattleBtn = e.target.closest('[data-open-battle]');
+            if (openBattleBtn) {
+              SoundFX.play('tap');
+              openBattleReplayModal(openBattleBtn.dataset.openBattle, { animate: true });
+              return;
+            }
+            const openBattleInstantBtn = e.target.closest('[data-open-battle-instant]');
+            if (openBattleInstantBtn) {
+              SoundFX.play('tap');
+              openBattleReplayModal(openBattleInstantBtn.dataset.openBattleInstant, { animate: false });
+              return;
+            }
+            const battleFilterBtn = e.target.closest('[data-battle-filter]');
+            if (battleFilterBtn) {
+              SoundFX.play('tap');
+              battleLogFilter = battleFilterBtn.dataset.battleFilter;
+              renderHeroesTab();
+              return;
+            }
+            const markReadBtn = e.target.closest('[data-mark-battles-read]');
+            if (markReadBtn) {
+              SoundFX.play('tap');
+              markAllBattlesRead();
+              return;
+            }
+            const gotoWmDino = e.target.closest('[data-goto-world-dino]');
+            if (gotoWmDino) {
+              const dDef = getWorldDinoDef(gotoWmDino.dataset.gotoWorldDino);
+              SoundFX.play('tap');
+              switchTab('worldmap');
+              if (dDef) {
+                centerWorldMapOn(dDef.xPct, dDef.yPct);
+                openWorldDinoSheet(dDef.id);
+              }
+              return;
+            }
+            const gotoWm = e.target.closest('[data-goto-worldmap]');
+            if (gotoWm) {
+              SoundFX.play('tap');
+              switchTab('worldmap');
+              return;
+            }
             const chestBtn = e.target.closest('[data-open-gear-chest]');
             if (chestBtn) {
               openGearChest(chestBtn.dataset.openGearChest === 'all');
@@ -11070,9 +13374,48 @@
           });
 
           // Center Modal Events
-          document.getElementById('centerModalBackdrop').addEventListener('click', (e) => {
+          document.getElementById('centerModalBackdrop').addEventListener('click', async (e) => {
             if (e.target.id === 'centerModalBackdrop' || e.target.id === 'btnCloseCenterModal' || e.target.id === 'btnCancelReset') {
               closeCenterModal();
+              return;
+            }
+            if (e.target.id === 'btnMpSaveTribeName') {
+              const inp = document.getElementById('mpTribeNameInput');
+              if (inp && window.DinoMultiplayer) {
+                const updated = window.DinoMultiplayer.setTribeName(inp.value);
+                SoundFX.play('tap');
+                showToast(`Stammesname geändert zu „${updated}“.`, 'ok');
+                renderWorldMap();
+              }
+              return;
+            }
+            if (e.target.id === 'btnMpGoogleSignIn') {
+              if (!window.DinoMultiplayer) return;
+              SoundFX.play('tap');
+              const res = await window.DinoMultiplayer.signInWithGoogle();
+              if (res.ok) {
+                showToast('Google-Konto verknüpft! Spielstand wird in der Cloud gesichert.', 'ok');
+                openSettingsModal();
+              } else {
+                showToast('Anmeldung abgebrochen oder fehlgeschlagen.', 'warn');
+              }
+              return;
+            }
+            if (e.target.id === 'btnMpForceCloudSave') {
+              if (window.DinoMultiplayer) {
+                window.DinoMultiplayer.saveToCloud(state, true);
+                SoundFX.play('tap');
+                showToast('Spielstand wurde in Cloud Firestore gesichert.', 'ok');
+              }
+              return;
+            }
+            if (e.target.id === 'btnMpSignOut') {
+              if (window.DinoMultiplayer) {
+                await window.DinoMultiplayer.signOut();
+                SoundFX.play('tap');
+                showToast('Abgemeldet. Du spielst im Gast-Modus weiter.', 'info');
+                openSettingsModal();
+              }
               return;
             }
             if (e.target.id === 'btnToggleSound') {
@@ -11098,9 +13441,99 @@
               worldCam.initialized = false;
               saveState();
               closeCenterModal();
+              closeBattleModal();
               closeSheet();
               switchTab('village');
               showToast('Neuer Stamm am Großen Signalfeuer gegründet.', 'ok');
+            }
+          });
+
+          // Live-Gefecht Banner Events
+          document.getElementById('battleAlertBanner').addEventListener('click', (e) => {
+            const openBtn = e.target.closest('[data-open-battle]');
+            if (openBtn) {
+              SoundFX.play('tap');
+              openBattleReplayModal(openBtn.dataset.openBattle, { animate: true });
+              return;
+            }
+            if (e.target.closest('[data-dismiss-battle-banner]')) {
+              SoundFX.play('tap');
+              hideBattleAlertBanner();
+            }
+          });
+
+          // Kampf-Animation & Kampf-Log Modal Events
+          document.getElementById('battleModalBackdrop').addEventListener('click', (e) => {
+            if (e.target.id === 'battleModalBackdrop' || e.target.closest('[data-battle-close]')) {
+              SoundFX.play('tap');
+              closeBattleModal();
+              return;
+            }
+            const speedBtn = e.target.closest('[data-battle-speed]');
+            if (speedBtn) {
+              SoundFX.play('tap');
+              battleAnimState.speed = battleAnimState.speed === 1 ? 2 : 1;
+              speedBtn.textContent = `${battleAnimState.speed}×`;
+              return;
+            }
+            if (e.target.closest('[data-battle-skip]')) {
+              const battle = getBattleLogById(battleAnimState.battleId);
+              if (battle) {
+                SoundFX.play('tap');
+                finishBattlePresentation(battle, false);
+              }
+              return;
+            }
+            const replayBtn = e.target.closest('[data-battle-replay]');
+            if (replayBtn) {
+              SoundFX.play('tap');
+              openBattleReplayModal(replayBtn.dataset.battleReplay, { animate: true });
+              return;
+            }
+            if (e.target.closest('[data-battle-goto-log]')) {
+              SoundFX.play('tap');
+              closeBattleModal();
+              heroSubTab = 'battles';
+              switchTab('heroes');
+            }
+          });
+
+          // Welt-Chat Events
+          const chatFab = document.getElementById('btnWorldChatFab');
+          if (chatFab) {
+            chatFab.addEventListener('click', () => {
+              SoundFX.play('tap');
+              toggleWorldChatDrawer();
+            });
+          }
+          const chatClose = document.getElementById('btnCloseWorldChat');
+          if (chatClose) {
+            chatClose.addEventListener('click', () => {
+              SoundFX.play('tap');
+              toggleWorldChatDrawer(false);
+            });
+          }
+          const chatForm = document.getElementById('mpChatForm');
+          if (chatForm) {
+            chatForm.addEventListener('submit', async (e) => {
+              e.preventDefault();
+              const inp = document.getElementById('mpChatInput');
+              if (!inp || !window.DinoMultiplayer) return;
+              const text = inp.value.trim();
+              if (!text) return;
+              inp.value = '';
+              const res = await window.DinoMultiplayer.sendChat(text, state.buildings.bonfire.level);
+              if (!res.ok) {
+                showToast(res.error || 'Nachricht konnte nicht gesendet werden.', 'err');
+              }
+            });
+          }
+
+          document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && battleAnimState.active) {
+              closeBattleModal();
+            } else if (e.key === 'Escape' && mpWorld.chatOpen) {
+              toggleWorldChatDrawer(false);
             }
           });
 
@@ -11109,6 +13542,72 @@
             if (activeTab === 'worldmap') applyWorldCamera(worldCam.x, worldCam.y);
           });
           window.addEventListener('beforeunload', saveState);
+        }
+
+        function bootstrapMultiplayer() {
+          if (!window.DinoMultiplayer) return;
+          window.DinoMultiplayer.init({
+            onSessionChange: (session) => {
+              mpWorld.session = session;
+              mpWorld.onlinePlayers = session.onlinePlayers || 1;
+              renderWorldChatUI();
+            },
+            onWorldUpdate: ({ settlements, marches, onlinePlayers }) => {
+              mpWorld.settlements = settlements || [];
+              mpWorld.marches = marches || [];
+              mpWorld.onlinePlayers = onlinePlayers || 1;
+              if (activeTab === 'worldmap') {
+                renderWorldMap();
+              }
+              renderWorldChatUI();
+            },
+            onChatUpdate: (messages) => {
+              const prevLen = mpWorld.chat.length;
+              mpWorld.chat = messages || [];
+              const newest = mpWorld.chat.length > 0 ? mpWorld.chat[mpWorld.chat.length - 1] : null;
+              if (!mpWorld.chatOpen && newest && newest.messageId !== mpWorld.lastSeenChatId && prevLen > 0) {
+                mpWorld.unreadChat += 1;
+              }
+              if (mpWorld.chatOpen && newest) {
+                mpWorld.lastSeenChatId = newest.messageId;
+              }
+              renderWorldChatUI();
+            },
+            onCloudStateLoaded: (cloudState, tribeName) => {
+              if (cloudState && typeof cloudState === 'object' && cloudState.buildings) {
+                try {
+                  localStorage.setItem(STORAGE_KEY, JSON.stringify(cloudState));
+                  const merged = loadState();
+                  if (merged) {
+                    state = merged;
+                    renderAll();
+                    showToast(`Cloud-Spielstand für „${tribeName}“ geladen!`, 'ok');
+                  }
+                } catch {
+                  // ignore
+                }
+              }
+            },
+            getCurrentLocalState: () => state,
+            getCurrentSettlementMeta: () => ({
+              bonfireLevel: state.buildings.bonfire.level,
+              power: computeVillagePowerMp(),
+              tileX: state.homeTile.x,
+              tileY: state.homeTile.y
+            })
+          });
+
+          // Alle 25 Sekunden Siedlungsstatus (Stufe/Macht/Position) auf gemeinsamer Weltkarte synchronisieren
+          setInterval(() => {
+            if (!window.DinoMultiplayer) return;
+            window.DinoMultiplayer.syncSettlement({
+              bonfireLevel: state.buildings.bonfire.level,
+              power: computeVillagePowerMp(),
+              tileX: state.homeTile.x,
+              tileY: state.homeTile.y,
+              autoAssignIfOccupied: true
+            });
+          }, 25000);
         }
 
         function bootstrapVillage3D() {
@@ -11138,6 +13637,12 @@
           bindEvents();
           bootstrapVillage3D();
           window.addEventListener('village3d-ready', bootstrapVillage3D, { once: true });
+          // Multiplayer-Bridge direkt oder nach Modul-Ladung initialisieren
+          if (window.DinoMultiplayer) {
+            bootstrapMultiplayer();
+          } else {
+            window.addEventListener('load', bootstrapMultiplayer, { once: true });
+          }
           resizeCanvas();
           renderAll();
           requestAnimationFrame(animateParticles);
@@ -11160,6 +13665,7 @@
         init();
       })();
     </script>
+    <script type="module" src="/src/multiplayerBridge.ts"></script>
     <script type="module" src="/src/village3d.ts"></script>
   </body>
 </html>

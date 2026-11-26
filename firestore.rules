@@ -1,0 +1,170 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Hardened Global Primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // 3. Entity Validation Blueprints (Anti-Update-Gap)
+    function isValidPublicProfile(data, userId) {
+      return data.keys().hasAll(['uid', 'tribeName', 'bonfireLevel', 'power', 'tileX', 'tileY', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'tribeName', 'bonfireLevel', 'power', 'tileX', 'tileY', 'updatedAt'])
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid == userId && data.uid == request.auth.uid
+        && data.tribeName is string && data.tribeName.size() >= 2 && data.tribeName.size() <= 28
+        && data.bonfireLevel is int && data.bonfireLevel >= 1 && data.bonfireLevel <= 25
+        && data.power is int && data.power >= 0 && data.power <= 100000000
+        && data.tileX is int && data.tileX >= 0 && data.tileX <= 46
+        && data.tileY is int && data.tileY >= 0 && data.tileY <= 25
+        && data.updatedAt == request.time;
+    }
+
+    function isValidPrivateSave(data, userId) {
+      return data.keys().hasAll(['uid', 'schemaVersion', 'tribeName', 'state', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'schemaVersion', 'tribeName', 'state', 'updatedAt'])
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid == userId && data.uid == request.auth.uid
+        && data.schemaVersion is int && data.schemaVersion >= 1 && data.schemaVersion <= 50
+        && data.tribeName is string && data.tribeName.size() >= 2 && data.tribeName.size() <= 28
+        && data.state is map
+        && data.updatedAt == request.time;
+    }
+
+    function isValidWorldSettlement(data, userId) {
+      return data.keys().hasAll(['uid', 'tribeName', 'bonfireLevel', 'power', 'tileX', 'tileY', 'chunkKey', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'tribeName', 'bonfireLevel', 'power', 'tileX', 'tileY', 'chunkKey', 'updatedAt'])
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid == userId && data.uid == request.auth.uid
+        && data.tribeName is string && data.tribeName.size() >= 2 && data.tribeName.size() <= 28
+        && data.bonfireLevel is int && data.bonfireLevel >= 1 && data.bonfireLevel <= 25
+        && data.power is int && data.power >= 0 && data.power <= 100000000
+        && data.tileX is int && data.tileX >= 0 && data.tileX <= 46
+        && data.tileY is int && data.tileY >= 0 && data.tileY <= 25
+        && data.chunkKey is string && data.chunkKey.size() >= 3 && data.chunkKey.size() <= 16 && data.chunkKey.matches('^[0-9]+_[0-9]+$')
+        && data.updatedAt == request.time;
+    }
+
+    function isValidWorldMarch(data, marchId) {
+      return data.keys().hasAll(['marchId', 'uid', 'tribeName', 'kind', 'fromX', 'fromY', 'toX', 'toY', 'targetLabel', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['marchId', 'uid', 'tribeName', 'kind', 'fromX', 'fromY', 'toX', 'toY', 'targetLabel', 'status', 'createdAt', 'updatedAt'])
+        && data.marchId is string && data.marchId.size() >= 3 && data.marchId.size() <= 96 && data.marchId == marchId && isValidId(data.marchId)
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid == request.auth.uid
+        && data.tribeName is string && data.tribeName.size() >= 2 && data.tribeName.size() <= 28
+        && data.kind is string && data.kind.size() >= 4 && data.kind.size() <= 12 && data.kind in ['gather', 'hunt']
+        && data.fromX is number && data.fromX >= 0 && data.fromX <= 100
+        && data.fromY is number && data.fromY >= 0 && data.fromY <= 100
+        && data.toX is number && data.toX >= 0 && data.toX <= 100
+        && data.toY is number && data.toY >= 0 && data.toY <= 100
+        && data.targetLabel is string && data.targetLabel.size() >= 1 && data.targetLabel.size() <= 64
+        && data.status is string && data.status.size() >= 6 && data.status.size() <= 12 && data.status in ['active', 'completed']
+        && data.createdAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
+    function isValidWorldChatMessage(data, messageId) {
+      return data.keys().hasAll(['messageId', 'uid', 'tribeName', 'bonfireLevel', 'text', 'channel', 'createdAt'])
+        && data.keys().hasOnly(['messageId', 'uid', 'tribeName', 'bonfireLevel', 'text', 'channel', 'createdAt'])
+        && data.messageId is string && data.messageId.size() >= 3 && data.messageId.size() <= 96 && data.messageId == messageId && isValidId(data.messageId)
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid == request.auth.uid
+        && data.tribeName is string && data.tribeName.size() >= 2 && data.tribeName.size() <= 28
+        && data.bonfireLevel is int && data.bonfireLevel >= 1 && data.bonfireLevel <= 25
+        && data.text is string && data.text.size() >= 1 && data.text.size() <= 240
+        && data.channel is string && data.channel.size() == 5 && data.channel == 'world'
+        && data.createdAt == request.time;
+    }
+
+    // 4. Collection Rules
+
+    // Spieler-Unterkollektionen: Öffentliches Profil vs. Privater Spielstand (PII-Isolation)
+    match /users/{userId}/public/profile {
+      allow get: if isSignedIn() && isValidId(userId);
+      allow create: if isOwner(userId) && isValidId(userId) && isValidPublicProfile(incoming(), userId);
+      allow update: if isOwner(userId)
+        && isValidId(userId)
+        && isValidPublicProfile(incoming(), userId)
+        && incoming().uid == existing().uid
+        && incoming().diff(existing()).affectedKeys().hasOnly(['tribeName', 'bonfireLevel', 'power', 'tileX', 'tileY', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    match /users/{userId}/private/save {
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow create: if isOwner(userId) && isValidId(userId) && isValidPrivateSave(incoming(), userId);
+      allow update: if isOwner(userId)
+        && isValidId(userId)
+        && isValidPrivateSave(incoming(), userId)
+        && incoming().uid == existing().uid
+        && incoming().diff(existing()).affectedKeys().hasOnly(['schemaVersion', 'tribeName', 'state', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    // Gemeinsame Multiplayer-Weltkarte: Spielerdörfer (Query-bounded)
+    match /world_settlements/{userId} {
+      allow get: if isSignedIn() && isValidId(userId);
+      allow list: if isSignedIn() && request.query.limit <= 100;
+      allow create: if isOwner(userId) && isValidId(userId) && isValidWorldSettlement(incoming(), userId);
+      allow update: if isOwner(userId)
+        && isValidId(userId)
+        && isValidWorldSettlement(incoming(), userId)
+        && incoming().uid == existing().uid
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['tribeName', 'bonfireLevel', 'power', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly(['tileX', 'tileY', 'chunkKey', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly(['tribeName', 'bonfireLevel', 'power', 'tileX', 'tileY', 'chunkKey', 'updatedAt'])
+        );
+      allow delete: if false;
+    }
+
+    // Gemeinsame Weltkarte: Aktive Märsche (Query-bounded + Terminal State Locking)
+    match /world_marches/{marchId} {
+      allow get: if isSignedIn() && isValidId(marchId);
+      allow list: if isSignedIn() && request.query.limit <= 50 && existing().status == 'active';
+      allow create: if isSignedIn()
+        && isValidId(marchId)
+        && isValidWorldMarch(incoming(), marchId)
+        && incoming().status == 'active'
+        && incoming().createdAt == request.time;
+      allow update: if isSignedIn()
+        && isValidId(marchId)
+        && isValidWorldMarch(incoming(), marchId)
+        && existing().uid == request.auth.uid
+        && incoming().uid == existing().uid
+        && incoming().marchId == existing().marchId
+        && incoming().createdAt == existing().createdAt
+        && existing().status == 'active'
+        && incoming().status == 'completed'
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']);
+      allow delete: if isSignedIn() && isValidId(marchId) && existing().uid == request.auth.uid;
+    }
+
+    // Globaler Welt-Chat (Query-bounded, unveränderliche Nachrichten)
+    match /world_chat/{messageId} {
+      allow get: if isSignedIn() && isValidId(messageId);
+      allow list: if isSignedIn() && request.query.limit <= 50;
+      allow create: if isSignedIn()
+        && isValidId(messageId)
+        && isValidWorldChatMessage(incoming(), messageId);
+      allow update, delete: if false;
+    }
+  }
+}
