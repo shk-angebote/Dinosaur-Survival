@@ -234,7 +234,6 @@ class DinoMultiplayerBridge {
     this.initialized = true;
 
     // 1. Mit Node.js Spielserver verbinden (signierte Gast-Session + dauerhafter Weltzustand + WebSocket)
-    void this.bootstrapServerState();
     this.socket = new GameRealtimeSocket(
       (ev) => this.handleRealtimeEvent(ev),
       (connected) => {
@@ -246,7 +245,7 @@ class DinoMultiplayerBridge {
         }
       }
     );
-    this.socket.connect();
+    void this.bootstrapServerState();
 
     // 2. Firebase Authentication abonnieren (Google-Konto + Cloud Firestore Persistenz)
     this.unsubAuth = subscribeAuth((user) => {
@@ -262,6 +261,8 @@ class DinoMultiplayerBridge {
         fetchWorldState(),
         this.firebaseUser ? Promise.resolve(null) : this.ensureGuestToken(),
       ]);
+      // WebSocket nur verbinden, wenn ein aktiver Spielserver antwortet (verhindert Konsolenfehler auf statischem GitHub Pages)
+      this.socket?.connect();
       this.serverOffsetMs = world.serverTimeMs - Date.now();
       this.onlinePlayers = Math.max(1, world.onlinePlayers || 1);
       for (const s of world.settlements || []) {
