@@ -1,101 +1,82 @@
-# Dinosaur Survival — Dokumentierte Game-Server API (v1)
+# Dinosaur Survival — Spielserver-API Dokumentation (v1)
 
-Diese Schnittstelle trennt Spieloberfläche und Spiellogik vollständig. Sowohl der aktuelle **Web-Client (React + TypeScript + Three.js)** als auch ein zukünftiger **Unity-Client (C#)** sprechen exakt dieselben Endpunkte an und teilen sich dieselbe Spielwelt.
+Diese dokumentierte HTTP- & WebSocket-API wird gemeinsam vom **Web-Client (React + TypeScript + Three.js)** und vom zukünftigen **Unity-Client (C#)** genutzt.
 
----
-
-## Basis-URL & Authentifizierung
-- **HTTP Basis-Pfad:** `/api/v1`
-- **Echtzeit-WebSocket:** `ws://<host>/ws` (bzw. `wss://<host>/ws` auf Cloud Run)
-- **Authentifizierung:** Spieler melden sich über **Firebase Authentication** (Gast oder Google-Konto) an und übergeben ihre Spieler-ID (`uid`) bzw. das Firebase ID-Token im Header `Authorization: Bearer <ID_TOKEN>`.
-
----
-
-## 1. Server-Status & Zeit-Synchronisation
-`GET /api/v1/health`
-
-Liefert den Serverzustand und die autoritative Server-Uhr (`serverTimeMs`), damit Bauzeiten und Märsche auf allen Geräten synchron laufen.
-
-```json
-{
-  "ok": true,
-  "service": "dinosaur-survival-server",
-  "apiVersion": "v1",
-  "serverTimeMs": 1795600000000,
-  "onlinePlayers": 12,
-  "settlementsCount": 8
-}
-```
+- **Basis-URL (Entwicklung / Cloud Run):** `https://<host>` (lokal `http://localhost:3000`)
+- **Echtzeit-WebSocket:** `wss://<host>/ws`
+- **Authentifizierung:** `Authorization: Bearer <token>`
+  - **Google/Firebase-Konto:** Reguläres Firebase Auth ID-Token (`user.getIdToken()` im Web-SDK oder Firebase Unity SDK). Der Server prüft die RS256-Signatur kryptographisch gegen Googles öffentliche Zertifikate (ohne IAM-Abhängigkeit).
+  - **Gast-Modus:** Signiertes HMAC-SHA256-Gasttoken über `POST /api/v1/auth/guest` (wird im Client nur im Arbeitsspeicher gehalten).
 
 ---
+
+## 1. Gesundheit & Server-Uhr
+
+### `GET /api/v1/health`
+Liefert Serverstatus, Serverzeit (`serverTimeMs`), Online-Spielerzahl und Speicherstatus.
 
 ## 2. Zentrale Spielkonfiguration (Single Source of Truth)
-`GET /api/v1/config`
 
-Liefert alle verbindlichen Spieltabellen (Max-Stufe 25, Marschwarteschlangen-Stufen `[1,4,9,15,21]`, Gebäudekosten, Dino-Arten, Beute-Chancen und Weltkarten-Raster `48×27`). Unity lädt diese Tabelle beim Start, sodass Web und Unity niemals unterschiedliche Werte verwenden.
+### `GET /api/v1/config`
+Liefert verbindliche Konstanten für Web und Unity:
+- `maxLevel` (`25`), `marchQueueUnlockLevels` (`[1, 4, 9, 15, 21]`), `worldGrid` (`48 × 27`), Gebäude-Formeln und die 8 Dinosaurier-Arten inkl. Beute-Tabellen.
 
----
+## 3. Gast-Sitzung & Konto-Migration
 
-## 3. Serverseitige Bau- & Zeitprüfung
-`POST /api/v1/economy/validate-build`
-
-Prüft Gebäudekosten, Signalfeuer-Abhängigkeit und berechnet das verbindliche Bauende (`endsAtMs`) anhand der Server-Uhr.
-
-**Request:**
+### `POST /api/v1/auth/guest`
+Erzeugt oder erneuert eine kryptographisch signierte Gast-Sitzung.
 ```json
-{
-  "buildingId": "quarry",
-  "currentLevel": 3,
-  "bonfireLevel": 4,
-  "resources": { "meat": 400, "wood": 600, "stone": 250, "fur": 120 },
-  "techBuildSpeedBonus": 0.1
-}
+{ "existingGuestUid": "guest_optional" }
+```
+Antwort:
+```json
+{ "ok": true, "uid": "guest_...", "token": "guest.<payload>.<sig>", "expiresAtMs": 1798322000000, "serverTimeMs": 1795730000000 }
 ```
 
----
-
-## 4. Serverseitige Dino-Jagd Kampfberechnung
-`POST /api/v1/combat/dino-hunt`
-
-Berechnet Sieg/Niederlage, Truppenverluste, Beute, XP und das komplette Runden-Kampfprotokoll fälschungssicher auf dem Server. Web und Unity spielen das zurückgelieferte `rounds`-Array visuell ab.
-
-**Response-Auszug:**
+### `POST /api/v1/world/migrate-guest` *(Bearer: Firebase ID-Token erforderlich)*
+Überführt eine bisherige Gast-Siedlung und einen Gast-Spielstand atomar auf die verifizierte Firebase-UID und entfernt den alten Gast-Eintrag live von der Weltkarte.
 ```json
-{
-  "battleId": "battle_1795600000000_421",
-  "victory": true,
-  "dinoPower": 780,
-  "squadPower": 1420,
-  "counterMatched": true,
-  "lostTotal": 0,
-  "resources": { "meat": 130, "fur": 42 },
-  "items": { "bones": 1 },
-  "xp": 70,
-  "rounds": [
-    { "round": 1, "actorSide": "squad", "actorName": "Torv", "damage": 310, "isCrit": true }
-  ]
-}
+{ "guestToken": "guest.<payload>.<sig>" }
 ```
 
----
+## 4. Dauerhafter Spielstand (Server & Cloud Firestore)
 
-## 5. Gemeinsame Multiplayer-Weltkarte
-- `GET /api/v1/world/state` — Liefert alle aktiven Spielerdörfer (`settlements`), laufende Märsche (`marches`) und die letzten 60 Welt-Chat-Nachrichten (`chat`).
-- `POST /api/v1/world/settlement` — Registriert oder teleportiert eine `2×2`-Spielersiedlung atomar. Prüft serverseitig Hindernisse und andere Spielerdörfer (Antwort `409 Conflict`, falls eine der 4 Kacheln belegt ist).
-- `POST /api/v1/world/march` — Meldet einen laufenden Sammel- oder Jagdmarsch an und verteilt ihn per WebSocket an alle Spieler.
+### `GET /api/v1/player/save` *(Bearer erforderlich)*
+Lädt den dauerhaft auf dem Server gespeicherten Spielstand für die verifizierte UID.
 
----
+### `POST /api/v1/player/save` *(Bearer erforderlich)*
+Speichert den aktuellen Spielstand dauerhaft unter der verifizierten UID (ergänzend zur Cloud-Firestore-Sicherung unter `users/{uid}/private/save`).
+```json
+{ "schemaVersion": 1, "tribeName": "Glutstamm", "state": { "...": "..." } }
+```
 
-## 6. Globaler Welt-Chat
-- `GET /api/v1/chat` — Aktuelle Nachrichten abrufen.
-- `POST /api/v1/chat` — Neue Nachricht senden (`text` max. 240 Zeichen); wird sofort per WebSocket (`chat:message`) an alle verbundenen Clients verteilt.
+## 5. Autoritative Spiellogik
 
----
+### `POST /api/v1/economy/validate-build`
+Prüft Gebäudestufe, Kosten, Signalfeuer-Abhängigkeiten und berechnet autoritative Bauzeit & Endzeitstempel.
 
-## 7. WebSocket Echtzeit-Ereignisse (`/ws`)
-Alle Ereignisse folgen dem Schema `{ "type": "...", "payload": ... }`:
-- `world:init` — Vollständiger Startzustand direkt nach dem Verbinden.
-- `world:settlement` — Ein Spieler hat sein Dorf gegründet, ausgebaut oder teleportiert.
-- `world:march` — Ein neuer Sammel- oder Jagdmarsch wurde gestartet.
-- `chat:message` — Neue Nachricht im Welt-Chat.
-- `world:presence` — Aktualisierte Anzahl gleichzeitig verbundener Spieler.
+### `POST /api/v1/combat/dino-hunt`
+Berechnet Dino-Jagdkämpfe serverseitig inkl. Helden-Konterbonus, Runden-Kampflog, Verlusten, Beute und nächstem Dino-Level.
+
+## 6. Gemeinsame Multiplayer-Weltkarte & Welt-Chat
+
+### `GET /api/v1/world/state`
+Liefert alle aktiven Spielerdörfer (`settlements`), laufende Märsche (`marches`), aktuelle Welt-Chat-Nachrichten (`chat`) und Online-Zahl (`onlinePlayers`).
+
+### `POST /api/v1/world/settlement` *(Bearer erforderlich)*
+Registriert oder teleportiert das eigene 2×2-Dorf atomar auf dem 48×27-Raster. Gibt `409 Conflict` zurück, wenn eine der 4 Kacheln durch Hindernisse oder einen anderen Stamm belegt ist.
+
+### `POST /api/v1/world/march` *(Bearer erforderlich)*
+Meldet einen aktiven Sammel- oder Jagdmarsch (`status: "active"`) oder schließt ihn ab (`status: "completed"`).
+
+### `GET /api/v1/chat` & `POST /api/v1/chat` *(POST erfordert Bearer)*
+Liest die letzten 60 Welt-Chat-Nachrichten oder sendet eine neue Nachricht (max. 240 Zeichen) an alle verbundenen Spieler.
+
+## 7. WebSocket-Ereignisse (`/ws`)
+Alle Ereignisse folgen `{ "type": string, "payload": object }`:
+- `world:init` — Vollständiger Start-Snapshot
+- `world:settlement` — Neue oder verschobene Spielersiedlung
+- `world:settlement_removed` — Entfernte Gast-Siedlung nach Konto-Migration
+- `world:march` — Neuer oder abgeschlossener Marsch
+- `chat:message` — Neue Welt-Chat-Nachricht
+- `world:presence` — Aktualisierte Online-Spielerzahl

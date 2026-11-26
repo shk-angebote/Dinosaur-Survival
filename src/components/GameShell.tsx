@@ -1,9 +1,14 @@
 import React, { useEffect, useRef } from 'react';
 import { GAME_SHELL_HTML } from '../game/gameShellMarkup';
-import { initGameRuntime, type GameRuntimeSnapshot } from '../game/gameRuntime';
+import {
+  initGameRuntime,
+  type GameRuntimeHandle,
+  type GameRuntimeSnapshot,
+} from '../game/gameRuntime';
 
 interface GameShellProps {
   onSnapshot?: (snapshot: GameRuntimeSnapshot) => void;
+  onRuntimeReady?: (handle: GameRuntimeHandle) => void;
 }
 
 /**
@@ -12,10 +17,12 @@ interface GameShellProps {
  * Memoized mit eigenem ref-Container, damit React-Re-Renders das aktive 3D-Canvas und
  * DOM-Bindings niemals zurücksetzen.
  */
-export const GameShell: React.FC<GameShellProps> = React.memo(({ onSnapshot }) => {
+export const GameShell: React.FC<GameShellProps> = React.memo(({ onSnapshot, onRuntimeReady }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const onSnapshotRef = useRef(onSnapshot);
+  const onReadyRef = useRef(onRuntimeReady);
   onSnapshotRef.current = onSnapshot;
+  onReadyRef.current = onRuntimeReady;
 
   useEffect(() => {
     const el = containerRef.current;
@@ -26,11 +33,12 @@ export const GameShell: React.FC<GameShellProps> = React.memo(({ onSnapshot }) =
       el.dataset.shellMounted = '1';
     }
 
-    initGameRuntime({
+    const handle = initGameRuntime({
       onSnapshot: (snap) => {
         onSnapshotRef.current?.(snap);
       },
     });
+    onReadyRef.current?.(handle);
   }, []);
 
   return <div ref={containerRef} style={{ width: '100%', height: '100%' }} />;

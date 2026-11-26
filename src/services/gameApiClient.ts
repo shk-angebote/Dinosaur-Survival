@@ -3,6 +3,9 @@ import type {
   BuildValidationResponse,
   DinoHuntCombatRequest,
   DinoHuntCombatResponse,
+  GuestAuthResponse,
+  MigrateGuestResponse,
+  PlayerSaveDTO,
   RealtimeEvent,
   TeleportRequest,
   TeleportResponse,
@@ -11,16 +14,20 @@ import type {
   WorldStateResponse,
 } from '../shared/apiTypes';
 
-async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
+async function fetchJson<T>(url: string, init?: RequestInit, bearerToken?: string | null): Promise<T> {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), 8000);
   try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...((init?.headers as Record<string, string> | undefined) || {}),
+    };
+    if (bearerToken) {
+      headers.Authorization = `Bearer ${bearerToken}`;
+    }
     const res = await fetch(url, {
       ...init,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(init?.headers || {}),
-      },
+      headers,
       signal: controller.signal,
     });
     const data = (await res.json()) as T;
@@ -35,9 +42,12 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 
 export async function fetchServerHealth(): Promise<{
   ok: boolean;
+  firebaseProjectLinked: boolean;
+  persistentStoreActive: boolean;
   serverTimeMs: number;
   onlinePlayers: number;
   settlementsCount: number;
+  savesCount: number;
 }> {
   return fetchJson('/api/v1/health');
 }
@@ -47,6 +57,55 @@ export async function fetchPublicGameConfig(): Promise<{
   config: Record<string, unknown>;
 }> {
   return fetchJson('/api/v1/config');
+}
+
+export async function postAuthGuest(existingGuestUid?: string): Promise<GuestAuthResponse> {
+  return fetchJson('/api/v1/auth/guest', {
+    method: 'POST',
+    body: JSON.stringify({ existingGuestUid }),
+  });
+}
+
+export async function fetchServerPlayerSave(bearerToken: string): Promise<{
+  ok: boolean;
+  uid: string;
+  provider: 'firebase' | 'guest';
+  save: PlayerSaveDTO | null;
+  serverTimeMs: number;
+}> {
+  return fetchJson('/api/v1/player/save', { method: 'GET' }, bearerToken);
+}
+
+export async function postServerPlayerSave(
+  bearerToken: string,
+  payload: {
+    schemaVersion: number;
+    tribeName: string;
+    state: Record<string, unknown>;
+  }
+): Promise<{ ok: boolean; uid: string; updatedAt: number; serverTimeMs: number }> {
+  return fetchJson(
+    '/api/v1/player/save',
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+    bearerToken
+  );
+}
+
+export async function postMigrateGuest(
+  firebaseIdToken: string,
+  guestToken: string
+): Promise<MigrateGuestResponse> {
+  return fetchJson(
+    '/api/v1/world/migrate-guest',
+    {
+      method: 'POST',
+      body: JSON.stringify({ guestToken }),
+    },
+    firebaseIdToken
+  );
 }
 
 export async function fetchWorldState(): Promise<WorldStateResponse> {
@@ -72,34 +131,50 @@ export async function postDinoHuntCombat(
 }
 
 export async function postSettlement(
-  req: TeleportRequest & { autoAssignIfOccupied?: boolean }
+  req: Omit<TeleportRequest, 'uid'> & { uid?: string; autoAssignIfOccupied?: boolean },
+  bearerToken: string
 ): Promise<TeleportResponse> {
-  return fetchJson('/api/v1/world/settlement', {
-    method: 'POST',
-    body: JSON.stringify(req),
-  });
+  return fetchJson(
+    '/api/v1/world/settlement',
+    {
+      method: 'POST',
+      body: JSON.stringify(req),
+    },
+    bearerToken
+  );
 }
 
 export async function postMarch(
-  march: Partial<WorldMarchDTO>
+  march: Partial<WorldMarchDTO>,
+  bearerToken: string
 ): Promise<{ ok: boolean; march?: WorldMarchDTO; serverTimeMs: number }> {
-  return fetchJson('/api/v1/world/march', {
-    method: 'POST',
-    body: JSON.stringify(march),
-  });
+  return fetchJson(
+    '/api/v1/world/march',
+    {
+      method: 'POST',
+      body: JSON.stringify(march),
+    },
+    bearerToken
+  );
 }
 
-export async function postChatMessage(payload: {
-  messageId?: string;
-  uid: string;
-  tribeName: string;
-  bonfireLevel: number;
-  text: string;
-}): Promise<{ ok: boolean; message?: WorldChatMessageDTO; serverTimeMs: number }> {
-  return fetchJson('/api/v1/chat', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
+export async function postChatMessage(
+  payload: {
+    messageId?: string;
+    tribeName: string;
+    bonfireLevel: number;
+    text: string;
+  },
+  bearerToken: string
+): Promise<{ ok: boolean; message?: WorldChatMessageDTO; serverTimeMs: number }> {
+  return fetchJson(
+    '/api/v1/chat',
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+    bearerToken
+  );
 }
 
 export class GameRealtimeSocket {

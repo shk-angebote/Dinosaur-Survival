@@ -141,9 +141,34 @@ export interface TeleportResponse {
   serverTimeMs: number;
 }
 
+export interface GuestAuthResponse {
+  ok: boolean;
+  uid: string;
+  token: string;
+  expiresAtMs: number;
+  serverTimeMs: number;
+}
+
+export interface PlayerSaveDTO {
+  uid: string;
+  schemaVersion: number;
+  tribeName: string;
+  state: Record<string, unknown>;
+  updatedAt: number;
+}
+
+export interface MigrateGuestResponse {
+  ok: boolean;
+  removedGuestUid: string | null;
+  settlement: WorldSettlementDTO | null;
+  serverTimeMs: number;
+}
+
 export type RealtimeEvent =
   | { type: 'world:init'; payload: WorldStateResponse }
   | { type: 'world:settlement'; payload: WorldSettlementDTO }
+  | { type: 'world:settlement_removed'; payload: { uid: string } }
   | { type: 'world:march'; payload: WorldMarchDTO }
   | { type: 'chat:message'; payload: WorldChatMessageDTO }
   | { type: 'world:presence'; payload: { onlinePlayers: number; serverTimeMs: number } };
+

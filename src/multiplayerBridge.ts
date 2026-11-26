@@ -11,6 +11,8 @@ import type {
   WorldSettlementDTO,
 } from './shared/apiTypes';
 import {
+  completeMarchInFirestore,
+  getFirebaseIdToken,
   loadCloudSave,
   publishChatToFirestore,
   publishMarchToFirestore,
@@ -24,17 +26,23 @@ import {
   syncPublicProfileAndSettlement,
 } from './services/firebaseClient';
 import {
+  fetchServerPlayerSave,
   fetchWorldState,
   GameRealtimeSocket,
+  postAuthGuest,
   postChatMessage,
   postDinoHuntCombat,
   postMarch,
+  postMigrateGuest,
+  postServerPlayerSave,
   postSettlement,
   postValidateBuild,
 } from './services/gameApiClient';
 
 const GUEST_UID_KEY = 'glut_basalt_guest_uid_v1';
 const TRIBE_NAME_KEY = 'glut_basalt_tribe_name_v1';
+
+export type SyncState = 'connecting' | 'synced' | 'saving' | 'offline';
 
 export interface PlayerSession {
   uid: string;
@@ -43,7 +51,10 @@ export interface PlayerSession {
   displayName: string | null;
   tribeName: string;
   wsConnected: boolean;
+  serverAuthenticated: boolean;
   cloudSynced: boolean;
+  syncState: SyncState;
+  lastServerSaveAt: number | null;
   lastCloudSaveAt: number | null;
   onlinePlayers: number;
   serverOffsetMs: number;
@@ -70,7 +81,7 @@ export interface BridgeCallbacks {
 function getOrCreateGuestUid(): string {
   try {
     const existing = localStorage.getItem(GUEST_UID_KEY);
-    if (existing && /^[a-zA-Z0-9_-]{6,64}$/.test(existing)) return existing;
+    if (existing && /^guest_[a-zA-Z0-9_-]{6,64}$/.test(existing)) return existing;
     const created = `guest_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     localStorage.setItem(GUEST_UID_KEY, created);
     return created;
@@ -96,9 +107,15 @@ class DinoMultiplayerBridge {
   private callbacks: BridgeCallbacks = {};
   private firebaseUser: User | null = null;
   private guestUid: string = getOrCreateGuestUid();
+  // Signiertes Gast-Token bleibt ausschließlich im Arbeitsspeicher (niemals in localStorage)
+  private guestBearerToken: string | null = null;
+  private guestTokenPromise: Promise<string | null> | null = null;
+
   private tribeName: string = getOrCreateTribeName();
   private wsConnected = false;
   private cloudSynced = false;
+  private syncState: SyncState = 'connecting';
+  private lastServerSaveAt: number | null = null;
   private lastCloudSaveAt: number | null = null;
   private onlinePlayers = 1;
   private serverOffsetMs = 0;
@@ -110,7 +127,7 @@ class DinoMultiplayerBridge {
   private socket: GameRealtimeSocket | null = null;
   private unsubAuth: (() => void) | null = null;
   private unsubFirestoreWorld: (() => void) | null = null;
-  private cloudSaveTimer: number | null = null;
+  private saveTimer: number | null = null;
   private initialized = false;
   private listeners = new Set<() => void>();
 
@@ -139,7 +156,10 @@ class DinoMultiplayerBridge {
       displayName: this.firebaseUser?.displayName ?? null,
       tribeName: this.tribeName,
       wsConnected: this.wsConnected,
+      serverAuthenticated: Boolean(this.firebaseUser || this.guestBearerToken),
       cloudSynced: this.cloudSynced,
+      syncState: this.syncState,
+      lastServerSaveAt: this.lastServerSaveAt,
       lastCloudSaveAt: this.lastCloudSaveAt,
       onlinePlayers: this.onlinePlayers,
       serverOffsetMs: this.serverOffsetMs,
@@ -167,6 +187,42 @@ class DinoMultiplayerBridge {
     };
   }
 
+  private async ensureGuestToken(): Promise<string | null> {
+    if (this.guestBearerToken) return this.guestBearerToken;
+    if (this.guestTokenPromise) return this.guestTokenPromise;
+
+    this.guestTokenPromise = (async () => {
+      try {
+        const res = await postAuthGuest(this.guestUid);
+        if (res.ok && res.token && res.uid) {
+          this.guestUid = res.uid;
+          this.guestBearerToken = res.token;
+          try {
+            localStorage.setItem(GUEST_UID_KEY, res.uid);
+          } catch {
+            // ignore
+          }
+          this.emitSession();
+          return res.token;
+        }
+      } catch {
+        // Server offline — fallback gracefully
+      } finally {
+        this.guestTokenPromise = null;
+      }
+      return null;
+    })();
+    return this.guestTokenPromise;
+  }
+
+  private async getActiveBearerToken(forceRefreshFirebase = false): Promise<string | null> {
+    if (this.firebaseUser) {
+      const fbToken = await getFirebaseIdToken(forceRefreshFirebase);
+      if (fbToken) return fbToken;
+    }
+    return this.ensureGuestToken();
+  }
+
   init(callbacks: BridgeCallbacks): void {
     this.callbacks = callbacks;
     if (this.initialized) {
@@ -177,21 +233,22 @@ class DinoMultiplayerBridge {
     }
     this.initialized = true;
 
-    // 1. Connect to Node.js Game Server REST + WebSocket (works immediately for Guests & Signed-In)
+    // 1. Mit Node.js Spielserver verbinden (signierte Gast-Session + dauerhafter Weltzustand + WebSocket)
     void this.bootstrapServerState();
     this.socket = new GameRealtimeSocket(
       (ev) => this.handleRealtimeEvent(ev),
       (connected) => {
         this.wsConnected = connected;
+        this.syncState = connected ? 'synced' : 'offline';
         this.emitSession();
         if (connected) {
-          this.pushCurrentSettlement(true);
+          void this.pushCurrentSettlement(true);
         }
       }
     );
     this.socket.connect();
 
-    // 2. Listen to Firebase Authentication (Google Account linking / Cloud Save)
+    // 2. Firebase Authentication abonnieren (Google-Konto + Cloud Firestore Persistenz)
     this.unsubAuth = subscribeAuth((user) => {
       void this.handleAuthChanged(user);
     });
@@ -201,7 +258,10 @@ class DinoMultiplayerBridge {
 
   private async bootstrapServerState(): Promise<void> {
     try {
-      const world = await fetchWorldState();
+      const [world, guestToken] = await Promise.all([
+        fetchWorldState(),
+        this.firebaseUser ? Promise.resolve(null) : this.ensureGuestToken(),
+      ]);
       this.serverOffsetMs = world.serverTimeMs - Date.now();
       this.onlinePlayers = Math.max(1, world.onlinePlayers || 1);
       for (const s of world.settlements || []) {
@@ -213,12 +273,38 @@ class DinoMultiplayerBridge {
       for (const c of world.chat || []) {
         this.chatMap.set(c.messageId, c);
       }
+      this.syncState = 'synced';
       this.emitSession();
       this.emitWorld();
       this.emitChat();
-      this.pushCurrentSettlement(true);
+
+      // Wenn Gast-Spieler einen neueren Server-Spielstand hat (z. B. nach Browser-Reset), wiederherstellen
+      if (!this.firebaseUser && guestToken) {
+        try {
+          const srvSave = await fetchServerPlayerSave(guestToken);
+          const localState = this.callbacks.getCurrentLocalState?.();
+          const localLastTick = Number((localState as { lastTick?: number } | null)?.lastTick || 0);
+          if (
+            srvSave.ok &&
+            srvSave.save &&
+            srvSave.save.state &&
+            srvSave.save.updatedAt > localLastTick + 5000
+          ) {
+            this.tribeName = sanitizeTribeName(srvSave.save.tribeName, this.tribeName);
+            this.lastServerSaveAt = srvSave.save.updatedAt;
+            this.callbacks.onCloudStateLoaded?.(srvSave.save.state, this.tribeName);
+          } else if (localState) {
+            await this.persistToServer(localState, guestToken);
+          }
+        } catch {
+          // ignore non-fatal guest save check
+        }
+      }
+
+      await this.pushCurrentSettlement(true);
     } catch {
-      // Offline or starting up — WebSocket reconnect will catch up
+      this.syncState = 'offline';
+      this.emitSession();
     }
   }
 
@@ -242,8 +328,15 @@ class DinoMultiplayerBridge {
     } else if (ev.type === 'world:settlement') {
       this.settlementsMap.set(ev.payload.uid, ev.payload);
       this.emitWorld();
+    } else if (ev.type === 'world:settlement_removed') {
+      this.settlementsMap.delete(ev.payload.uid);
+      this.emitWorld();
     } else if (ev.type === 'world:march') {
-      this.marchesMap.set(ev.payload.marchId, ev.payload);
+      if (ev.payload.status === 'completed') {
+        this.marchesMap.delete(ev.payload.marchId);
+      } else {
+        this.marchesMap.set(ev.payload.marchId, ev.payload);
+      }
       this.emitWorld();
     } else if (ev.type === 'chat:message') {
       this.chatMap.set(ev.payload.messageId, ev.payload);
@@ -266,16 +359,38 @@ class DinoMultiplayerBridge {
     if (!user) {
       this.cloudSynced = false;
       this.emitSession();
+      await this.ensureGuestToken();
+      await this.pushCurrentSettlement(true);
       return;
     }
 
-    // If user still has default guest tribe name and Google gives a first name, keep theirs unless empty
     if (user.displayName && this.tribeName.startsWith('Glutstamm ')) {
       const first = user.displayName.split(' ')[0] || 'Stamm';
-      this.setTribeName(`${first}s Stamm`);
+      this.tribeName = sanitizeTribeName(`${first}s Stamm`, this.tribeName);
+      try {
+        localStorage.setItem(TRIBE_NAME_KEY, this.tribeName);
+      } catch {
+        // ignore
+      }
     }
 
-    // Attach Firestore real-time multiplayer world listeners (authenticated only!)
+    // 1. Bestehende Gast-Siedlung atomar auf dem Spielserver auf die Google-UID migrieren
+    const fbToken = await getFirebaseIdToken(true);
+    if (fbToken && this.guestBearerToken) {
+      try {
+        const migrated = await postMigrateGuest(fbToken, this.guestBearerToken);
+        if (migrated.removedGuestUid) {
+          this.settlementsMap.delete(migrated.removedGuestUid);
+        }
+        if (migrated.settlement) {
+          this.settlementsMap.set(migrated.settlement.uid, migrated.settlement);
+        }
+      } catch {
+        // ignore if server unreachable
+      }
+    }
+
+    // 2. Echtzeit-Firestore-Listener für gemeinsame Weltkarte, Märsche & Welt-Chat aktivieren
     this.unsubFirestoreWorld = subscribeFirestoreWorld({
       onSettlements: (list) => {
         for (const s of list) {
@@ -288,7 +403,9 @@ class DinoMultiplayerBridge {
       },
       onMarches: (list) => {
         for (const m of list) {
-          this.marchesMap.set(m.marchId, m);
+          if (m.status === 'active') {
+            this.marchesMap.set(m.marchId, m);
+          }
         }
         this.emitWorld();
       },
@@ -300,33 +417,78 @@ class DinoMultiplayerBridge {
       },
     });
 
-    // Load Cloud Save or migrate local Guest save to Cloud Firestore!
+    // 3. Cloud Firestore & Server-Spielstand abgleichen (neuester Stand gewinnt)
     try {
-      const existingCloud = await loadCloudSave(user.uid);
-      if (existingCloud && existingCloud.state && Object.keys(existingCloud.state).length > 0) {
-        this.tribeName = sanitizeTribeName(existingCloud.tribeName, this.tribeName);
+      this.syncState = 'saving';
+      this.emitSession();
+
+      const [cloudSave, serverSaveResp] = await Promise.all([
+        loadCloudSave(user.uid),
+        fbToken ? fetchServerPlayerSave(fbToken).catch(() => null) : Promise.resolve(null),
+      ]);
+
+      const localState = this.callbacks.getCurrentLocalState?.() || null;
+      const localTs = Number((localState as { lastTick?: number } | null)?.lastTick || 0);
+      const cloudTs = cloudSave?.updatedAt || 0;
+      const serverTs = serverSaveResp?.save?.updatedAt || 0;
+
+      if (cloudSave && cloudTs >= serverTs && cloudTs > localTs + 3000) {
+        this.tribeName = sanitizeTribeName(cloudSave.tribeName, this.tribeName);
         try {
           localStorage.setItem(TRIBE_NAME_KEY, this.tribeName);
         } catch {
           // ignore
         }
         this.cloudSynced = true;
-        this.lastCloudSaveAt = existingCloud.updatedAt;
-        this.callbacks.onCloudStateLoaded?.(existingCloud.state, this.tribeName);
-      } else {
-        const localState = this.callbacks.getCurrentLocalState?.();
-        if (localState) {
-          await saveCloudState(user.uid, this.tribeName, localState, 1);
-          this.cloudSynced = true;
-          this.lastCloudSaveAt = Date.now();
+        this.lastCloudSaveAt = cloudSave.updatedAt;
+        this.callbacks.onCloudStateLoaded?.(cloudSave.state, this.tribeName);
+        if (fbToken) {
+          await this.persistToServer(cloudSave.state, fbToken);
+        }
+      } else if (serverSaveResp?.save && serverTs > cloudTs && serverTs > localTs + 3000) {
+        this.tribeName = sanitizeTribeName(serverSaveResp.save.tribeName, this.tribeName);
+        this.lastServerSaveAt = serverSaveResp.save.updatedAt;
+        this.callbacks.onCloudStateLoaded?.(serverSaveResp.save.state, this.tribeName);
+        await saveCloudState(user.uid, this.tribeName, serverSaveResp.save.state, 1);
+        this.cloudSynced = true;
+        this.lastCloudSaveAt = Date.now();
+      } else if (localState) {
+        await saveCloudState(user.uid, this.tribeName, localState, 1);
+        this.cloudSynced = true;
+        this.lastCloudSaveAt = Date.now();
+        if (fbToken) {
+          await this.persistToServer(localState, fbToken);
         }
       }
-      this.pushCurrentSettlement(true);
+
+      this.syncState = 'synced';
+      await this.pushCurrentSettlement(true);
     } catch (err) {
       console.error('[Cloud Save Sync]', err);
+      this.syncState = this.wsConnected ? 'synced' : 'offline';
     }
 
     this.emitSession();
+  }
+
+  private async persistToServer(
+    stateObj: Record<string, unknown>,
+    tokenOverride?: string | null
+  ): Promise<void> {
+    const token = tokenOverride ?? (await this.getActiveBearerToken());
+    if (!token) return;
+    try {
+      const res = await postServerPlayerSave(token, {
+        schemaVersion: 1,
+        tribeName: this.tribeName,
+        state: stateObj,
+      });
+      if (res.ok) {
+        this.lastServerSaveAt = res.updatedAt;
+      }
+    } catch {
+      // ignore offline server backup errors
+    }
   }
 
   async signInWithGoogle(): Promise<{ ok: boolean; error?: string }> {
@@ -355,14 +517,14 @@ class DinoMultiplayerBridge {
       // ignore
     }
     this.emitSession();
-    this.pushCurrentSettlement(false);
+    void this.pushCurrentSettlement(false);
     return clean;
   }
 
-  private pushCurrentSettlement(autoAssignIfOccupied: boolean): void {
+  private async pushCurrentSettlement(autoAssignIfOccupied: boolean): Promise<void> {
     const meta = this.callbacks.getCurrentSettlementMeta?.();
     if (!meta) return;
-    void this.syncSettlement({
+    await this.syncSettlement({
       bonfireLevel: meta.bonfireLevel,
       power: meta.power,
       tileX: meta.tileX,
@@ -379,16 +541,21 @@ class DinoMultiplayerBridge {
     autoAssignIfOccupied?: boolean;
   }): Promise<TeleportResponse | null> {
     const session = this.getSession();
+    const token = await this.getActiveBearerToken();
+    if (!token) return null;
+
     try {
-      const resp = await postSettlement({
-        uid: session.uid,
-        tribeName: session.tribeName,
-        bonfireLevel: payload.bonfireLevel,
-        power: payload.power,
-        tileX: payload.tileX,
-        tileY: payload.tileY,
-        autoAssignIfOccupied: payload.autoAssignIfOccupied ?? true,
-      });
+      const resp = await postSettlement(
+        {
+          tribeName: session.tribeName,
+          bonfireLevel: payload.bonfireLevel,
+          power: payload.power,
+          tileX: payload.tileX,
+          tileY: payload.tileY,
+          autoAssignIfOccupied: payload.autoAssignIfOccupied ?? true,
+        },
+        token
+      );
       if (resp.ok && resp.settlement) {
         this.settlementsMap.set(resp.settlement.uid, resp.settlement);
         this.emitWorld();
@@ -416,16 +583,22 @@ class DinoMultiplayerBridge {
     tileY: number;
   }): Promise<TeleportResponse> {
     const session = this.getSession();
+    const token = await this.getActiveBearerToken();
+    if (!token) {
+      return { ok: true, serverTimeMs: Date.now() };
+    }
     try {
-      const resp = await postSettlement({
-        uid: session.uid,
-        tribeName: session.tribeName,
-        bonfireLevel: payload.bonfireLevel,
-        power: payload.power,
-        tileX: payload.tileX,
-        tileY: payload.tileY,
-        autoAssignIfOccupied: false,
-      });
+      const resp = await postSettlement(
+        {
+          tribeName: session.tribeName,
+          bonfireLevel: payload.bonfireLevel,
+          power: payload.power,
+          tileX: payload.tileX,
+          tileY: payload.tileY,
+          autoAssignIfOccupied: false,
+        },
+        token
+      );
       if (resp.ok && resp.settlement) {
         this.settlementsMap.set(resp.settlement.uid, resp.settlement);
         this.emitWorld();
@@ -442,7 +615,6 @@ class DinoMultiplayerBridge {
       }
       return resp;
     } catch {
-      // Fallback if offline so local gameplay still works smoothly
       return { ok: true, serverTimeMs: Date.now() };
     }
   }
@@ -458,25 +630,30 @@ class DinoMultiplayerBridge {
     durationMs: number;
   }): Promise<void> {
     const session = this.getSession();
+    const token = await this.getActiveBearerToken();
     const now = Date.now() + this.serverOffsetMs;
     const marchId = sanitizeId(payload.marchId || `m_${now}_${Math.floor(Math.random() * 9999)}`);
-    try {
-      await postMarch({
-        marchId,
-        uid: session.uid,
-        tribeName: session.tribeName,
-        kind: payload.kind,
-        fromX: payload.fromX,
-        fromY: payload.fromY,
-        toX: payload.toX,
-        toY: payload.toY,
-        targetLabel: payload.targetLabel,
-        startedAt: now,
-        endsAt: now + Math.max(4000, payload.durationMs),
-        status: 'active',
-      });
-    } catch {
-      // ignore offline broadcast errors
+    if (token) {
+      try {
+        await postMarch(
+          {
+            marchId,
+            tribeName: session.tribeName,
+            kind: payload.kind,
+            fromX: payload.fromX,
+            fromY: payload.fromY,
+            toX: payload.toX,
+            toY: payload.toY,
+            targetLabel: payload.targetLabel,
+            startedAt: now,
+            endsAt: now + Math.max(4000, payload.durationMs),
+            status: 'active',
+          },
+          token
+        );
+      } catch {
+        // ignore offline broadcast errors
+      }
     }
     if (this.firebaseUser) {
       void publishMarchToFirestore({
@@ -490,6 +667,21 @@ class DinoMultiplayerBridge {
         toY: payload.toY,
         targetLabel: payload.targetLabel,
       }).catch(() => {});
+    }
+  }
+
+  async completeMarch(marchIdRaw: string): Promise<void> {
+    const marchId = sanitizeId(marchIdRaw);
+    if (marchId.length < 3) return;
+    this.marchesMap.delete(marchId);
+    this.emitWorld();
+
+    const token = await this.getActiveBearerToken();
+    if (token) {
+      void postMarch({ marchId, status: 'completed' }, token).catch(() => {});
+    }
+    if (this.firebaseUser) {
+      void completeMarchInFirestore(marchId).catch(() => {});
     }
   }
 
@@ -513,16 +705,20 @@ class DinoMultiplayerBridge {
     const clean = String(text || '').trim().slice(0, 240);
     if (!clean) return { ok: false, error: 'Nachricht ist leer.' };
     const session = this.getSession();
-    const messageId = sanitizeId(`msg_${Date.now()}_${Math.floor(Math.random() * 99999)}`);
+    const token = await this.getActiveBearerToken();
+    if (!token) return { ok: false, error: 'Keine Serververbindung.' };
 
+    const messageId = sanitizeId(`msg_${Date.now()}_${Math.floor(Math.random() * 99999)}`);
     try {
-      const resp = await postChatMessage({
-        messageId,
-        uid: session.uid,
-        tribeName: session.tribeName,
-        bonfireLevel,
-        text: clean,
-      });
+      const resp = await postChatMessage(
+        {
+          messageId,
+          tribeName: session.tribeName,
+          bonfireLevel,
+          text: clean,
+        },
+        token
+      );
       if (resp.ok && resp.message) {
         this.chatMap.set(resp.message.messageId, resp.message);
         this.emitChat();
@@ -543,31 +739,38 @@ class DinoMultiplayerBridge {
   }
 
   saveToCloud(stateObj: Record<string, unknown>, immediate = false): void {
-    if (!this.firebaseUser) return;
-    const uid = this.firebaseUser.uid;
     const runSave = async () => {
+      this.syncState = 'saving';
+      this.emitSession();
       try {
-        await saveCloudState(uid, this.tribeName, stateObj, 1);
-        this.cloudSynced = true;
-        this.lastCloudSaveAt = Date.now();
-        this.emitSession();
+        // 1. Immer auf dem Spielserver dauerhaft sichern (für Gäste & Google-Konten)
+        await this.persistToServer(stateObj);
+        // 2. Bei verknüpftem Google-Konto zusätzlich in Cloud Firestore sichern
+        if (this.firebaseUser) {
+          await saveCloudState(this.firebaseUser.uid, this.tribeName, stateObj, 1);
+          this.cloudSynced = true;
+          this.lastCloudSaveAt = Date.now();
+        }
+        this.syncState = this.wsConnected ? 'synced' : 'offline';
       } catch (err) {
-        console.error('[Cloud Save Fehler]', err);
+        console.error('[Persistenz-Sync Fehler]', err);
+        this.syncState = this.wsConnected ? 'synced' : 'offline';
       }
+      this.emitSession();
     };
 
-    if (this.cloudSaveTimer !== null) {
-      window.clearTimeout(this.cloudSaveTimer);
-      this.cloudSaveTimer = null;
+    if (this.saveTimer !== null) {
+      window.clearTimeout(this.saveTimer);
+      this.saveTimer = null;
     }
 
     if (immediate) {
       void runSave();
     } else {
-      this.cloudSaveTimer = window.setTimeout(() => {
-        this.cloudSaveTimer = null;
+      this.saveTimer = window.setTimeout(() => {
+        this.saveTimer = null;
         void runSave();
-      }, 2500);
+      }, 2200);
     }
   }
 

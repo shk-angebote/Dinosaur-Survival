@@ -1,9 +1,13 @@
 /* eslint-disable */
 // Extrahierte Spiel-Engine aus dem ursprünglichen Monolithen — sauber eingebunden in die React/TypeScript-Struktur.
 let runtimeInitialized = false;
+let runtimeHandle = {
+  jumpToWorldTile() {},
+  forceSave() {},
+};
 
 export function initGameRuntime(hooks = {}) {
-  if (runtimeInitialized) return;
+  if (runtimeInitialized) return runtimeHandle;
   runtimeInitialized = true;
 
   const notifyReact = (snapshot) => {
@@ -3719,6 +3723,9 @@ export function initGameRuntime(hooks = {}) {
                     }
                   }
                   completed = true;
+                  if (window.DinoMultiplayer && march.id) {
+                    window.DinoMultiplayer.completeMarch(march.id);
+                  }
                   break;
                 }
               }
@@ -3778,6 +3785,9 @@ export function initGameRuntime(hooks = {}) {
                   }
                 }
                 completed = true;
+                if (window.DinoMultiplayer && march.id) {
+                  window.DinoMultiplayer.completeMarch(march.id);
+                }
                 break;
               }
             }
@@ -9035,4 +9045,39 @@ export function initGameRuntime(hooks = {}) {
   };
   emitSnapshot();
   setInterval(emitSnapshot, 1000);
+
+  runtimeHandle = {
+    jumpToWorldTile(tileX, tileY) {
+      try {
+        if (typeof switchTab === "function") switchTab("worldmap");
+        const pxX = (Number(tileX) + 1) * WORLD_TILE_SIZE;
+        const pxY = (Number(tileY) + 1) * WORLD_TILE_SIZE;
+        const xPct = (pxX / WORLD_MAP_WIDTH) * 100;
+        const yPct = (pxY / WORLD_MAP_HEIGHT) * 100;
+        if (typeof centerWorldMapOn === "function") {
+          setTimeout(() => centerWorldMapOn(xPct, yPct), 60);
+        }
+      } catch {
+        // ignore
+      }
+    },
+    forceSave() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      } catch {
+        // ignore
+      }
+      if (window.DinoMultiplayer) {
+        window.DinoMultiplayer.saveToCloud(state, true);
+        window.DinoMultiplayer.syncSettlement({
+          bonfireLevel: state.buildings.bonfire.level,
+          power: computeVillagePowerMp(),
+          tileX: state.homeTile.x,
+          tileY: state.homeTile.y,
+          autoAssignIfOccupied: true
+        });
+      }
+    }
+  };
+  return runtimeHandle;
 }

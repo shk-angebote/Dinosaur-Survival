@@ -20,6 +20,7 @@ import {
   query,
   serverTimestamp,
   setDoc,
+  updateDoc,
   where,
   type Firestore,
   type Unsubscribe,
@@ -138,6 +139,15 @@ export async function signInWithGooglePopup(): Promise<User> {
 
 export async function signOutFirebase(): Promise<void> {
   await signOut(auth);
+}
+
+export async function getFirebaseIdToken(forceRefresh = false): Promise<string | null> {
+  if (!auth.currentUser) return null;
+  try {
+    return await auth.currentUser.getIdToken(forceRefresh);
+  } catch {
+    return null;
+  }
 }
 
 // --- Private Cloud Save & Public Profile ---
@@ -278,6 +288,24 @@ export async function publishMarchToFirestore(march: {
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export async function completeMarchInFirestore(marchIdRaw: string): Promise<void> {
+  if (!auth.currentUser) return;
+  const marchId = sanitizeId(marchIdRaw);
+  if (marchId.length < 3) return;
+  const path = `world_marches/${marchId}`;
+  try {
+    await updateDoc(doc(db, 'world_marches', marchId), {
+      status: 'completed',
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    // Ignoriere not-found falls der Marsch nur lokal/auf dem Server existierte
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.includes('No document to update') || msg.includes('not-found')) return;
+    handleFirestoreError(error, OperationType.UPDATE, path);
   }
 }
 

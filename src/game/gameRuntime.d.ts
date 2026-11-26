@@ -5,8 +5,13 @@ export interface GameRuntimeSnapshot {
   started: boolean;
 }
 
+export interface GameRuntimeHandle {
+  jumpToWorldTile: (tileX: number, tileY: number) => void;
+  forceSave: () => void;
+}
+
 export interface GameRuntimeHooks {
   onSnapshot?: (snapshot: GameRuntimeSnapshot) => void;
 }
 
-export function initGameRuntime(hooks?: GameRuntimeHooks): void;
+export function initGameRuntime(hooks?: GameRuntimeHooks): GameRuntimeHandle;

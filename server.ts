@@ -1,7 +1,8 @@
 /**
  * Dinosaur Survival (Glut & Basalt) — Zentraler Spielserver (Node.js + Express + WebSockets)
  * Einheitliche, dokumentierte API (/api/v1/...) für Web-Client (React/Three.js) und späteren Unity-Client.
- * Läuft auf Port 3000 (Entwicklung mit Vite-Middleware, Produktion mit statischem dist/-Build auf Cloud Run).
+ * Verbindet kryptographisch geprüfte Firebase Auth ID-Tokens, signierte Gast-Sessions,
+ * dauerhafte Welt-Speicherung und Echtzeit-WebSockets auf Port 3000.
  */
 
 import http from 'http';
@@ -16,7 +17,7 @@ import type {
   TeleportRequest,
   WorldChatMessageDTO,
   WorldMarchDTO,
-  WorldSettlementDTO
+  WorldSettlementDTO,
 } from './src/shared/apiTypes.js';
 import { getPublicGameConfig } from './src/shared/gameConfig.js';
 import {
@@ -25,8 +26,15 @@ import {
   getChunkKey,
   resolveAuthoritativeDinoHunt,
   validateBuildingUpgrade,
-  validateSettlementPlacement2x2
+  validateSettlementPlacement2x2,
 } from './src/shared/gameEngine.js';
+import {
+  FIREBASE_PROJECT_ID,
+  issueGuestSessionToken,
+  verifyBearerHeader,
+  verifyGuestSessionToken,
+} from './src/server/firebaseTokenVerifier.js';
+import { PersistentWorldStore } from './src/server/worldStore.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -34,39 +42,33 @@ const __dirname = path.dirname(__filename);
 const PORT = Number(process.env.PORT || 3000);
 const isProd = process.env.NODE_ENV === 'production';
 
-// Serverseitiger, autoritativer Multiplayer-Weltzustand (in Cloud Run später zusätzlich via Firestore/RTDB gespiegelt)
+// Dauerhafter, autoritativer Multiplayer-Weltzustand (überlebt Server-Neustarts)
 const staticWorldGrid = createStaticWorldGrid();
-const settlements = new Map<string, WorldSettlementDTO>();
-const activeMarches = new Map<string, WorldMarchDTO>();
-const chatHistory: WorldChatMessageDTO[] = [];
-
-// Initiale Begrüßungsnachricht im Welt-Chat
-chatHistory.push({
-  messageId: 'sys_welcome_1',
-  uid: 'system_caldera',
-  tribeName: 'Caldera-Chronik',
-  bonfireLevel: 25,
-  text: 'Willkommen in der gemeinsamen Dinosaurierwelt! Baue dein Signalfeuer aus, jage wilde Saurier und tausche dich hier mit anderen Stämmen aus.',
-  channel: 'world',
-  createdAt: Date.now()
-});
+const worldStore = new PersistentWorldStore();
 
 function sanitizeText(raw: unknown, maxLen: number): string {
   if (typeof raw !== 'string') return '';
   return raw.replace(/[\u0000-\u001F\u007F]/g, '').trim().slice(0, maxLen);
 }
 
-function isValidUid(raw: unknown): raw is string {
-  return typeof raw === 'string' && raw.length >= 2 && raw.length <= 128 && /^[a-zA-Z0-9_\-]+$/.test(raw);
+function isValidId(raw: unknown): raw is string {
+  return (
+    typeof raw === 'string' &&
+    raw.length >= 2 &&
+    raw.length <= 128 &&
+    /^[a-zA-Z0-9_\-]+$/.test(raw)
+  );
 }
 
-function pruneExpiredMarches(nowMs: number) {
-  for (const [id, m] of activeMarches.entries()) {
-    if (m.endsAt + 15000 < nowMs) {
-      activeMarches.delete(id);
-    }
-  }
-}
+process.on('SIGTERM', () => {
+  worldStore.flushSync();
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  worldStore.flushSync();
+  process.exit(0);
+});
 
 async function startServer() {
   const app = express();
@@ -105,38 +107,46 @@ async function startServer() {
 
   function buildWorldSnapshot() {
     const nowMs = Date.now();
-    pruneExpiredMarches(nowMs);
+    worldStore.pruneExpiredMarches(nowMs);
     return {
       serverTimeMs: nowMs,
       onlinePlayers: getOnlineCount(),
-      settlements: Array.from(settlements.values()),
-      marches: Array.from(activeMarches.values()),
-      chat: chatHistory.slice(-60)
+      settlements: Array.from(worldStore.settlements.values()),
+      marches: Array.from(worldStore.activeMarches.values()),
+      chat: worldStore.chatHistory.slice(-60),
     };
   }
 
   wss.on('connection', (ws) => {
-    // Initialen Weltzustand senden
     const initEvent: RealtimeEvent = { type: 'world:init', payload: buildWorldSnapshot() };
     ws.send(JSON.stringify(initEvent));
-    broadcast({ type: 'world:presence', payload: { onlinePlayers: getOnlineCount(), serverTimeMs: Date.now() } });
+    broadcast({
+      type: 'world:presence',
+      payload: { onlinePlayers: getOnlineCount(), serverTimeMs: Date.now() },
+    });
 
     ws.on('close', () => {
-      broadcast({ type: 'world:presence', payload: { onlinePlayers: getOnlineCount(), serverTimeMs: Date.now() } });
+      broadcast({
+        type: 'world:presence',
+        payload: { onlinePlayers: getOnlineCount(), serverTimeMs: Date.now() },
+      });
     });
   });
 
   // ==================== DOKUMENTIERTE SPIEL-API (/api/v1/...) ====================
 
-  // 1. Server-Status & autoritative Server-Uhr (für Web & Unity Zeit-Synchronisation)
+  // 1. Server-Status & autoritative Server-Uhr
   app.get('/api/v1/health', (_req, res) => {
     res.json({
       ok: true,
       service: 'dinosaur-survival-server',
       apiVersion: 'v1',
+      firebaseProjectLinked: Boolean(FIREBASE_PROJECT_ID),
+      persistentStoreActive: true,
       serverTimeMs: Date.now(),
       onlinePlayers: getOnlineCount(),
-      settlementsCount: settlements.size
+      settlementsCount: worldStore.settlements.size,
+      savesCount: worldStore.playerSaves.size,
     });
   });
 
@@ -144,11 +154,110 @@ async function startServer() {
   app.get('/api/v1/config', (_req, res) => {
     res.json({
       serverTimeMs: Date.now(),
-      config: getPublicGameConfig()
+      config: getPublicGameConfig(),
     });
   });
 
-  // 3. Serverseitige Bauzeit- & Kostenprüfung
+  // 3. Signierte Gast-Sitzung anfordern (sofort online spielbar ohne Account-Zwang)
+  app.post('/api/v1/auth/guest', (req, res) => {
+    const body = (req.body || {}) as { existingGuestUid?: string };
+    const issued = issueGuestSessionToken(body.existingGuestUid);
+    res.json({
+      ok: true,
+      uid: issued.uid,
+      token: issued.token,
+      expiresAtMs: issued.expiresAtMs,
+      serverTimeMs: Date.now(),
+    });
+  });
+
+  // 4. Serverseitiger Spielstand (Lesen & Speichern — geschützt durch Firebase ID-Token oder Gast-Token)
+  app.get('/api/v1/player/save', async (req, res) => {
+    const identity = await verifyBearerHeader(req.headers.authorization);
+    if (!identity) {
+      res.status(401).json({ ok: false, error: 'Authentifizierung erforderlich.' });
+      return;
+    }
+    const save = worldStore.getPlayerSave(identity.uid);
+    res.json({
+      ok: true,
+      uid: identity.uid,
+      provider: identity.provider,
+      save,
+      serverTimeMs: Date.now(),
+    });
+  });
+
+  app.post('/api/v1/player/save', async (req, res) => {
+    const identity = await verifyBearerHeader(req.headers.authorization);
+    if (!identity) {
+      res.status(401).json({ ok: false, error: 'Authentifizierung erforderlich.' });
+      return;
+    }
+    const body = (req.body || {}) as {
+      schemaVersion?: number;
+      tribeName?: string;
+      state?: unknown;
+    };
+    if (!body.state || typeof body.state !== 'object' || Array.isArray(body.state)) {
+      res.status(400).json({ ok: false, error: 'Ungültiger Spielstand.' });
+      return;
+    }
+    const schemaVersion = Math.max(1, Math.min(50, Math.floor(Number(body.schemaVersion || 1))));
+    const tribeName = sanitizeText(body.tribeName || 'Glutstamm', 28) || 'Glutstamm';
+    const nowMs = Date.now();
+    const record = {
+      uid: identity.uid,
+      schemaVersion,
+      tribeName,
+      state: body.state as Record<string, unknown>,
+      updatedAt: nowMs,
+    };
+    worldStore.upsertPlayerSave(record);
+    res.json({
+      ok: true,
+      uid: identity.uid,
+      updatedAt: nowMs,
+      serverTimeMs: nowMs,
+    });
+  });
+
+  // 5. Gast-Siedlung & Spielstand atomar auf verifiziertes Google/Firebase-Konto übertragen
+  app.post('/api/v1/world/migrate-guest', async (req, res) => {
+    const identity = await verifyBearerHeader(req.headers.authorization);
+    if (!identity || identity.provider !== 'firebase') {
+      res.status(401).json({ ok: false, error: 'Verifiziertes Firebase-Konto erforderlich.' });
+      return;
+    }
+    const body = (req.body || {}) as { guestToken?: string };
+    const guestIdentity =
+      typeof body.guestToken === 'string' ? verifyGuestSessionToken(body.guestToken) : null;
+    if (!guestIdentity) {
+      res.json({
+        ok: true,
+        removedGuestUid: null,
+        settlement: worldStore.settlements.get(identity.uid) || null,
+        serverTimeMs: Date.now(),
+      });
+      return;
+    }
+
+    const migrated = worldStore.migrateGuestToVerifiedUid(guestIdentity.uid, identity.uid);
+    if (migrated.removedGuestUid) {
+      broadcast({ type: 'world:settlement_removed', payload: { uid: migrated.removedGuestUid } });
+    }
+    if (migrated.migratedSettlement) {
+      broadcast({ type: 'world:settlement', payload: migrated.migratedSettlement });
+    }
+    res.json({
+      ok: true,
+      removedGuestUid: migrated.removedGuestUid,
+      settlement: migrated.migratedSettlement || worldStore.settlements.get(identity.uid) || null,
+      serverTimeMs: Date.now(),
+    });
+  });
+
+  // 6. Serverseitige Bauzeit- & Kostenprüfung
   app.post('/api/v1/economy/validate-build', (req, res) => {
     const body = req.body as Partial<BuildValidationRequest>;
     if (!body || typeof body.buildingId !== 'string' || typeof body.currentLevel !== 'number') {
@@ -161,14 +270,14 @@ async function startServer() {
         currentLevel: body.currentLevel,
         bonfireLevel: Number(body.bonfireLevel || 1),
         resources: body.resources || { meat: 0, wood: 0, stone: 0, fur: 0 },
-        techBuildSpeedBonus: Number(body.techBuildSpeedBonus || 0)
+        techBuildSpeedBonus: Number(body.techBuildSpeedBonus || 0),
       },
       Date.now()
     );
     res.json(result);
   });
 
-  // 4. Serverseitige Dino-Jagd Kampfberechnung (Anti-Cheat, Runden-Log + Beute)
+  // 7. Serverseitige Dino-Jagd Kampfberechnung (Anti-Cheat, Runden-Log + Beute)
   app.post('/api/v1/combat/dino-hunt', (req, res) => {
     const body = req.body as Partial<DinoHuntCombatRequest>;
     if (!body || typeof body.speciesId !== 'string' || typeof body.squadPower !== 'number') {
@@ -182,35 +291,52 @@ async function startServer() {
         dinoLevel: Number(body.dinoLevel || 1),
         squadPower: Number(body.squadPower || 1),
         heroes: Array.isArray(body.heroes) ? body.heroes.slice(0, 3) : [],
-        troops: body.troops || { slinger: 0, clubman: 0, dinorider: 0 }
+        troops: body.troops || { slinger: 0, clubman: 0, dinorider: 0 },
       },
       Date.now()
     );
     res.json(result);
   });
 
-  // 5. Gemeinsamer Multiplayer-Weltkarten-Zustand
+  // 8. Gemeinsamer Multiplayer-Weltkarten-Zustand
   app.get('/api/v1/world/state', (_req, res) => {
     res.json(buildWorldSnapshot());
   });
 
-  // 6. Spielerdorf auf der gemeinsamen 48x27-Weltkarte registrieren oder atomar teleportieren
-  app.post('/api/v1/world/settlement', (req, res) => {
-    const body = req.body as Partial<TeleportRequest> & { autoAssignIfOccupied?: boolean };
-    if (!isValidUid(body?.uid)) {
-      res.status(400).json({ ok: false, reason: 'Ungültige Spieler-ID.', serverTimeMs: Date.now() });
+  // 9. Spielerdorf auf der gemeinsamen 48x27-Weltkarte registrieren oder atomar teleportieren
+  app.post('/api/v1/world/settlement', async (req, res) => {
+    const identity = await verifyBearerHeader(req.headers.authorization);
+    if (!identity) {
+      res
+        .status(401)
+        .json({ ok: false, reason: 'Sitzungstoken erforderlich.', serverTimeMs: Date.now() });
       return;
     }
+
+    const body = (req.body || {}) as Partial<TeleportRequest> & { autoAssignIfOccupied?: boolean };
+    const verifiedUid = identity.uid;
     const tribeName = sanitizeText(body.tribeName || 'Urzeit-Stamm', 28) || 'Urzeit-Stamm';
     const bonfireLevel = Math.max(1, Math.min(25, Math.floor(Number(body.bonfireLevel || 1))));
     const power = Math.max(0, Math.min(100_000_000, Math.floor(Number(body.power || 0))));
     let tileX = Math.floor(Number(body.tileX ?? 10));
     let tileY = Math.floor(Number(body.tileY ?? 20));
 
-    const check = validateSettlementPlacement2x2(staticWorldGrid, settlements.values(), body.uid, tileX, tileY);
+    const check = validateSettlementPlacement2x2(
+      staticWorldGrid,
+      worldStore.settlements.values(),
+      verifiedUid,
+      tileX,
+      tileY
+    );
     if (!check.valid) {
       if (body.autoAssignIfOccupied) {
-        const spot = findFree2x2Spot(staticWorldGrid, settlements.values(), body.uid, tileX, tileY);
+        const spot = findFree2x2Spot(
+          staticWorldGrid,
+          worldStore.settlements.values(),
+          verifiedUid,
+          tileX,
+          tileY
+        );
         tileX = spot.tileX;
         tileY = spot.tileY;
       } else {
@@ -220,58 +346,70 @@ async function startServer() {
     }
 
     const dto: WorldSettlementDTO = {
-      uid: body.uid,
+      uid: verifiedUid,
       tribeName,
       bonfireLevel,
       power,
       tileX,
       tileY,
       chunkKey: getChunkKey(tileX, tileY),
-      updatedAt: Date.now()
+      updatedAt: Date.now(),
     };
-    settlements.set(dto.uid, dto);
+    worldStore.upsertSettlement(dto);
     broadcast({ type: 'world:settlement', payload: dto });
     res.json({ ok: true, settlement: dto, serverTimeMs: dto.updatedAt });
   });
 
-  // 7. Aktiven Marsch für alle Spieler auf der Weltkarte sichtbar machen
-  app.post('/api/v1/world/march', (req, res) => {
-    const body = req.body as Partial<WorldMarchDTO>;
-    if (!isValidUid(body?.uid) || !isValidUid(body?.marchId)) {
-      res.status(400).json({ ok: false, error: 'Ungültige Marsch-Daten.' });
+  // 10. Aktiven Marsch für alle Spieler auf der Weltkarte sichtbar machen / beenden
+  app.post('/api/v1/world/march', async (req, res) => {
+    const identity = await verifyBearerHeader(req.headers.authorization);
+    if (!identity) {
+      res.status(401).json({ ok: false, error: 'Sitzungstoken erforderlich.' });
       return;
     }
+    const body = (req.body || {}) as Partial<WorldMarchDTO>;
+    if (!isValidId(body.marchId)) {
+      res.status(400).json({ ok: false, error: 'Ungültige Marsch-ID.' });
+      return;
+    }
+    const existing = worldStore.activeMarches.get(body.marchId);
+    if (existing && existing.uid !== identity.uid) {
+      res.status(403).json({ ok: false, error: 'Keine Berechtigung für diesen Marsch.' });
+      return;
+    }
+
     const nowMs = Date.now();
     const dto: WorldMarchDTO = {
       marchId: body.marchId,
-      uid: body.uid,
-      tribeName: sanitizeText(body.tribeName || 'Urzeit-Stamm', 28) || 'Urzeit-Stamm',
+      uid: identity.uid,
+      tribeName: sanitizeText(body.tribeName || existing?.tribeName || 'Urzeit-Stamm', 28) || 'Urzeit-Stamm',
       kind: body.kind === 'hunt' ? 'hunt' : 'gather',
-      fromX: Math.max(0, Math.min(100, Number(body.fromX || 0))),
-      fromY: Math.max(0, Math.min(100, Number(body.fromY || 0))),
-      toX: Math.max(0, Math.min(100, Number(body.toX || 0))),
-      toY: Math.max(0, Math.min(100, Number(body.toY || 0))),
-      targetLabel: sanitizeText(body.targetLabel || 'Ziel', 64) || 'Ziel',
-      startedAt: Number(body.startedAt || nowMs),
-      endsAt: Number(body.endsAt || nowMs + 15000),
-      status: body.status === 'completed' ? 'completed' : 'active'
+      fromX: Math.max(0, Math.min(100, Number(body.fromX ?? existing?.fromX ?? 0))),
+      fromY: Math.max(0, Math.min(100, Number(body.fromY ?? existing?.fromY ?? 0))),
+      toX: Math.max(0, Math.min(100, Number(body.toX ?? existing?.toX ?? 0))),
+      toY: Math.max(0, Math.min(100, Number(body.toY ?? existing?.toY ?? 0))),
+      targetLabel: sanitizeText(body.targetLabel || existing?.targetLabel || 'Ziel', 64) || 'Ziel',
+      startedAt: Number(body.startedAt || existing?.startedAt || nowMs),
+      endsAt: Number(body.endsAt || existing?.endsAt || nowMs + 15000),
+      status: body.status === 'completed' ? 'completed' : 'active',
     };
-    activeMarches.set(dto.marchId, dto);
+    worldStore.upsertMarch(dto);
     broadcast({ type: 'world:march', payload: dto });
     res.json({ ok: true, march: dto, serverTimeMs: nowMs });
   });
 
-  // 8. Globaler Welt-Chat (Lesen & Senden)
+  // 11. Globaler Welt-Chat (Lesen & authentifiziertes Senden)
   app.get('/api/v1/chat', (_req, res) => {
-    res.json({ serverTimeMs: Date.now(), messages: chatHistory.slice(-60) });
+    res.json({ serverTimeMs: Date.now(), messages: worldStore.chatHistory.slice(-60) });
   });
 
-  app.post('/api/v1/chat', (req, res) => {
-    const body = req.body as Partial<WorldChatMessageDTO>;
-    if (!isValidUid(body?.uid)) {
-      res.status(400).json({ ok: false, error: 'Ungültige Spieler-ID.' });
+  app.post('/api/v1/chat', async (req, res) => {
+    const identity = await verifyBearerHeader(req.headers.authorization);
+    if (!identity) {
+      res.status(401).json({ ok: false, error: 'Sitzungstoken erforderlich.' });
       return;
     }
+    const body = (req.body || {}) as Partial<WorldChatMessageDTO>;
     const text = sanitizeText(body.text, 240);
     if (!text) {
       res.status(400).json({ ok: false, error: 'Nachricht darf nicht leer sein.' });
@@ -279,18 +417,17 @@ async function startServer() {
     }
     const nowMs = Date.now();
     const msg: WorldChatMessageDTO = {
-      messageId: isValidUid(body.messageId) ? body.messageId : `msg_${nowMs}_${Math.floor(Math.random() * 9999)}`,
-      uid: body.uid,
+      messageId: isValidId(body.messageId)
+        ? body.messageId
+        : `msg_${nowMs}_${Math.floor(Math.random() * 9999)}`,
+      uid: identity.uid,
       tribeName: sanitizeText(body.tribeName || 'Urzeit-Stamm', 28) || 'Urzeit-Stamm',
       bonfireLevel: Math.max(1, Math.min(25, Math.floor(Number(body.bonfireLevel || 1)))),
       text,
       channel: 'world',
-      createdAt: nowMs
+      createdAt: nowMs,
     };
-    if (!chatHistory.some((m) => m.messageId === msg.messageId)) {
-      chatHistory.push(msg);
-      if (chatHistory.length > 100) chatHistory.shift();
-    }
+    worldStore.appendChat(msg);
     broadcast({ type: 'chat:message', payload: msg });
     res.json({ ok: true, message: msg, serverTimeMs: nowMs });
   });
@@ -303,9 +440,9 @@ async function startServer() {
       server: {
         middlewareMode: true,
         hmr: false,
-        watch: null
+        watch: null,
       },
-      appType: 'spa'
+      appType: 'spa',
     });
 
     // Im Preview-Modus (HMR deaktiviert) verhindert dieser leichtgewichtige @vite/client-Stub
@@ -361,7 +498,9 @@ export class ErrorOverlay extends HTMLElement {}
   }
 
   server.listen(PORT, '0.0.0.0', () => {
-    console.log(`[Dinosaur Survival Server] Läuft auf http://0.0.0.0:${PORT} (API v1 + WebSocket /ws)`);
+    console.log(
+      `[Dinosaur Survival Server] Läuft auf http://0.0.0.0:${PORT} (API v1 + WebSocket /ws + Persistent Store)`
+    );
   });
 }
 
