@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dino Survival - Ausrüstungskisten & Klassen-Gear</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; user-select: none; }
+    body { background: #121010; color: #f0e6d2; display: flex; justify-content: center; min-height: 100vh; padding: 12px; }
+    .screen { width: 100%; max-width: 440px; background: #1a1716; border: 2px solid #3c3228; border-radius: 14px; display: flex; flex-direction: column; overflow: hidden; }
+    
+    /* Top Bar */
+    .top-bar { background: #26201c; padding: 10px 14px; border-bottom: 2px solid #4a3a2a; display: flex; justify-content: space-between; align-items: center; }
+    .fire-badge { font-size: 12px; background: #171311; padding: 4px 8px; border-radius: 6px; border: 1px solid #5a4025; }
+
+    /* Kisten-Bereich */
+    .chest-bar { background: #221b16; padding: 10px; border-bottom: 2px solid #3c2d20; display: flex; justify-content: space-between; align-items: center; }
+    .chest-btn { background: #b8621b; border: 1px solid #e08c38; color: #fff; font-size: 11px; font-weight: bold; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
+    .chest-btn:hover { background: #d47624; }
+
+    /* Navigation / Tabs */
+    .tab-bar { display: flex; background: #171311; border-bottom: 1px solid #3d3023; }
+    .tab-btn { flex: 1; padding: 8px; font-size: 11px; background: none; border: none; color: #a4917b; cursor: pointer; border-bottom: 2px solid transparent; font-weight: bold; }
+    .tab-btn.active { color: #f5a623; border-bottom-color: #f5a623; background: #221a16; }
+
+    /* Content Area */
+    .main-content { padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; height: calc(100vh - 150px); }
+
+    /* Hero Card */
+    .hero-card { background: #231d18; border: 2px solid #8e682d; border-radius: 10px; padding: 12px; }
+    .hero-meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .role-tag { font-size: 11px; padding: 2px 6px; border-radius: 4px; font-weight: bold; }
+    .role-melee { background: #61231f; color: #ff9b94; border: 1px solid #943a34; }
+    .role-tank { background: #244b28; color: #8fe896; border: 1px solid #3c7d42; }
+    .role-ranged { background: #1f3e5e; color: #8ec3f8; border: 1px solid #336599; }
+
+    /* Rarity Styles */
+    .rarity-grey { border-color: #777 !important; color: #bbb; }
+    .rarity-green { border-color: #3bb353 !important; color: #6ef588; }
+    .rarity-blue { border-color: #3182ce !important; color: #63b3ed; }
+    .rarity-purple { border-color: #805ad5 !important; color: #b794f4; }
+    .rarity-gold { border-color: #d69e2e !important; color: #f6e05e; }
+
+    /* Ausrüstungs-Slots */
+    .equip-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
+    .equip-slot { background: #161210; border: 1px dashed #4d3824; border-radius: 6px; padding: 8px; min-height: 64px; display: flex; flex-direction: column; justify-content: space-between; font-size: 11px; }
+    .equip-slot.filled { border-style: solid; background: #1c1613; }
+    .slot-action-btn { background: #3d2c1e; border: 1px solid #6b4d32; color: #e6cead; border-radius: 4px; padding: 2px 6px; cursor: pointer; font-size: 10px; align-self: flex-start; margin-top: 4px; }
+    .slot-action-btn.unequip { background: #5c2020; border-color: #8c3838; }
+
+    /* Inventar Kacheln */
+    .inv-item { background: #1a1512; border: 1px solid #3d2f23; border-radius: 6px; padding: 8px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 11px; }
+  </style>
+</head>
+<body>
+
+<div class="screen">
+  <!-- Top Bar -->
+  <div class="top-bar">
+    <div style="font-weight:bold; font-size:14px; color:#ffb443;">🔥 Dino Survival Gear</div>
+    <div class="fire-badge">Signalfeuer: <strong>St. 10</strong> (Freigeschaltet)</div>
+  </div>
+
+  <!-- Kisten & Inventar-Header -->
+  <div class="chest-bar">
+    <div>
+      <div style="font-size:12px; font-weight:bold;">📦 Ausrüstungskisten: <span id="lblChests" style="color:#f5a623;">3</span></div>
+      <div style="font-size:10px; color:#9c8570;">Wildnis & Heldenhöhle</div>
+    </div>
+    <div style="display:flex; gap:6px;">
+      <button class="chest-btn" onclick="addChest()">+ Kiste finden</button>
+      <button class="chest-btn" style="background:#3d6e32; border-color:#5ca84d;" onclick="openChest()">Öffnen</button>
+    </div>
+  </div>
+
+  <!-- Helden-Umschalter -->
+  <div class="tab-bar">
+    <button class="tab-btn active" id="tab0" onclick="selectHero(0)">Kragor (Nahkampf)</button>
+    <button class="tab-btn" id="tab1" onclick="selectHero(1)">Tora (Tank)</button>
+    <button class="tab-btn" id="tab2" onclick="selectHero(2)">Nok (Fernkampf)</button>
+  </div>
+
+  <div class="main-content">
+    <!-- Ausgewählter Held & angelegte Ausrüstung -->
+    <div class="hero-card">
+      <div class="hero-meta">
+        <div>
+          <strong id="heroName" style="font-size:15px; color:#ffcc66;">Kragor Faust</strong>
+          <div style="font-size:11px; color:#aa9580;" id="heroStats">Gesamtmacht: 124.000</div>
+        </div>
+        <span class="role-tag role-melee" id="heroRoleTag">Nahkampf</span>
+      </div>
+
+      <div style="font-size:12px; font-weight:bold; color:#e09440; margin-top:8px;">Angelegte Klassen-Ausrüstung:</div>
+      <div class="equip-grid" id="equipGrid"></div>
+    </div>
+
+    <!-- Rucksack / Gear-Inventar passend zur Klasse -->
+    <div class="hero-card" style="border-color:#4a3726;">
+      <div style="font-size:12px; font-weight:bold; color:#d4a059; margin-bottom:6px;">
+        Verfügbares Inventar für <span id="lblFilterRole">Nahkampf</span>:
+      </div>
+      <div id="inventoryList"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  let chestCount = 3;
+  let activeHeroIdx = 0;
+
+  const heroes = [
+    {
+      id: 'kragor',
+      name: 'Kragor Faust',
+      role: 'melee',
+      roleLabel: 'Nahkampf',
+      roleClass: 'role-melee',
+      equipped: { waffe: null, ruestung: null, helm: null, amulett: null }
+    },
+    {
+      id: 'tora',
+      name: 'Tora Echsenklaue',
+      role: 'tank',
+      roleLabel: 'Tank',
+      roleClass: 'role-tank',
+      equipped: { waffe: null, ruestung: null, helm: null, amulett: null }
+    },
+    {
+      id: 'nok',
+      name: 'Nok Wurfflink',
+      role: 'ranged',
+      roleLabel: 'Fernkampf',
+      roleClass: 'role-ranged',
+      equipped: { waffe: null, ruestung: null, helm: null, amulett: null }
+    }
+  ];
+
+  // Globales Ausrüstungs-Inventar
+  let equipmentBag = [
+    { id: 1, slot: 'waffe', role: 'melee', name: 'Obsidian-Keule', rarity: 'green', stat: '+240 ATK' },
+    { id: 2, slot: 'ruestung', role: 'melee', name: 'Knochen-Wams', rarity: 'blue', stat: '+380 DEF' },
+    { id: 3, slot: 'waffe', role: 'tank', name: 'Hornstoß-Lanze', rarity: 'purple', stat: '+450 DEF / +1200 HP' },
+    { id: 4, slot: 'waffe', role: 'ranged', name: 'Flugsehnen-Schleuder', rarity: 'gold', stat: '+890 ATK / +12% Krit' }
+  ];
+
+  const gearNames = {
+    melee: { waffe: 'Obsidian-Keule', ruestung: 'Knochenwams', helm: 'Schädelhaube', amulett: 'Reißzahn-Kette' },
+    tank: { waffe: 'Hornstoß-Lanze', ruestung: 'Schildkrötenpanzer', helm: 'Triceratops-Krone', amulett: 'Felsbrocken-Totem' },
+    ranged: { waffe: 'Binden-Schleuder', ruestung: 'Flugsaurier-Haut', helm: 'Späher-Kapuze', amulett: 'Bernstein-Linse' }
+  };
+
+  const rarities = [
+    { key: 'grey', label: 'Gewöhnlich', weight: 45, bonus: 100 },
+    { key: 'green', label: 'Ungewöhnlich', weight: 30, bonus: 220 },
+    { key: 'blue', label: 'Selten', weight: 15, bonus: 420 },
+    { key: 'purple', label: 'Episch', weight: 8, bonus: 750 },
+    { key: 'gold', label: 'Mythisch', weight: 2, bonus: 1300 }
+  ];
+
+  function addChest() {
+    chestCount++;
+    render();
+  }
+
+  function openChest() {
+    if (chestCount <= 0) return alert('Keine Ausrüstungskisten vorhanden! Finde welche in der Wildnis.');
+    chestCount--;
+
+    // Zufällige Klasse, Slot und Seltenheit
+    const roles = ['melee', 'tank', 'ranged'];
+    const slots = ['waffe', 'ruestung', 'helm', 'amulett'];
+    
+    const pickedRole = roles[Math.floor(Math.random() * roles.length)];
+    const pickedSlot = slots[Math.floor(Math.random() * slots.length)];
+    
+    // Seltenheit per Drop-Rate ziehen
+    const roll = Math.random() * 100;
+    let accumulated = 0;
+    let pickedRarity = rarities[0];
+    for (let r of rarities) {
+      accumulated += r.weight;
+      if (roll <= accumulated) {
+        pickedRarity = r;
+        break;
+      }
+    }
+
+    const newItem = {
+      id: Date.now() + Math.random(),
+      slot: pickedSlot,
+      role: pickedRole,
+      name: `${gearNames[pickedRole][pickedSlot]} (${pickedRarity.label})`,
+      rarity: pickedRarity.key,
+      stat: `+${pickedRarity.bonus} ${pickedSlot === 'ruestung' || pickedSlot === 'helm' ? 'DEF/LP' : 'ATK'}`
+    };
+
+    equipmentBag.push(newItem);
+    alert(`🎉 Ausrüstungskiste geöffnet!\nErhalten: [${newItem.role.toUpperCase()}] ${newItem.name} (${newItem.stat})`);
+    render();
+  }
+
+  function selectHero(idx) {
+    activeHeroIdx = idx;
+    document.querySelectorAll('.tab-btn').forEach((b, i) => b.classList.toggle('active', i === idx));
+    render();
+  }
+
+  function equipItem(itemId) {
+    const hero = heroes[activeHeroIdx];
+    const itemIdx = equipmentBag.findIndex(i => i.id === itemId);
+    if (itemIdx === -1) return;
+
+    const item = equipmentBag[itemIdx];
+    if (item.role !== hero.role) {
+      return alert(`Dieses Teil ist nur für ${item.role.toUpperCase()} geeignet!`);
+    }
+
+    // Wenn Slot belegt, altes Teil zurück ins Inventar
+    if (hero.equipped[item.slot]) {
+      equipmentBag.push(hero.equipped[item.slot]);
+    }
+
+    hero.equipped[item.slot] = item;
+    equipmentBag.splice(itemIdx, 1);
+    render();
+  }
+
+  function unequipItem(slot) {
+    const hero = heroes[activeHeroIdx];
+    if (!hero.equipped[slot]) return;
+
+    equipmentBag.push(hero.equipped[slot]);
+    hero.equipped[slot] = null;
+    render();
+  }
+
+  function render() {
+    document.getElementById('lblChests').innerText = chestCount;
+    const hero = heroes[activeHeroIdx];
+
+    document.getElementById('heroName').innerText = hero.name;
+    document.getElementById('lblFilterRole').innerText = hero.roleLabel;
+    
+    const roleTag = document.getElementById('heroRoleTag');
+    roleTag.className = `role-tag ${hero.roleClass}`;
+    roleTag.innerText = hero.roleLabel;
+
+    // Equip Grid rendern
+    const slots = [
+      { key: 'waffe', title: 'Waffe' },
+      { key: 'ruestung', title: 'Rüstung' },
+      { key: 'helm', title: 'Helm' },
+      { key: 'amulett', title: 'Amulett' }
+    ];
+
+    const equipGrid = document.getElementById('equipGrid');
+    equipGrid.innerHTML = '';
+    slots.forEach(s => {
+      const eq = hero.equipped[s.key];
+      if (eq) {
+        equipGrid.innerHTML += `
+          <div class="equip-slot filled rarity-${eq.rarity}">
+            <div>
+              <strong style="text-transform:capitalize;">${s.title}:</strong>
+              <div>${eq.name}</div>
+              <div style="font-size:10px;">${eq.stat}</div>
+            </div>
+            <button class="slot-action-btn unequip" onclick="unequipItem('${s.key}')">Ablegen</button>
+          </div>
+        `;
+      } else {
+        equipGrid.innerHTML += `
+          <div class="equip-slot">
+            <span style="color:#777;">${s.title} (Leer)</span>
+            <span style="font-size:10px; color:#555;">Klasse: ${hero.roleLabel}</span>
+          </div>
+        `;
+      }
+    });
+
+    // Inventarliste (nur Teile passend zur Klasse anzeigen)
+    const invList = document.getElementById('inventoryList');
+    invList.innerHTML = '';
+
+    const matchingGear = equipmentBag.filter(item => item.role === hero.role);
+    if (matchingGear.length === 0) {
+      invList.innerHTML = `<div style="font-size:11px; color:#777; padding:6px;">Keine ungenutzte ${hero.roleLabel}-Ausrüstung im Inventar. Öffne mehr Kisten!</div>`;
+    } else {
+      matchingGear.forEach(item => {
+        invList.innerHTML += `
+          <div class="inv-item rarity-${item.rarity}">
+            <div>
+              <strong>${item.name}</strong> [${item.slot.toUpperCase()}]
+              <div style="font-size:10px;">${item.stat}</div>
+            </div>
+            <button class="slot-action-btn" onclick="equipItem(${item.id})">Anlegen</button>
+          </div>
+        `;
+      });
+    }
+  }
+
+  render();
+</script>
+</body>
+</html>

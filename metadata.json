@@ -1,0 +1,6 @@
+{
+  "name": "Glut & Basalt — Urzeit-Siedlung",
+  "description": "Persistentes 4X-Dino-Siedlungsaufbauspiel im Mobile-First-Hochformat mit Signalfeuer-Management, strikten Gebäude-Abhängigkeiten, Urzeit-Forschungsbaum, Wildnis-Expeditionen und dynamischen Aschestürmen.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

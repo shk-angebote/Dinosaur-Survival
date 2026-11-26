@@ -1,0 +1,1091 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Dino Survival - Heldenlager S0</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Plus Jakarta Sans', 'sans-serif'],
+            title: ['Cinzel', 'serif'],
+          },
+          colors: {
+            volcano: {
+              900: '#110c0c',
+              850: '#181212',
+              800: '#231818',
+              700: '#342222',
+              600: '#4c2e2c',
+              lava: '#ff5e1a',
+              amber: '#ffaa29',
+              gold: '#f59e0b',
+              epic: '#a855f7',
+              rare: '#3b82f6',
+            }
+          },
+          boxShadow: {
+            'glow-lava': '0 0 20px rgba(255, 94, 26, 0.45)',
+            'glow-gold': '0 0 16px rgba(245, 158, 11, 0.35)',
+            'glow-epic': '0 0 16px rgba(168, 85, 247, 0.35)',
+            'glow-rare': '0 0 16px rgba(59, 130, 246, 0.35)',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background: #090707;
+      color: #e5e7eb;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 4px;
+      height: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #442a27;
+      border-radius: 9999px;
+    }
+    .emboss-stone {
+      background: linear-gradient(180deg, #2b1f1e 0%, #171111 100%);
+      border: 1px solid #4a3431;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 4px 10px rgba(0,0,0,0.6);
+    }
+    .badge-s0 {
+      background: linear-gradient(135deg, #d97706, #b45309);
+      text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+    }
+  </style>
+</head>
+<body class="flex items-center justify-center min-h-screen p-0 sm:p-4 bg-neutral-950">
+
+  <!-- Mobile Viewport Frame (9:16 Aspect feel) -->
+  <div class="relative w-full max-w-[440px] h-[100dvh] sm:h-[900px] bg-volcano-900 border-0 sm:border border-volcano-700/60 sm:rounded-[32px] overflow-hidden flex flex-col shadow-2xl shadow-black">
+    
+    <!-- Toast Notification Message Box -->
+    <div id="toastBox" class="absolute top-16 left-1/2 -translate-x-1/2 z-50 pointer-events-none transition-all duration-300 opacity-0 transform -translate-y-4 px-4 py-2 rounded-xl text-xs font-bold text-white shadow-xl flex items-center gap-2 border bg-volcano-800/95 border-amber-500/50 backdrop-blur-md">
+      <span id="toastIcon">✨</span>
+      <span id="toastMsg">Hinweis</span>
+    </div>
+
+    <!-- TOP HEADER BAR -->
+    <header class="relative z-20 shrink-0 px-4 pt-3 pb-2.5 bg-gradient-to-b from-volcano-850 to-volcano-900/95 border-b border-volcano-700/60 backdrop-blur-md">
+      <div class="flex items-center justify-between">
+        <!-- Title & S0 Tag -->
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-volcano-700 to-volcano-850 border border-volcano-600 flex items-center justify-center text-amber-400 font-bold text-sm shadow-md">
+            🦖
+          </div>
+          <div>
+            <div class="flex items-center gap-1.5">
+              <h1 class="font-title text-base font-black text-amber-100 tracking-wider">HELDEN</h1>
+              <span class="badge-s0 text-[10px] font-extrabold px-1.5 py-0.5 rounded text-white shadow">S0</span>
+            </div>
+            <p class="text-[10px] text-neutral-400 leading-none">Aschewüste & Urzeit-Survival</p>
+          </div>
+        </div>
+
+        <!-- Signalfeuer Simulation Widget (Testing Tool) -->
+        <div class="flex items-center gap-1.5 bg-volcano-800/90 border border-amber-500/30 px-2 py-1 rounded-xl shadow-inner">
+          <div class="flex flex-col items-end">
+            <span class="text-[9px] uppercase tracking-wider text-amber-300/80 font-bold">Signalfeuer</span>
+            <span id="signalfeuerBadge" class="text-xs font-black text-amber-400">St. 10</span>
+          </div>
+          <div class="flex flex-col gap-0.5 ml-1">
+            <button onclick="changeSignalfeuer(1)" class="w-4 h-4 bg-volcano-700 hover:bg-amber-600 text-[10px] rounded flex items-center justify-center text-white font-bold leading-none active:scale-95 transition-all">▲</button>
+            <button onclick="changeSignalfeuer(-1)" class="w-4 h-4 bg-volcano-700 hover:bg-amber-600 text-[10px] rounded flex items-center justify-center text-white font-bold leading-none active:scale-95 transition-all">▼</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Inventory Resources (PvP-Malerei & PvE-Malerei) -->
+      <div class="mt-2.5 grid grid-cols-2 gap-2">
+        <!-- PvP Malerei -->
+        <div class="bg-gradient-to-r from-red-950/60 to-volcano-800/80 border border-red-500/30 rounded-xl p-1.5 flex items-center justify-between">
+          <div class="flex items-center gap-1.5">
+            <div class="w-7 h-7 rounded-lg bg-red-900/60 border border-red-500/40 flex items-center justify-center text-sm shadow">
+              🩸
+            </div>
+            <div>
+              <div class="text-[9px] font-semibold text-red-300 leading-none">PvP-Malerei</div>
+              <div id="pvpPaintCount" class="text-xs font-black text-red-100">18</div>
+            </div>
+          </div>
+          <button onclick="addPaint('pvp', 6, 'Heldenhöhle')" title="Aus Heldenhöhle plündern" class="px-2 py-1 bg-red-600/80 hover:bg-red-500 rounded-lg text-[10px] font-bold text-white shadow active:scale-95 transition-all">
+            +6 Höhle
+          </button>
+        </div>
+
+        <!-- PvE Malerei -->
+        <div class="bg-gradient-to-r from-emerald-950/60 to-volcano-800/80 border border-emerald-500/30 rounded-xl p-1.5 flex items-center justify-between">
+          <div class="flex items-center gap-1.5">
+            <div class="w-7 h-7 rounded-lg bg-emerald-900/60 border border-emerald-500/40 flex items-center justify-center text-sm shadow">
+              🌿
+            </div>
+            <div>
+              <div class="text-[9px] font-semibold text-emerald-300 leading-none">PvE-Malerei</div>
+              <div id="pvePaintCount" class="text-xs font-black text-emerald-100">22</div>
+            </div>
+          </div>
+          <button onclick="addPaint('pve', 6, 'Wildnis')" title="In der Wildnis suchen" class="px-2 py-1 bg-emerald-600/80 hover:bg-emerald-500 rounded-lg text-[10px] font-bold text-white shadow active:scale-95 transition-all">
+            +6 Wildnis
+          </button>
+        </div>
+      </div>
+
+      <!-- Quick Banner Info on Gear Unlock -->
+      <div id="gearUnlockHeaderNote" class="mt-2 text-[10px] text-center font-medium rounded-lg py-1 px-2 border transition-all duration-300 bg-amber-950/30 border-amber-600/30 text-amber-200">
+        <!-- dynamic text -->
+      </div>
+    </header>
+
+    <!-- FILTER & SORT BAR -->
+    <div class="shrink-0 px-3 py-2 bg-volcano-850/95 border-b border-volcano-700/40 flex items-center justify-between gap-2">
+      <!-- Scrollable Tabs -->
+      <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 custom-scrollbar text-xs">
+        <button onclick="setFilter('all')" class="tab-btn px-2.5 py-1 rounded-lg font-bold border transition-all text-[11px] bg-amber-500/20 text-amber-300 border-amber-500/50" data-filter="all">Alle</button>
+        <button onclick="setFilter('gold')" class="tab-btn px-2.5 py-1 rounded-lg font-bold border transition-all text-[11px] bg-volcano-800 text-yellow-400/80 border-transparent hover:border-yellow-500/40" data-filter="gold">Gold</button>
+        <button onclick="setFilter('purple')" class="tab-btn px-2.5 py-1 rounded-lg font-bold border transition-all text-[11px] bg-volcano-800 text-purple-400/80 border-transparent hover:border-purple-500/40" data-filter="purple">Lila</button>
+        <button onclick="setFilter('blue')" class="tab-btn px-2.5 py-1 rounded-lg font-bold border transition-all text-[11px] bg-volcano-800 text-blue-400/80 border-transparent hover:border-blue-500/40" data-filter="blue">Blau (Sammler)</button>
+        <button onclick="setFilter('melee')" class="tab-btn px-2.5 py-1 rounded-lg font-bold border transition-all text-[11px] bg-volcano-800 text-neutral-300 border-transparent" data-filter="melee">Keulen</button>
+        <button onclick="setFilter('tank')" class="tab-btn px-2.5 py-1 rounded-lg font-bold border transition-all text-[11px] bg-volcano-800 text-neutral-300 border-transparent" data-filter="tank">Dinoreiter</button>
+        <button onclick="setFilter('ranged')" class="tab-btn px-2.5 py-1 rounded-lg font-bold border transition-all text-[11px] bg-volcano-800 text-neutral-300 border-transparent" data-filter="ranged">Schleuder</button>
+      </div>
+
+      <!-- Sort Dropdown -->
+      <div class="shrink-0 flex items-center gap-1 text-[11px] bg-volcano-800 px-2 py-1 rounded-lg border border-volcano-600/50">
+        <span class="text-neutral-400 text-[10px]">Sortieren:</span>
+        <select id="sortSelect" onchange="renderHeroes()" class="bg-transparent text-amber-200 font-bold focus:outline-none cursor-pointer">
+          <option value="power" class="bg-volcano-900 text-white">Macht</option>
+          <option value="level" class="bg-volcano-900 text-white">Level</option>
+          <option value="stars" class="bg-volcano-900 text-white">Sterne</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- MAIN ROSTER GRID (SCROLLABLE AREA) -->
+    <main class="flex-1 overflow-y-auto px-3 py-3 custom-scrollbar">
+      <div id="heroesGrid" class="grid grid-cols-2 sm:grid-cols-2 gap-2.5">
+        <!-- Rendered via JavaScript -->
+      </div>
+    </main>
+
+    <!-- BOTTOM ACTION BAR (WHITEOUT SURVIVAL INSPIRED) -->
+    <footer class="shrink-0 px-4 py-2.5 bg-volcano-850/95 border-t border-volcano-700/60 flex items-center justify-between gap-3">
+      <button onclick="openCampModal()" class="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-blue-700 to-blue-600 hover:from-blue-600 hover:to-blue-500 border border-blue-400/50 text-white font-extrabold text-xs tracking-wide shadow-md flex items-center justify-center gap-1.5 active:scale-95 transition-all">
+        <span>⛺</span> Trainingslager
+      </button>
+      <button onclick="recruitHero()" class="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-orange-500 hover:from-amber-500 hover:to-orange-400 border border-amber-300/60 text-white font-extrabold text-xs tracking-wide shadow-md shadow-amber-900/30 flex items-center justify-center gap-1.5 active:scale-95 transition-all">
+        <span>🔥</span> Helden rekrutieren
+      </button>
+    </footer>
+
+    <!-- HERO DETAIL MODAL (FULL OVERLAY) -->
+    <div id="heroModal" class="absolute inset-0 z-40 bg-volcano-950/95 backdrop-blur-md flex flex-col transition-all duration-300 translate-y-full opacity-0 pointer-events-none">
+      
+      <!-- Modal Header -->
+      <div class="shrink-0 px-4 pt-3 pb-2.5 border-b border-volcano-700/80 flex items-center justify-between bg-volcano-900">
+        <button onclick="closeHeroModal()" class="w-8 h-8 rounded-lg bg-volcano-800 border border-volcano-600 flex items-center justify-center text-amber-200 hover:text-white font-bold text-sm active:scale-90 transition-all">
+          ←
+        </button>
+        <div class="text-center">
+          <span class="text-[10px] uppercase font-extrabold tracking-widest text-neutral-400">Helden-Details (S0)</span>
+          <h2 id="modalHeroName" class="font-title text-base font-black text-amber-100 leading-tight">Name</h2>
+        </div>
+        <div id="modalRarityBadge" class="text-[10px] font-extrabold px-2 py-0.5 rounded uppercase border">
+          Gold
+        </div>
+      </div>
+
+      <!-- Modal Body (Scrollable) -->
+      <div class="flex-1 overflow-y-auto px-4 py-3 custom-scrollbar space-y-3.5">
+        
+        <!-- Top Hero Card Overview -->
+        <div id="modalHeaderCard" class="p-3 rounded-2xl border flex items-center gap-3 bg-gradient-to-r relative overflow-hidden">
+          <div id="modalAvatarBox" class="w-16 h-16 rounded-xl border flex items-center justify-center text-3xl shadow-inner shrink-0 bg-volcano-900">
+            🦖
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center justify-between gap-1">
+              <span id="modalRoleLabel" class="text-xs font-black text-amber-300 truncate">Dinoreiter (Tank)</span>
+              <span id="modalPowerVal" class="text-xs font-black text-amber-400">⚡ 124.200</span>
+            </div>
+            <p id="modalHeroTitle" class="text-[11px] text-neutral-400 truncate">Titel des Helden</p>
+
+            <!-- Star Rating Display & Corner Progress -->
+            <div class="mt-1 flex items-center justify-between">
+              <div id="modalStarsDisplay" class="flex items-center gap-1">
+                <!-- 6 SVG Stars with corners -->
+              </div>
+              <span id="modalCornerText" class="text-[10px] font-bold text-neutral-300">0/5 Ecken</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Star Upgrade Action Button (5 Corners = 1 Full Star up to 6 Stars) -->
+        <div class="p-2.5 rounded-xl bg-volcano-850 border border-volcano-700 flex items-center justify-between gap-2">
+          <div>
+            <div class="text-[11px] font-extrabold text-white flex items-center gap-1">
+              <span>⭐</span> Sternen-Aufstieg (Max. 6 Sterne)
+            </div>
+            <div class="text-[10px] text-neutral-400">Jeder Stern benötigt 5 Ecken.</div>
+          </div>
+          <button id="upgradeCornerBtn" onclick="upgradeCurrentHeroCorner()" class="px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white font-extrabold text-xs shadow-md active:scale-95 transition-all flex items-center gap-1">
+            <span>+1 Ecke</span>
+          </button>
+        </div>
+
+        <!-- EQUIPMENT SECTION (SIGNALFEUER RULE: LEVEL 10 REQUIRED) -->
+        <div class="p-3 rounded-2xl bg-volcano-850 border border-volcano-700/80">
+          <div class="flex items-center justify-between mb-2">
+            <div class="flex items-center gap-1.5">
+              <span class="text-xs">🛡️</span>
+              <h3 class="text-xs font-bold text-neutral-200 uppercase tracking-wide">Helden-Ausrüstung</h3>
+            </div>
+            <span id="equipmentStatusTag" class="text-[10px] font-extrabold px-2 py-0.5 rounded-full border">
+              St. 10 benötigt
+            </span>
+          </div>
+
+          <!-- Unlocked Gear Slots or Lock Overlay -->
+          <div id="equipmentContainer" class="relative">
+            <!-- 4 Slots: Waffe, Rüstung, Helm, Amulett -->
+            <div class="grid grid-cols-4 gap-2" id="equipmentSlotsGrid">
+              <!-- Rendered via JS -->
+            </div>
+
+            <!-- Lock Banner when Signalfeuer < 10 -->
+            <div id="equipmentLockOverlay" class="absolute inset-0 bg-volcano-950/90 rounded-xl backdrop-blur-sm flex flex-col items-center justify-center p-2 text-center border border-red-500/30">
+              <div class="text-xl mb-1">🔒</div>
+              <div class="text-xs font-bold text-red-300">Ausrüstung gesperrt</div>
+              <div class="text-[10px] text-neutral-400 mt-0.5">Wird ab <strong class="text-amber-400">Signalfeuer Stufe 10</strong> freigeschaltet!</div>
+              <button onclick="boostSignalfeuerTo10()" class="mt-2 px-2.5 py-1 rounded bg-amber-600/80 hover:bg-amber-500 text-[10px] font-black text-white">
+                Signalfeuer auf St. 10 setzen
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 6 SKILLS SECTION (3x PVP + 3x PVE) -->
+        <div class="space-y-3">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-1">
+              <span class="text-xs">🔥</span>
+              <h3 class="text-xs font-black text-amber-200 uppercase tracking-wider">6 Fähigkeiten (Max. Lv. 6)</h3>
+            </div>
+            <span class="text-[10px] text-neutral-400">Heldenhöhle & Wildnis</span>
+          </div>
+
+          <!-- 3x PvP SKILLS -->
+          <div class="p-3 rounded-2xl bg-red-950/20 border border-red-700/40">
+            <div class="flex items-center justify-between mb-2 pb-1.5 border-b border-red-800/40">
+              <span class="text-xs font-bold text-red-300 flex items-center gap-1">
+                <span>⚔️</span> 3x PvP-Fähigkeiten
+              </span>
+              <span class="text-[10px] text-red-300/80 font-semibold">Bedarf: PvP-Malerei</span>
+            </div>
+            <div id="pvpSkillsContainer" class="space-y-2">
+              <!-- Rendered via JS -->
+            </div>
+          </div>
+
+          <!-- 3x PvE DINO & WILDERNESS SKILLS -->
+          <div class="p-3 rounded-2xl bg-emerald-950/20 border border-emerald-700/40">
+            <div class="flex items-center justify-between mb-2 pb-1.5 border-b border-emerald-800/40">
+              <span class="text-xs font-bold text-emerald-300 flex items-center gap-1">
+                <span>🦖</span> 3x Dinojagd & Wildnis
+              </span>
+              <span class="text-[10px] text-emerald-300/80 font-semibold">Bedarf: PvE-Malerei</span>
+            </div>
+            <div id="pveSkillsContainer" class="space-y-2">
+              <!-- Rendered via JS -->
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- INFO / TRAINING CAMP MODAL -->
+    <div id="genericModal" class="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 opacity-0 pointer-events-none transition-opacity duration-200">
+      <div class="w-full max-w-xs bg-volcano-850 border border-amber-500/40 rounded-2xl p-4 shadow-2xl text-center space-y-3">
+        <div id="genericModalIcon" class="text-3xl">⛺</div>
+        <h3 id="genericModalTitle" class="text-sm font-bold text-amber-200">Trainingslager</h3>
+        <p id="genericModalText" class="text-xs text-neutral-300 leading-relaxed">Alle deine S0-Einheiten werden hier gedrillt.</p>
+        <button onclick="closeGenericModal()" class="w-full py-2 bg-volcano-700 hover:bg-volcano-600 rounded-xl text-xs font-bold text-white transition-all">
+          Verstanden
+        </button>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    // --- STATE MANAGEMENT ---
+    let signalfeuerLevel = 10; // Default: Stufe 10 (Ausrüstung freigeschaltet)
+    let pvpPaint = 18;
+    let pvePaint = 22;
+    let currentFilter = 'all';
+    let selectedHeroId = 'hero_kragor';
+
+    // Roster of S0 Heroes (Gold, Purple, Blue) with 6 Skills (3 PvP, 3 Dino/Wildnis)
+    const heroesData = [
+      {
+        id: 'hero_kragor',
+        name: 'Kragor Faust',
+        title: 'Stammespatriarch',
+        rarity: 'gold',
+        role: 'melee',
+        roleLabel: 'Keulenschwinger (Nahkampf)',
+        roleIcon: '🪵',
+        avatarIcon: '🦣',
+        level: 80,
+        power: 128500,
+        stars: 5,
+        corners: 3, // out of 5
+        equipment: {
+          waffe: { name: 'Obsidian-Keule', bonus: '+1.200 ATK', icon: '🪓' },
+          ruestung: { name: 'Knochenpanzer', bonus: '+3.500 LP', icon: '🥋' },
+          helm: { name: 'Säbelzahn-Schädel', bonus: '+850 DEF', icon: '💀' },
+          amulett: { name: 'Bernstein-Zahn', bonus: '+5% Krit.', icon: '📿' }
+        },
+        skills: {
+          pvp: [
+            { id: 'k1', name: 'Erdbeben-Schwung', level: 4, desc: 'Fügt feindlicher Infanterie 320% Schaden zu und betäubt 2s.' },
+            { id: 'k2', name: 'Arena-Zorn', level: 3, desc: 'Erhöht den Schaden beim Angriff auf fremde Lager um +18%.' },
+            { id: 'k3', name: 'Stammes-Bollwerk', level: 2, desc: 'Reduziert erlittenen Schaden bei eigener Dorf-Verteidigung um 15%.' }
+          ],
+          pve: [
+            { id: 'k4', name: 'Alpha-Brecher', level: 5, desc: 'Unterbricht Sturmangriffe gigantischer Raubsaurier.' },
+            { id: 'k5', name: 'Beute-Schlächter', level: 4, desc: 'Erhöht Fleisch- & Knochenbeute besiegter Dinos um +25%.' },
+            { id: 'k6', name: 'Aschepfad-Marsch', level: 3, desc: 'Erhöht Marschtempo in der Aschewüste um +15%.' }
+          ]
+        }
+      },
+      {
+        id: 'hero_tora',
+        name: 'Tora Echsenklaue',
+        title: 'Raptor-Gebieterin',
+        rarity: 'gold',
+        role: 'tank',
+        roleLabel: 'Dinoreiter (Tank)',
+        roleIcon: '🦖',
+        avatarIcon: '🦎',
+        level: 80,
+        power: 124200,
+        stars: 4,
+        corners: 4,
+        equipment: {
+          waffe: { name: 'Raptor-Speer', bonus: '+980 ATK', icon: '🗡️' },
+          ruestung: { name: 'Schuppen-Sattel', bonus: '+4.200 LP', icon: '🛡️' },
+          helm: { name: 'Hornstirn-Kappe', bonus: '+920 DEF', icon: '⛑️' },
+          amulett: { name: 'Glutstein-Amulett', bonus: '+6% Block', icon: '🔮' }
+        },
+        skills: {
+          pvp: [
+            { id: 't1', name: 'Horn-Ansturm', level: 4, desc: 'Zieht gegnerische Angriffe auf sich und blockt 35% Schaden.' },
+            { id: 't2', name: 'Kavallerie-Panzer', level: 3, desc: 'Erhöht Lebenspunkte aller verbündeten Dinoreiter um 22%.' },
+            { id: 't3', name: 'Konterklaue', level: 2, desc: 'Reflektiert 14% Nahkampfschaden zurück auf Feinde.' }
+          ],
+          pve: [
+            { id: 't4', name: 'Rudel-Hohn', level: 4, desc: 'Zwingt wilde Saurier, nur Tora anzugreifen.' },
+            { id: 't5', name: 'Saurier-Fährte', level: 3, desc: 'Spart 15% Ausdauer bei Jagdzügen auf Dinos.' },
+            { id: 't6', name: 'Last-Packtier', level: 5, desc: 'Erhöht die Truppen-Traglast für Beute um 30%.' }
+          ]
+        }
+      },
+      {
+        id: 'hero_moruk',
+        name: 'Moruk Schädelseher',
+        title: 'Knochen-Schamane',
+        rarity: 'gold',
+        role: 'ranged',
+        roleLabel: 'Steinschleuderer (Fernkampf)',
+        roleIcon: '🪨',
+        avatarIcon: '🧙‍♂️',
+        level: 80,
+        power: 121800,
+        stars: 5,
+        corners: 1,
+        equipment: {
+          waffe: { name: 'Obsidian-Schleuder', bonus: '+1.450 ATK', icon: '🏹' },
+          ruestung: { name: 'Totem-Gewand', bonus: '+2.800 LP', icon: '🧥' },
+          helm: { name: 'Raptorschädel-Maske', bonus: '+720 DEF', icon: '🎭' },
+          amulett: { name: 'Lavaperle', bonus: '+8% Brandschaden', icon: '📿' }
+        },
+        skills: {
+          pvp: [
+            { id: 'm1', name: 'Vulkan-Salve', level: 4, desc: 'Glühende Steine bombardieren hintere Reihen für 3s Brandschaden.' },
+            { id: 'm2', name: 'Präzisionsgesang', level: 3, desc: 'Erhöht die Krit-Rate der Steinschleuderer um 18%.' },
+            { id: 'm3', name: 'Rauchvorhang', level: 2, desc: 'Senkt die Treffsicherheit gegnerischer Bogenschützen.' }
+          ],
+          pve: [
+            { id: 'm4', name: 'Schwachstellen-Wurf', level: 3, desc: 'Fügt gepanzerten Boss-Dinos 270% Extraschaden zu.' },
+            { id: 'm5', name: 'Kundschafter-Geist', level: 4, desc: 'Verkürzt Reisezeiten zu Dino-Höhlen um 15%.' },
+            { id: 'm6', name: 'Rohstoff-Gabe', level: 3, desc: 'Erhöht Ressourcenfunde beim Plündern um 18%.' }
+          ]
+        }
+      },
+      {
+        id: 'hero_vanya',
+        name: 'Vanya Glutfeder',
+        title: 'Pterodaktylus-Pirsch',
+        rarity: 'purple',
+        role: 'ranged',
+        roleLabel: 'Steinschleuderer (Fernkampf)',
+        roleIcon: '🪨',
+        avatarIcon: '🦅',
+        level: 70,
+        power: 84500,
+        stars: 3,
+        corners: 4,
+        equipment: {
+          waffe: { name: 'Flügelknochen-Bogen', bonus: '+820 ATK', icon: '🏹' },
+          ruestung: { name: 'Gefiederte Weste', bonus: '+1.950 LP', icon: '🥋' },
+          helm: { name: 'Späher-Kapuze', bonus: '+510 DEF', icon: '🧢' },
+          amulett: { name: 'Adlerklaue', bonus: '+4% Tempo', icon: '✨' }
+        },
+        skills: {
+          pvp: [
+            { id: 'v1', name: 'Fokus-Schuss', level: 3, desc: 'Fügt gegnerischen Kommandanten 250% Schaden zu.' },
+            { id: 'v2', name: 'Schnellschuss', level: 2, desc: 'Erhöht Fernkampf-Angriffstempo um +12%.' },
+            { id: 'v3', name: 'Ausweichrolle', level: 1, desc: 'Chance von 10%, Treffern im PvP zu entgehen.' }
+          ],
+          pve: [
+            { id: 'v4', name: 'Sturzflug-Kiesel', level: 3, desc: 'Verursacht 210% Schaden an flinken Dinos.' },
+            { id: 'v5', name: 'Nest-Plünderung', level: 2, desc: 'Erhöht Beute aus Dino-Nestern um 15%.' },
+            { id: 'v6', name: 'Rückzugs-Eile', level: 3, desc: 'Sammeltrupps kehren 15% schneller ins Lager zurück.' }
+          ]
+        }
+      },
+      {
+        id: 'hero_brakor',
+        name: 'Brakor Schildhorn',
+        title: 'Triceratops-Wächter',
+        rarity: 'purple',
+        role: 'tank',
+        roleLabel: 'Dinoreiter (Tank)',
+        roleIcon: '🦖',
+        avatarIcon: '🦏',
+        level: 70,
+        power: 82900,
+        stars: 4,
+        corners: 0,
+        equipment: {
+          waffe: { name: 'Hornstoß-Lanze', bonus: '+650 ATK', icon: '🔱' },
+          ruestung: { name: 'Hornschild-Weste', bonus: '+2.400 LP', icon: '🛡️' },
+          helm: { name: 'Kamm-Helm', bonus: '+640 DEF', icon: '🪖' },
+          amulett: { name: 'Fels-Fossil', bonus: '+5% Zähigkeit', icon: '🪨' }
+        },
+        skills: {
+          pvp: [
+            { id: 'b1', name: 'Hornwall', level: 3, desc: 'Erzeugt einen Schild für verbündete Nahkämpfer.' },
+            { id: 'b2', name: 'Bollwerk-Front', level: 2, desc: 'Verteidigung der Frontlinie steigt um 14%.' },
+            { id: 'b3', name: 'Erschütterung', level: 2, desc: 'Senkt den gegnerischen Angriffswert für 3s.' }
+          ],
+          pve: [
+            { id: 'b4', name: 'Stampfer-Schutz', level: 3, desc: 'Reduziert den Flächenschaden großer Raubsaurier.' },
+            { id: 'b5', name: 'Großwild-Spur', level: 2, desc: '+12% Schaden gegen Panzer-Saurier.' },
+            { id: 'b6', name: 'Schwere Fracht', level: 4, desc: 'Erhöht die Steinbruch-Traglast um 20%.' }
+          ]
+        }
+      },
+      {
+        id: 'hero_nok',
+        name: 'Nok Wurfflink',
+        title: 'Sammler & Späher',
+        rarity: 'blue',
+        role: 'ranged',
+        roleLabel: 'Steinschleuderer (Sammel-Spezialist)',
+        roleIcon: '🪨',
+        avatarIcon: '👦',
+        level: 50,
+        power: 41200,
+        stars: 2,
+        corners: 3,
+        equipment: {
+          waffe: { name: 'Kiesel-Schleuder', bonus: '+350 ATK', icon: '🪨' },
+          ruestung: { name: 'Fell-Wams', bonus: '+980 LP', icon: '🥋' },
+          helm: { name: 'Spähermütze', bonus: '+240 DEF', icon: '🧢' },
+          amulett: { name: 'Muschel-Kette', bonus: '+10% Sammeltempo', icon: '🐚' }
+        },
+        skills: {
+          pvp: [
+            { id: 'n1', name: 'Ablenkungsstein', level: 2, desc: 'Verlangsamt ein gegnerisches Ziel für 3s.' },
+            { id: 'n2', name: 'Flinke Finger', level: 2, desc: 'Eigene Angriffsrate steigt im Notfall um 8%.' },
+            { id: 'n3', name: 'Deckung', level: 1, desc: 'Reduziert erlittenen Fernkampfschaden um 8%.' }
+          ],
+          pve: [
+            { id: 'n4', name: 'Kiesel-Hagel', level: 2, desc: 'Schwächt kleinere Asche-Wölfe und Raptorlinge.' },
+            { id: 'n5', name: 'Fleißige Hände', level: 4, desc: 'Erhöht Holz- & Nahrung-Sammelrate um +20%.' },
+            { id: 'n6', name: 'Asche-Spurt', level: 3, desc: 'Erhöht Marschgeschwindigkeit zu Ressourcenfeldern.' }
+          ]
+        }
+      },
+      {
+        id: 'hero_mila',
+        name: 'Mila Fährtenleserin',
+        title: 'Echsennest-Kundschafterin',
+        rarity: 'blue',
+        role: 'tank',
+        roleLabel: 'Dinoreiter (Last- & Sammeltier)',
+        roleIcon: '🦖',
+        avatarIcon: '👧',
+        level: 50,
+        power: 39800,
+        stars: 3,
+        corners: 1,
+        equipment: {
+          waffe: { name: 'Treibstecken', bonus: '+280 ATK', icon: '🦯' },
+          ruestung: { name: 'Leder-Sattel', bonus: '+1.100 LP', icon: '🪑' },
+          helm: { name: 'Hornkappe', bonus: '+290 DEF', icon: '👒' },
+          amulett: { name: 'Kupfer-Knochen', bonus: '+15% Traglast', icon: '🦴' }
+        },
+        skills: {
+          pvp: [
+            { id: 'ml1', name: 'Kollision', level: 1, desc: 'Stößt feindliche Nahkämpfer zurück.' },
+            { id: 'ml2', name: 'Zähigkeit', level: 2, desc: 'Verteidigung steigt bei niedrigen LP um 10%.' },
+            { id: 'ml3', name: 'Rudel-Geist', level: 1, desc: 'Erhöht Moral verbündeter Einheiten leicht.' }
+          ],
+          pve: [
+            { id: 'ml4', name: 'Echsen-Zähmung', level: 2, desc: 'Besänftigt wilde Dinos und verringert Schaden.' },
+            { id: 'ml5', name: 'Packtier-Gespann', level: 4, desc: 'Erhöht die Truppen-Traglast auf Märschen um 25%.' },
+            { id: 'ml6', name: 'Steinbruch-Ernte', level: 3, desc: 'Erhöht das Sammeltempo in Steinbrüchen um 18%.' }
+          ]
+        }
+      },
+      {
+        id: 'hero_torok',
+        name: 'Torok Holzhacker',
+        title: 'Rodungsmeister',
+        rarity: 'blue',
+        role: 'melee',
+        roleLabel: 'Keulenschwinger (Holzfäller-Experte)',
+        roleIcon: '🪵',
+        avatarIcon: '🪓',
+        level: 45,
+        power: 36700,
+        stars: 2,
+        corners: 4,
+        equipment: {
+          waffe: { name: 'Fäller-Beil', bonus: '+390 ATK', icon: '🪓' },
+          ruestung: { name: 'Baumrinden-Schutz', bonus: '+920 LP', icon: '🪵' },
+          helm: { name: 'Lederhaube', bonus: '+210 DEF', icon: '🧢' },
+          amulett: { name: 'Harz-Tropfen', bonus: '+15% Holz-Ertrag', icon: '💧' }
+        },
+        skills: {
+          pvp: [
+            { id: 'tk1', name: 'Stumpfer Hieb', level: 2, desc: 'Fügt einem Einzelfeind 180% Schaden zu.' },
+            { id: 'tk2', name: 'Eisenfaust', level: 1, desc: 'Erhöht den Angriff um +6%.' },
+            { id: 'tk3', name: 'Dickes Fell', level: 1, desc: 'Erlittener Schaden sinkt um 5%.' }
+          ],
+          pve: [
+            { id: 'tk4', name: 'Stamm-Spalter', level: 2, desc: 'Durchdringt dicke Baumriesen und Saurierknochen.' },
+            { id: 'tk5', name: 'Rodungs-Eifer', level: 4, desc: 'Erhöht Holz-Sammeltempo in der Wildnis um +25%.' },
+            { id: 'tk6', name: 'Lastenbündel', level: 3, desc: 'Erhöht die Holz-Transportkapazität um 20%.' }
+          ]
+        }
+      }
+    ];
+
+    // --- HELPER: TOAST MESSAGES ---
+    function showToast(msg, icon = '✨') {
+      const toast = document.getElementById('toastBox');
+      document.getElementById('toastMsg').innerText = msg;
+      document.getElementById('toastIcon').innerText = icon;
+      toast.classList.remove('opacity-0', '-translate-y-4');
+      toast.classList.add('opacity-100', 'translate-y-0');
+      clearTimeout(window.toastTimer);
+      window.toastTimer = setTimeout(() => {
+        toast.classList.remove('opacity-100', 'translate-y-0');
+        toast.classList.add('opacity-0', '-translate-y-4');
+      }, 2200);
+    }
+
+    // --- REWARD / PAINT ITEMS COLLECTION ---
+    function addPaint(type, amount, source) {
+      if (type === 'pvp') {
+        pvpPaint += amount;
+        showToast(`+${amount} PvP-Malerei aus der ${source}!`, '🩸');
+      } else {
+        pvePaint += amount;
+        showToast(`+${amount} PvE-Malerei aus der ${source}!`, '🌿');
+      }
+      updateResourceUI();
+    }
+
+    function updateResourceUI() {
+      document.getElementById('pvpPaintCount').innerText = pvpPaint;
+      document.getElementById('pvePaintCount').innerText = pvePaint;
+      if (document.getElementById('heroModal').classList.contains('opacity-100')) {
+        renderHeroModal(selectedHeroId);
+      }
+    }
+
+    // --- SIGNALFEUER LEVEL CONTROL ---
+    function changeSignalfeuer(delta) {
+      signalfeuerLevel = Math.max(1, Math.min(15, signalfeuerLevel + delta));
+      updateSignalfeuerUI();
+    }
+
+    function boostSignalfeuerTo10() {
+      signalfeuerLevel = 10;
+      updateSignalfeuerUI();
+      showToast('Signalfeuer auf St. 10 erhöht! Ausrüstung freigeschaltet.', '🔥');
+    }
+
+    function updateSignalfeuerUI() {
+      const badge = document.getElementById('signalfeuerBadge');
+      const note = document.getElementById('gearUnlockHeaderNote');
+      badge.innerText = `St. ${signalfeuerLevel}`;
+
+      if (signalfeuerLevel >= 10) {
+        badge.className = 'text-xs font-black text-amber-400 drop-shadow';
+        note.className = 'mt-2 text-[10px] text-center font-bold rounded-lg py-1 px-2 border transition-all duration-300 bg-emerald-950/40 border-emerald-500/40 text-emerald-200';
+        note.innerHTML = `🛡️ <strong>Ausrüstung aktiv</strong> (Signalfeuer St. ${signalfeuerLevel} ≥ 10)`;
+      } else {
+        badge.className = 'text-xs font-black text-red-400';
+        note.className = 'mt-2 text-[10px] text-center font-bold rounded-lg py-1 px-2 border transition-all duration-300 bg-red-950/40 border-red-500/40 text-red-200';
+        note.innerHTML = `🔒 <strong>Ausrüstung gesperrt</strong> (Freischaltung ab Stufe 10 · Noch ${10 - signalfeuerLevel} Stufen)`;
+      }
+
+      if (document.getElementById('heroModal').classList.contains('opacity-100')) {
+        updateEquipmentUI();
+      }
+    }
+
+    // --- 5-POINT STAR SVG GENERATOR WITH CORNER PROGRESS ---
+    // Each star has 5 corners. We visually color the corners based on completed corners.
+    function generateStarSvg(isFullStar, activeCornersForThisStar, size = 16) {
+      // 5-point star path points
+      const points = "12,2 15,9 22,9 16.5,14 18.5,21 12,17 5.5,21 7.5,14 2,9 9,9";
+      
+      let fillColor = '#372725'; // empty
+      let strokeColor = '#5c3d39';
+
+      if (isFullStar) {
+        fillColor = '#fbbf24'; // fully lit gold star
+        strokeColor = '#b45309';
+      } else if (activeCornersForThisStar > 0) {
+        // Star in progress: shows glowing ember partial color
+        fillColor = '#ea580c';
+        strokeColor = '#f97316';
+      }
+
+      return `
+        <div class="relative inline-flex items-center justify-center">
+          <svg width="${size}" height="${size}" viewBox="0 0 24 24" class="drop-shadow">
+            <polygon points="${points}" fill="${fillColor}" stroke="${strokeColor}" stroke-width="1.5" stroke-linejoin="round"/>
+          </svg>
+          ${!isFullStar && activeCornersForThisStar > 0 ? `
+            <span class="absolute -bottom-1 -right-1 text-[8px] bg-volcano-950 px-1 rounded-full text-amber-300 font-black border border-amber-500/60 leading-tight">
+              ${activeCornersForThisStar}
+            </span>
+          ` : ''}
+        </div>
+      `;
+    }
+
+    function renderStarRow(stars, corners, size = 14) {
+      let html = '';
+      for (let s = 1; s <= 6; s++) {
+        if (s <= stars) {
+          html += generateStarSvg(true, 5, size);
+        } else if (s === stars + 1 && corners > 0) {
+          html += generateStarSvg(false, corners, size);
+        } else {
+          html += generateStarSvg(false, 0, size);
+        }
+      }
+      return html;
+    }
+
+    // --- FILTER & SORT LOGIC ---
+    function setFilter(filterType) {
+      currentFilter = filterType;
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        const f = btn.getAttribute('data-filter');
+        if (f === filterType) {
+          btn.className = 'tab-btn px-2.5 py-1 rounded-lg font-bold border transition-all text-[11px] bg-amber-500/20 text-amber-300 border-amber-500/50';
+        } else {
+          btn.className = 'tab-btn px-2.5 py-1 rounded-lg font-bold border transition-all text-[11px] bg-volcano-800 text-neutral-300 border-transparent hover:border-neutral-600';
+        }
+      });
+      renderHeroes();
+    }
+
+    function getFilteredHeroes() {
+      let list = [...heroesData];
+      if (currentFilter === 'gold') list = list.filter(h => h.rarity === 'gold');
+      if (currentFilter === 'purple') list = list.filter(h => h.rarity === 'purple');
+      if (currentFilter === 'blue') list = list.filter(h => h.rarity === 'blue');
+      if (currentFilter === 'melee') list = list.filter(h => h.role === 'melee');
+      if (currentFilter === 'tank') list = list.filter(h => h.role === 'tank');
+      if (currentFilter === 'ranged') list = list.filter(h => h.role === 'ranged');
+
+      const sortVal = document.getElementById('sortSelect').value;
+      if (sortVal === 'power') list.sort((a, b) => b.power - a.power);
+      if (sortVal === 'level') list.sort((a, b) => b.level - a.level);
+      if (sortVal === 'stars') list.sort((a, b) => (b.stars * 5 + b.corners) - (a.stars * 5 + a.corners));
+      return list;
+    }
+
+    // --- RENDER HERO ROSTER GRID ---
+    function renderHeroes() {
+      const container = document.getElementById('heroesGrid');
+      const list = getFilteredHeroes();
+
+      if (list.length === 0) {
+        container.innerHTML = `
+          <div class="col-span-2 text-center py-10 text-neutral-500 text-xs">
+            Keine Helden für diesen Filter gefunden.
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = list.map(hero => {
+        let borderClass = 'border-amber-500/60 shadow-glow-gold bg-gradient-to-b from-amber-950/30 to-volcano-900';
+        let rarityLabel = 'Gold';
+        let rarityTextClass = 'text-amber-400';
+
+        if (hero.rarity === 'purple') {
+          borderClass = 'border-purple-500/60 shadow-glow-epic bg-gradient-to-b from-purple-950/30 to-volcano-900';
+          rarityLabel = 'Lila';
+          rarityTextClass = 'text-purple-400';
+        } else if (hero.rarity === 'blue') {
+          borderClass = 'border-blue-500/60 shadow-glow-rare bg-gradient-to-b from-blue-950/30 to-volcano-900';
+          rarityLabel = 'Blau (Sammler)';
+          rarityTextClass = 'text-blue-400';
+        }
+
+        return `
+          <div onclick="openHeroModal('${hero.id}')" class="relative group cursor-pointer p-2.5 rounded-2xl border ${borderClass} emboss-stone hover:scale-[1.02] active:scale-[0.98] transition-all flex flex-col justify-between">
+            
+            <!-- Top Card Header: Class Icon + S0 Badge -->
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-1 bg-volcano-950/80 px-1.5 py-0.5 rounded-md border border-neutral-700 text-[10px]">
+                <span>${hero.roleIcon}</span>
+                <span class="font-bold text-neutral-300">${hero.role === 'melee' ? 'Nah' : hero.role === 'tank' ? 'Tank' : 'Fern'}</span>
+              </div>
+              <div class="flex items-center gap-1">
+                <span class="text-[9px] font-black px-1 rounded bg-black/60 ${rarityTextClass}">${hero.rarity.toUpperCase()}</span>
+                <span class="badge-s0 text-[9px] font-black px-1.5 py-0.2 rounded text-white shadow">S0</span>
+              </div>
+            </div>
+
+            <!-- Central Hero Portrait / Visual Element -->
+            <div class="py-2.5 flex flex-col items-center justify-center">
+              <div class="w-14 h-14 rounded-2xl bg-gradient-to-b from-volcano-700 to-volcano-950 border border-volcano-600 flex items-center justify-center text-3xl shadow-inner group-hover:scale-105 transition-transform">
+                ${hero.avatarIcon}
+              </div>
+              <div class="mt-1.5 text-center px-1">
+                <div class="font-bold text-xs text-white truncate max-w-[140px]">${hero.name}</div>
+                <div class="text-[9px] text-neutral-400 truncate max-w-[130px]">${hero.title}</div>
+              </div>
+            </div>
+
+            <!-- Bottom Stats: Level, Power, 6-Stars Row -->
+            <div class="pt-1.5 border-t border-volcano-700/60 space-y-1">
+              <div class="flex items-center justify-between text-[10px]">
+                <span class="font-black text-amber-200">Lv. ${hero.level}</span>
+                <span class="font-bold text-amber-400">⚡ ${(hero.power / 1000).toFixed(1)}k</span>
+              </div>
+
+              <!-- 6 Stars visualization with 5-corners segment -->
+              <div class="flex items-center justify-between pt-0.5">
+                <div class="flex items-center gap-0.5">
+                  ${renderStarRow(hero.stars, hero.corners, 12)}
+                </div>
+                <span class="text-[8px] font-bold text-neutral-400">${hero.stars}★ +${hero.corners}/5</span>
+              </div>
+            </div>
+
+          </div>
+        `;
+      }).join('');
+    }
+
+    // --- HERO DETAIL MODAL ---
+    function openHeroModal(heroId) {
+      selectedHeroId = heroId;
+      renderHeroModal(heroId);
+      const modal = document.getElementById('heroModal');
+      modal.classList.remove('translate-y-full', 'opacity-0', 'pointer-events-none');
+      modal.classList.add('translate-y-0', 'opacity-100');
+    }
+
+    function closeHeroModal() {
+      const modal = document.getElementById('heroModal');
+      modal.classList.add('translate-y-full', 'opacity-0', 'pointer-events-none');
+      modal.classList.remove('translate-y-0', 'opacity-100');
+      renderHeroes();
+    }
+
+    function renderHeroModal(heroId) {
+      const hero = heroesData.find(h => h.id === heroId);
+      if (!hero) return;
+
+      document.getElementById('modalHeroName').innerText = hero.name;
+      document.getElementById('modalHeroTitle').innerText = hero.title;
+      document.getElementById('modalRoleLabel').innerText = `${hero.roleIcon} ${hero.roleLabel}`;
+      document.getElementById('modalPowerVal').innerText = `⚡ ${hero.power.toLocaleString('de-DE')}`;
+      document.getElementById('modalAvatarBox').innerText = hero.avatarIcon;
+
+      // Rarity Badge styling
+      const rBadge = document.getElementById('modalRarityBadge');
+      const hCard = document.getElementById('modalHeaderCard');
+      if (hero.rarity === 'gold') {
+        rBadge.innerText = 'Gold (Mythisch)';
+        rBadge.className = 'text-[10px] font-extrabold px-2 py-0.5 rounded uppercase border bg-amber-950/60 border-amber-500/80 text-amber-300';
+        hCard.className = 'p-3 rounded-2xl border flex items-center gap-3 bg-gradient-to-r from-amber-950/40 to-volcano-850 border-amber-500/50';
+      } else if (hero.rarity === 'purple') {
+        rBadge.innerText = 'Lila (Episch)';
+        rBadge.className = 'text-[10px] font-extrabold px-2 py-0.5 rounded uppercase border bg-purple-950/60 border-purple-500/80 text-purple-300';
+        hCard.className = 'p-3 rounded-2xl border flex items-center gap-3 bg-gradient-to-r from-purple-950/40 to-volcano-850 border-purple-500/50';
+      } else {
+        rBadge.innerText = 'Blau (Sammler)';
+        rBadge.className = 'text-[10px] font-extrabold px-2 py-0.5 rounded uppercase border bg-blue-950/60 border-blue-500/80 text-blue-300';
+        hCard.className = 'p-3 rounded-2xl border flex items-center gap-3 bg-gradient-to-r from-blue-950/40 to-volcano-850 border-blue-500/50';
+      }
+
+      // Stars in Modal
+      document.getElementById('modalStarsDisplay').innerHTML = renderStarRow(hero.stars, hero.corners, 16);
+      document.getElementById('modalCornerText').innerText = hero.stars >= 6 
+        ? 'Maximal (6 Sterne)' 
+        : `Aktueller Stern: ${hero.corners}/5 Ecken`;
+
+      const cornerBtn = document.getElementById('upgradeCornerBtn');
+      if (hero.stars >= 6) {
+        cornerBtn.disabled = true;
+        cornerBtn.innerText = 'Max. Sterne';
+        cornerBtn.className = 'px-3 py-1.5 rounded-lg bg-neutral-800 text-neutral-500 font-bold text-xs cursor-not-allowed';
+      } else {
+        cornerBtn.disabled = false;
+        cornerBtn.innerHTML = `<span>+1 Ecke (${hero.corners + 1}/5)</span>`;
+        cornerBtn.className = 'px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white font-extrabold text-xs shadow-md active:scale-95 transition-all';
+      }
+
+      // Render Equipment
+      updateEquipmentUI();
+
+      // Render 6 Skills
+      renderSkillsUI(hero);
+    }
+
+    // --- CORNER UPGRADE LOGIC (5 Corners = 1 Full Star) ---
+    function upgradeCurrentHeroCorner() {
+      const hero = heroesData.find(h => h.id === selectedHeroId);
+      if (!hero || hero.stars >= 6) return;
+
+      hero.corners++;
+      hero.power += 850;
+
+      if (hero.corners >= 5) {
+        hero.stars++;
+        hero.corners = 0;
+        hero.power += 3500;
+        showToast(`HERRVOLL! ${hero.name} hat Stern ${hero.stars} erreicht!`, '🌟');
+      } else {
+        showToast(`${hero.name}: Ecke ${hero.corners}/5 entzündet!`, '⭐');
+      }
+
+      renderHeroModal(hero.id);
+      renderHeroes();
+    }
+
+    // --- EQUIPMENT UI (UNLOCK AT SIGNALFEUER 10) ---
+    function updateEquipmentUI() {
+      const hero = heroesData.find(h => h.id === selectedHeroId);
+      if (!hero) return;
+
+      const isUnlocked = signalfeuerLevel >= 10;
+      const statusTag = document.getElementById('equipmentStatusTag');
+      const lockOverlay = document.getElementById('equipmentLockOverlay');
+
+      if (isUnlocked) {
+        statusTag.innerText = `Aktiv (St. ${signalfeuerLevel})`;
+        statusTag.className = 'text-[10px] font-extrabold px-2 py-0.5 rounded-full border bg-emerald-950/60 border-emerald-500/50 text-emerald-300';
+        lockOverlay.classList.add('hidden');
+      } else {
+        statusTag.innerText = `Gesperrt (St. 10 nötig)`;
+        statusTag.className = 'text-[10px] font-extrabold px-2 py-0.5 rounded-full border bg-red-950/60 border-red-500/50 text-red-300';
+        lockOverlay.classList.remove('hidden');
+      }
+
+      const slots = [
+        { key: 'waffe', label: 'Waffe' },
+        { key: 'ruestung', label: 'Rüstung' },
+        { key: 'helm', label: 'Helm' },
+        { key: 'amulett', label: 'Amulett' }
+      ];
+
+      const grid = document.getElementById('equipmentSlotsGrid');
+      grid.innerHTML = slots.map(s => {
+        const item = hero.equipment[s.key];
+        return `
+          <div class="bg-volcano-900 border border-volcano-700 rounded-xl p-1.5 flex flex-col items-center text-center">
+            <div class="w-8 h-8 rounded-lg bg-volcano-800 border border-amber-500/40 flex items-center justify-center text-base shadow mb-1">
+              ${item.icon}
+            </div>
+            <div class="text-[9px] font-bold text-neutral-300 truncate w-full">${item.name}</div>
+            <div class="text-[8px] font-semibold text-emerald-400 mt-0.5">${item.bonus}</div>
+            <div class="text-[7px] text-neutral-500 uppercase mt-0.5">${s.label}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // --- 6 SKILLS SYSTEM (LEVEL UP WITH MALEREI UP TO MAX LV. 6) ---
+    function renderSkillsUI(hero) {
+      const pvpContainer = document.getElementById('pvpSkillsContainer');
+      const pveContainer = document.getElementById('pveSkillsContainer');
+
+      // 3 PvP Skills
+      pvpContainer.innerHTML = hero.skills.pvp.map(skill => {
+        const cost = skill.level * 2; // e.g. Lv. 1->2 costs 2, Lv. 2->3 costs 4, etc.
+        const isMax = skill.level >= 6;
+        const canAfford = pvpPaint >= cost;
+
+        return `
+          <div class="p-2 rounded-xl bg-volcano-900/90 border border-red-900/40 flex items-center justify-between gap-2">
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-1.5">
+                <span class="text-[11px] font-black text-white truncate">${skill.name}</span>
+                <span class="text-[9px] font-bold px-1.5 py-0.2 rounded ${isMax ? 'bg-amber-500 text-black' : 'bg-red-950 text-red-300 border border-red-600/40'}">
+                  Lv. ${skill.level}/6
+                </span>
+              </div>
+              <p class="text-[9.5px] text-neutral-300 mt-0.5 leading-snug">${skill.desc}</p>
+              <div class="text-[8px] text-red-300/70 mt-0.5">Quelle: Heldenhöhle & Wildnis</div>
+            </div>
+            <div class="shrink-0 text-right">
+              ${isMax ? `
+                <span class="text-[10px] font-black text-amber-400">MAX</span>
+              ` : `
+                <button onclick="upgradeSkill('${hero.id}', 'pvp', '${skill.id}', ${cost})" ${canAfford ? '' : 'disabled'} class="px-2.5 py-1.5 rounded-lg text-[10px] font-extrabold shadow active:scale-95 transition-all flex flex-col items-center ${canAfford ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'}">
+                  <span>Aufwerten</span>
+                  <span class="text-[8px] opacity-90">${cost} PvP-Malerei</span>
+                </button>
+              `}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      // 3 PvE Skills
+      pveContainer.innerHTML = hero.skills.pve.map(skill => {
+        const cost = skill.level * 2;
+        const isMax = skill.level >= 6;
+        const canAfford = pvePaint >= cost;
+
+        return `
+          <div class="p-2 rounded-xl bg-volcano-900/90 border border-emerald-900/40 flex items-center justify-between gap-2">
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-1.5">
+                <span class="text-[11px] font-black text-white truncate">${skill.name}</span>
+                <span class="text-[9px] font-bold px-1.5 py-0.2 rounded ${isMax ? 'bg-amber-500 text-black' : 'bg-emerald-950 text-emerald-300 border border-emerald-600/40'}">
+                  Lv. ${skill.level}/6
+                </span>
+              </div>
+              <p class="text-[9.5px] text-neutral-300 mt-0.5 leading-snug">${skill.desc}</p>
+              <div class="text-[8px] text-emerald-300/70 mt-0.5">Quelle: Heldenhöhle & Wildnis</div>
+            </div>
+            <div class="shrink-0 text-right">
+              ${isMax ? `
+                <span class="text-[10px] font-black text-amber-400">MAX</span>
+              ` : `
+                <button onclick="upgradeSkill('${hero.id}', 'pve', '${skill.id}', ${cost})" ${canAfford ? '' : 'disabled'} class="px-2.5 py-1.5 rounded-lg text-[10px] font-extrabold shadow active:scale-95 transition-all flex flex-col items-center ${canAfford ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'}">
+                  <span>Aufwerten</span>
+                  <span class="text-[8px] opacity-90">${cost} PvE-Malerei</span>
+                </button>
+              `}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function upgradeSkill(heroId, type, skillId, cost) {
+      const hero = heroesData.find(h => h.id === heroId);
+      if (!hero) return;
+
+      if (type === 'pvp') {
+        if (pvpPaint < cost) {
+          showToast('Nicht genug PvP-Malerei!', '⚠️');
+          return;
+        }
+        const sk = hero.skills.pvp.find(s => s.id === skillId);
+        if (sk && sk.level < 6) {
+          pvpPaint -= cost;
+          sk.level++;
+          hero.power += 1200;
+          showToast(`PvP-Skill '${sk.name}' auf Lv. ${sk.level} erhöht!`, '🩸');
+        }
+      } else {
+        if (pvePaint < cost) {
+          showToast('Nicht genug PvE-Malerei!', '⚠️');
+          return;
+        }
+        const sk = hero.skills.pve.find(s => s.id === skillId);
+        if (sk && sk.level < 6) {
+          pvePaint -= cost;
+          sk.level++;
+          hero.power += 1200;
+          showToast(`Dino-Skill '${sk.name}' auf Lv. ${sk.level} erhöht!`, '🌿');
+        }
+      }
+
+      updateResourceUI();
+      renderHeroModal(hero.id);
+      renderHeroes();
+    }
+
+    // --- MODAL UTILITIES ---
+    function openCampModal() {
+      document.getElementById('genericModalIcon').innerText = '⛺';
+      document.getElementById('genericModalTitle').innerText = 'Trainingslager (S0)';
+      document.getElementById('genericModalText').innerText = 'Im Trainingslager drillst du Keulenschwinger, Dinoreiter und Steinschleuderer mit Asche-Erfahrung.';
+      const m = document.getElementById('genericModal');
+      m.classList.remove('opacity-0', 'pointer-events-none');
+      m.classList.add('opacity-100');
+    }
+
+    function recruitHero() {
+      const randomShards = Math.floor(Math.random() * 3) + 1;
+      pvpPaint += 4;
+      pvePaint += 4;
+      updateResourceUI();
+      document.getElementById('genericModalIcon').innerText = '🔥';
+      document.getElementById('genericModalTitle').innerText = 'Helden-Beschwörung';
+      document.getElementById('genericModalText').innerText = `Du hast das Urfeuer angerufen! Erhalten: +4 PvP-Malerei & +4 PvE-Malerei aus der Heldenhöhle!`;
+      const m = document.getElementById('genericModal');
+      m.classList.remove('opacity-0', 'pointer-events-none');
+      m.classList.add('opacity-100');
+    }
+
+    function closeGenericModal() {
+      const m = document.getElementById('genericModal');
+      m.classList.add('opacity-0', 'pointer-events-none');
+      m.classList.remove('opacity-100');
+    }
+
+    // --- INITIALIZATION ---
+    window.addEventListener('DOMContentLoaded', () => {
+      updateSignalfeuerUI();
+      updateResourceUI();
+      renderHeroes();
+    });
+  </script>
+</body>
+</html>
