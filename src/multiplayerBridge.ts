@@ -9,6 +9,8 @@ import type {
   RealtimeEvent,
   ResourceKey,
   TeleportResponse,
+  VolcanoAttackRequest,
+  VolcanoAttackResponse,
   WorldChatMessageDTO,
   WorldDynamicSpawnDTO,
   WorldMarchDTO,
@@ -16,6 +18,7 @@ import type {
   WorldNodeOccupantDTO,
   WorldSettlementDTO,
   WorldTradeDTO,
+  WorldVolcanoStateDTO,
 } from './shared/apiTypes';
 import {
   cancelTradeInFirestore,
@@ -39,6 +42,7 @@ import {
 } from './services/firebaseClient';
 import {
   fetchServerPlayerSave,
+  fetchVolcanoState,
   fetchWorldState,
   GameRealtimeSocket,
   postAuthGuest,
@@ -54,6 +58,7 @@ import {
   postSettlement,
   postSpawnRelocate,
   postValidateBuild,
+  postVolcanoAttack,
   type SocketDebugEvent,
 } from './services/gameApiClient';
 
@@ -123,6 +128,7 @@ export interface BridgeCallbacks {
     marches: WorldMarchDTO[];
     nodeOccupants: WorldNodeOccupantDTO[];
     dynamicSpawns: WorldDynamicSpawnDTO[];
+    volcano: WorldVolcanoStateDTO | null;
     onlinePlayers: number;
   }) => void;
   onNodeContest?: (contest: WorldNodeContestResultDTO, myUid: string) => void;
@@ -204,6 +210,7 @@ class DinoMultiplayerBridge {
   private marchesMap = new Map<string, WorldMarchDTO>();
   private nodeOccupantsMap = new Map<string, WorldNodeOccupantDTO>();
   private dynamicSpawnsMap = new Map<string, WorldDynamicSpawnDTO>();
+  private volcanoState: WorldVolcanoStateDTO | null = null;
   private handledContestIds = new Set<string>();
   private chatMap = new Map<string, WorldChatMessageDTO>();
   private tradesMap = new Map<string, WorldTradeDTO>();
@@ -383,6 +390,7 @@ class DinoMultiplayerBridge {
     marches: WorldMarchDTO[];
     nodeOccupants: WorldNodeOccupantDTO[];
     dynamicSpawns: WorldDynamicSpawnDTO[];
+    volcano: WorldVolcanoStateDTO | null;
     chat: WorldChatMessageDTO[];
     trades: WorldTradeDTO[];
     onlinePlayers: number;
@@ -412,6 +420,7 @@ class DinoMultiplayerBridge {
       marches,
       nodeOccupants,
       dynamicSpawns,
+      volcano: this.volcanoState,
       chat,
       trades,
       onlinePlayers: this.onlinePlayers,
@@ -608,6 +617,9 @@ class DinoMultiplayerBridge {
       for (const sp of world.dynamicSpawns || []) {
         this.dynamicSpawnsMap.set(sp.key, sp);
       }
+      if (world.volcano) {
+        this.volcanoState = world.volcano;
+      }
       this.syncState = 'synced';
       this.emitSession();
       this.emitWorld();
@@ -681,6 +693,9 @@ class DinoMultiplayerBridge {
       for (const sp of w.dynamicSpawns || []) {
         this.dynamicSpawnsMap.set(sp.key, sp);
       }
+      if (w.volcano) {
+        this.volcanoState = w.volcano;
+      }
       this.emitSession();
       this.emitWorld();
       this.emitChat();
@@ -716,6 +731,9 @@ class DinoMultiplayerBridge {
       }
     } else if (ev.type === 'world:spawn_update') {
       this.dynamicSpawnsMap.set(ev.payload.key, ev.payload);
+      this.emitWorld();
+    } else if (ev.type === 'world:volcano') {
+      this.volcanoState = ev.payload;
       this.emitWorld();
     } else if (ev.type === 'world:trade') {
       this.upsertTradeAndCheckSettlement(ev.payload);
@@ -1752,6 +1770,47 @@ class DinoMultiplayerBridge {
     }
   }
 
+  async refreshVolcanoState(): Promise<WorldVolcanoStateDTO | null> {
+    try {
+      const resp = await fetchVolcanoState();
+      if (resp && resp.ok && resp.volcano) {
+        this.serverOffsetMs = resp.serverTimeMs - Date.now();
+        this.volcanoState = resp.volcano;
+        this.emitWorld();
+        return resp.volcano;
+      }
+    } catch {
+      // keep cached volcano state if offline
+    }
+    return this.volcanoState;
+  }
+
+  async attackVolcano(payload: Omit<VolcanoAttackRequest, 'tribeName'> & { tribeName?: string }): Promise<VolcanoAttackResponse | null> {
+    const token = await this.getActiveBearerToken();
+    if (!token) return null;
+    try {
+      const resp = await postVolcanoAttack(
+        {
+          tribeName: sanitizeTribeName(payload.tribeName || this.tribeName),
+          squadPower: Math.max(10, Math.floor(Number(payload.squadPower || 10))),
+          heroIds: Array.isArray(payload.heroIds) ? payload.heroIds.slice(0, 3) : [],
+          heroNames: Array.isArray(payload.heroNames) ? payload.heroNames.slice(0, 3) : [],
+          troops: payload.troops || { slinger: 0, clubman: 0, dinorider: 0 },
+        },
+        token
+      );
+      if (resp && resp.volcano) {
+        this.serverOffsetMs = resp.serverTimeMs - Date.now();
+        this.volcanoState = resp.volcano;
+        this.emitWorld();
+      }
+      return resp;
+    } catch (err) {
+      this.pushLog('error', 'API', 'Vulkan-Angriff fehlgeschlagen', this.formatErrorDetail(err));
+      return null;
+    }
+  }
+
   private emitSession(): void {
     this.callbacks.onSessionChange?.(this.getSession());
     this.notifyListeners();
@@ -1764,6 +1823,7 @@ class DinoMultiplayerBridge {
       marches: w.marches,
       nodeOccupants: w.nodeOccupants,
       dynamicSpawns: w.dynamicSpawns,
+      volcano: w.volcano,
       onlinePlayers: w.onlinePlayers,
     });
     this.notifyListeners();

@@ -39,15 +39,21 @@ export interface WorldMapTeleportGhostState {
   valid: boolean;
 }
 
+export interface WorldMapVolcanoState {
+  phase: 'battle' | 'peace';
+  holderStatus: 'neutral' | 'own' | 'enemy';
+}
+
 export interface WorldMapEntitiesPayload {
   settlements: WorldMapSettlementItem[];
   nodes: WorldMapNodeItem[];
   dinos: WorldMapDinoItem[];
   teleportGhost: WorldMapTeleportGhostState;
+  volcano?: WorldMapVolcanoState;
 }
 
 export interface WorldMapPickResult {
-  kind: 'home' | 'player' | 'node' | 'dino';
+  kind: 'home' | 'player' | 'node' | 'dino' | 'volcano';
   id: string;
 }
 
@@ -750,6 +756,15 @@ class WorldMap3DController implements WorldMap3DAPI {
   private mats: WorldMats | null = null;
   private calderaLight: THREE.PointLight | null = null;
   private calderaLavaMesh: THREE.Mesh | null = null;
+  private volcanoMainFlame: THREE.Group | null = null;
+  private volcanoPylonFlames: THREE.Mesh[] = [];
+  private volcanoLavaFallMat: THREE.MeshStandardMaterial | null = null;
+  private volcanoBannerMat: THREE.MeshStandardMaterial | null = null;
+  private volcanoRingMat: THREE.MeshBasicMaterial | null = null;
+  private volcanoShieldDome: THREE.Mesh | null = null;
+  private volcanoBattleBeam: THREE.Mesh | null = null;
+  private volcanoHitMesh: THREE.Mesh | null = null;
+  private volcanoPhase: 'battle' | 'peace' = 'battle';
   private emberInst: THREE.InstancedMesh | null = null;
   private emberData: { x: number; y: number; z: number; vy: number; phase: number; size: number }[] = [];
   private gridLineMajor: THREE.LineSegments | null = null;
@@ -828,8 +843,8 @@ class WorldMap3DController implements WorldMap3DAPI {
       rim.position.set(-460, 340, -480);
       scene.add(rim);
 
-      const calderaLight = new THREE.PointLight(0xff721c, 3200, 440, 1.5);
-      calderaLight.position.set(0, 42, 0);
+      const calderaLight = new THREE.PointLight(0xff6b1a, 5400, 560, 1.4);
+      calderaLight.position.set(0, 88, 0);
       scene.add(calderaLight);
       this.calderaLight = calderaLight;
 
@@ -932,32 +947,275 @@ class WorldMap3DController implements WorldMap3DAPI {
     );
     scene.add(borderLine);
 
-    // Molten lava lake inside the central volcanic caldera
-    const lavaLake = new THREE.Mesh(new THREE.CircleGeometry(88, 36), mats.lava);
-    lavaLake.rotation.x = -Math.PI / 2;
-    lavaLake.position.y = 0.65;
-    scene.add(lavaLake);
-    this.calderaLavaMesh = lavaLake;
+    // Glowing molten magma moat ringing the base of the central Obsidian Volcano
+    const moatMesh = new THREE.Mesh(new THREE.RingGeometry(126, 144, 42), mats.lava);
+    moatMesh.rotation.x = -Math.PI / 2;
+    moatMesh.position.y = 0.65;
+    scene.add(moatMesh);
   }
 
   private buildVolcanicLandmarks(scene: THREE.Scene, mats: WorldMats): void {
-    // 1. Jagged basalt spire ring around central volcanic caldera
-    const spireCount = 34;
-    const spireGeo = new THREE.ConeGeometry(16, 44, 6);
-    const spireInst = new THREE.InstancedMesh(spireGeo, mats.basaltDark, spireCount);
-    for (let i = 0; i < spireCount; i++) {
-      const ang = (i / spireCount) * Math.PI * 2;
-      const rad = 114 + (i % 3) * 14;
-      const sc = 0.72 + ((i * 19) % 10) * 0.075;
-      _dummy.position.set(Math.cos(ang) * rad, 14 * sc, Math.sin(ang) * rad);
-      _dummy.rotation.set((i % 3 - 1) * 0.14, ang + i, ((i + 1) % 3 - 1) * 0.12);
-      _dummy.scale.set(sc * 1.15, sc, sc * 0.95);
+    // 1. EPIC CENTRAL VOLCANO & CLICKABLE OBSIDIAN CITADEL ("Vulkan-Zitadelle")
+    const volcanoGroup = new THREE.Group();
+    volcanoGroup.position.set(0, 0, 0);
+
+    const obsidianMat = new THREE.MeshStandardMaterial({
+      color: 0x241d19,
+      roughness: 0.9,
+      metalness: 0.14,
+      flatShading: true
+    });
+    const obsidianTrimMat = new THREE.MeshStandardMaterial({
+      color: 0x382c25,
+      roughness: 0.82,
+      metalness: 0.22,
+      flatShading: true
+    });
+    const bronzeMat = new THREE.MeshStandardMaterial({
+      color: 0xb97a3d,
+      roughness: 0.42,
+      metalness: 0.68
+    });
+    const lavaFallMat = new THREE.MeshStandardMaterial({
+      color: 0xff5a12,
+      emissive: 0xff4500,
+      emissiveIntensity: 1.55,
+      roughness: 0.3,
+      metalness: 0.05
+    });
+    this.volcanoLavaFallMat = lavaFallMat;
+
+    const bannerMat = new THREE.MeshStandardMaterial({
+      color: 0xf59e0b,
+      emissive: 0xd97706,
+      emissiveIntensity: 0.45,
+      roughness: 0.55,
+      side: THREE.DoubleSide
+    });
+    this.volcanoBannerMat = bannerMat;
+
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0xf59e0b,
+      transparent: true,
+      opacity: 0.62,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    });
+    this.volcanoRingMat = ringMat;
+
+    // Terraced 3-tier Stratovolcano Mountain (rising dramatically to y = 58)
+    const tier1 = new THREE.Mesh(new THREE.CylinderGeometry(96, 134, 22, 14, 1), obsidianMat);
+    tier1.position.y = 11;
+    volcanoGroup.add(tier1);
+
+    const tier2 = new THREE.Mesh(new THREE.CylinderGeometry(72, 99, 21, 14, 1), obsidianTrimMat);
+    tier2.position.y = 31;
+    tier2.rotation.y = Math.PI / 14;
+    volcanoGroup.add(tier2);
+
+    const tier3 = new THREE.Mesh(new THREE.CylinderGeometry(58, 76, 17, 12, 1), obsidianMat);
+    tier3.position.y = 48.5;
+    volcanoGroup.add(tier3);
+
+    // 18 Sculpted Jagged Basalt Buttress Ridges flanking the lower volcano slopes
+    const ridgeGeo = new THREE.ConeGeometry(16, 48, 5);
+    const ridgeInst = new THREE.InstancedMesh(ridgeGeo, mats.basaltDark, 18);
+    for (let i = 0; i < 18; i++) {
+      const ang = (i / 18) * Math.PI * 2;
+      const rad = 104 + (i % 3) * 10;
+      const sc = 0.85 + ((i * 13) % 7) * 0.08;
+      _dummy.position.set(Math.cos(ang) * rad, 17 * sc, Math.sin(ang) * rad);
+      _dummy.rotation.set(Math.sin(ang) * 0.24, ang, -Math.cos(ang) * 0.24);
+      _dummy.scale.set(sc * 1.15, sc * 1.12, sc * 0.9);
       _dummy.updateMatrix();
-      spireInst.setMatrixAt(i, _dummy.matrix);
+      ridgeInst.setMatrixAt(i, _dummy.matrix);
     }
-    spireInst.instanceMatrix.needsUpdate = true;
-    spireInst.computeBoundingSphere();
-    scene.add(spireInst);
+    ridgeInst.instanceMatrix.needsUpdate = true;
+    ridgeInst.computeBoundingSphere();
+    volcanoGroup.add(ridgeInst);
+
+    // 16 Towering Jagged Obsidian Crown Teeth framing the summit caldera rim
+    const toothGeo = new THREE.ConeGeometry(11, 30, 5);
+    const toothInst = new THREE.InstancedMesh(toothGeo, obsidianMat, 16);
+    for (let i = 0; i < 16; i++) {
+      const ang = (i / 16) * Math.PI * 2 + 0.19;
+      const rad = 61 + (i % 2) * 5;
+      const sc = 0.8 + ((i * 7) % 5) * 0.14;
+      _dummy.position.set(Math.cos(ang) * rad, 54 + 7 * sc, Math.sin(ang) * rad);
+      _dummy.rotation.set(Math.sin(ang) * 0.16, ang + i, -Math.cos(ang) * 0.16);
+      _dummy.scale.set(sc, sc * 1.15, sc * 0.85);
+      _dummy.updateMatrix();
+      toothInst.setMatrixAt(i, _dummy.matrix);
+    }
+    toothInst.instanceMatrix.needsUpdate = true;
+    toothInst.computeBoundingSphere();
+    volcanoGroup.add(toothInst);
+
+    // 6 Glowing Cascading Lava Falls flowing from crater lip down into the molten moat
+    for (let i = 0; i < 6; i++) {
+      const ang = (i / 6) * Math.PI * 2 + Math.PI / 6;
+      const fallGroup = new THREE.Group();
+      fallGroup.rotation.y = ang;
+      const stream = new THREE.Mesh(new THREE.BoxGeometry(6.5 + (i % 2) * 2.2, 68, 3.2), lavaFallMat);
+      stream.position.set(0, 29, 92);
+      stream.rotation.x = -0.66;
+      fallGroup.add(stream);
+
+      const pool = new THREE.Mesh(new THREE.CircleGeometry(13, 12), mats.lava);
+      pool.rotation.x = -Math.PI / 2;
+      pool.position.set(0, 0.9, 130);
+      fallGroup.add(pool);
+      volcanoGroup.add(fallGroup);
+    }
+
+    // Churning Elevated Summit Magma Vortex Lake inside the Caldera
+    const lavaLake = new THREE.Mesh(new THREE.CircleGeometry(56, 36), mats.lava);
+    lavaLake.rotation.x = -Math.PI / 2;
+    lavaLake.position.y = 53.2;
+    volcanoGroup.add(lavaLake);
+    this.calderaLavaMesh = lavaLake;
+
+    // 4 Cardinal Obsidian-Bronze Gate Pylons + Suspended Causeway Bridges + Blazing Braziers
+    this.volcanoPylonFlames = [];
+    for (let i = 0; i < 4; i++) {
+      const ang = (i / 4) * Math.PI * 2;
+      const arm = new THREE.Group();
+      arm.rotation.y = ang;
+
+      // Suspended causeway bridge from outer rim to central Sovereign Island
+      const bridge = new THREE.Mesh(new THREE.BoxGeometry(11, 3.2, 44), obsidianTrimMat);
+      bridge.position.set(0, 55.2, 39);
+      arm.add(bridge);
+
+      const bridgeRailL = new THREE.Mesh(new THREE.BoxGeometry(1.4, 2.2, 44), bronzeMat);
+      bridgeRailL.position.set(-5.2, 57.2, 39);
+      arm.add(bridgeRailL);
+
+      const bridgeRailR = new THREE.Mesh(new THREE.BoxGeometry(1.4, 2.2, 44), bronzeMat);
+      bridgeRailR.position.set(5.2, 57.2, 39);
+      arm.add(bridgeRailR);
+
+      // Colossal Carved Gate Pylon on the rim
+      const pylon = new THREE.Mesh(new THREE.CylinderGeometry(5.2, 8.2, 24, 6), obsidianMat);
+      pylon.position.set(0, 66, 61);
+      arm.add(pylon);
+
+      const runeBand = new THREE.Mesh(new THREE.CylinderGeometry(6.4, 6.8, 3.2, 6), lavaFallMat);
+      runeBand.position.set(0, 68, 61);
+      arm.add(runeBand);
+
+      const bronzeCap = new THREE.Mesh(new THREE.CylinderGeometry(7.2, 5.4, 3.2, 6), bronzeMat);
+      bronzeCap.position.set(0, 78.5, 61);
+      arm.add(bronzeCap);
+
+      // Blazing Brazier Flame atop each Pylon
+      const pFlame = new THREE.Mesh(new THREE.ConeGeometry(4.6, 13, 6), mats.flameOuter);
+      pFlame.position.set(0, 86, 61);
+      arm.add(pFlame);
+      this.volcanoPylonFlames.push(pFlame);
+
+      // Hanging Sovereign War Banner on each outer Pylon
+      const flag = new THREE.Mesh(new THREE.PlaneGeometry(7.5, 16), bannerMat);
+      flag.position.set(0, 63, 68.5);
+      arm.add(flag);
+
+      volcanoGroup.add(arm);
+    }
+
+    // Central Sovereign Citadel Spire & Forged Bronze Crown Altar
+    const dais = new THREE.Mesh(new THREE.CylinderGeometry(23, 27, 8, 8), obsidianTrimMat);
+    dais.position.y = 56;
+    volcanoGroup.add(dais);
+
+    const crownTorus = new THREE.Mesh(new THREE.TorusGeometry(21, 2.1, 8, 24), bronzeMat);
+    crownTorus.rotation.x = Math.PI / 2;
+    crownTorus.position.y = 60.5;
+    volcanoGroup.add(crownTorus);
+
+    const citadelKeep = new THREE.Mesh(new THREE.CylinderGeometry(11.5, 17, 19, 8), obsidianMat);
+    citadelKeep.position.y = 69;
+    volcanoGroup.add(citadelKeep);
+
+    const citadelCollar = new THREE.Mesh(new THREE.CylinderGeometry(13.5, 13.5, 3.4, 8), bronzeMat);
+    citadelCollar.position.y = 77.5;
+    volcanoGroup.add(citadelCollar);
+
+    const brazierBowl = new THREE.Mesh(new THREE.CylinderGeometry(12, 8.5, 5.5, 8), obsidianTrimMat);
+    brazierBowl.position.y = 81.5;
+    volcanoGroup.add(brazierBowl);
+
+    // Colossal Roaring Multi-Layer Summit Beacon Flame
+    const mainFlameGroup = new THREE.Group();
+    mainFlameGroup.position.set(0, 83.5, 0);
+    const fOuter = new THREE.Mesh(new THREE.ConeGeometry(10.5, 28, 7), mats.flameOuter);
+    fOuter.position.y = 14;
+    mainFlameGroup.add(fOuter);
+    const fMid = new THREE.Mesh(new THREE.ConeGeometry(7.2, 22, 6), mats.flameInner);
+    fMid.position.y = 11.5;
+    fMid.rotation.y = 0.5;
+    mainFlameGroup.add(fMid);
+    const fCore = new THREE.Mesh(
+      new THREE.ConeGeometry(4.2, 14, 6),
+      new THREE.MeshBasicMaterial({ color: 0xfff3b0 })
+    );
+    fCore.position.y = 8;
+    mainFlameGroup.add(fCore);
+    volcanoGroup.add(mainFlameGroup);
+    this.volcanoMainFlame = mainFlameGroup;
+
+    // Ground Sovereignty Territory Ring around the entire Volcano Monument
+    const territoryRing = new THREE.Mesh(new THREE.RingGeometry(147, 155, 48), ringMat);
+    territoryRing.rotation.x = -Math.PI / 2;
+    territoryRing.position.y = 1.05;
+    volcanoGroup.add(territoryRing);
+
+    const summitHalo = new THREE.Mesh(new THREE.RingGeometry(63, 68, 36), ringMat);
+    summitHalo.rotation.x = -Math.PI / 2;
+    summitHalo.position.y = 56.5;
+    volcanoGroup.add(summitHalo);
+
+    // 4-Week Peace Phase Translucent Runic Shield Dome
+    const shieldMat = new THREE.MeshBasicMaterial({
+      color: 0xfbbf24,
+      transparent: true,
+      opacity: 0.16,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    });
+    const shieldDome = new THREE.Mesh(
+      new THREE.SphereGeometry(96, 28, 14, 0, Math.PI * 2, 0, Math.PI * 0.52),
+      shieldMat
+    );
+    shieldDome.position.y = 40;
+    shieldDome.visible = false;
+    volcanoGroup.add(shieldDome);
+    this.volcanoShieldDome = shieldDome;
+
+    // Active 4-Week Battle Phase Sky-Piercing Molten Beacon Pillar
+    const beamMat = new THREE.MeshBasicMaterial({
+      color: 0xff6b1a,
+      transparent: true,
+      opacity: 0.24,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+    const battleBeam = new THREE.Mesh(new THREE.CylinderGeometry(6, 20, 180, 14, 1, true), beamMat);
+    battleBeam.position.y = 152;
+    battleBeam.visible = true;
+    volcanoGroup.add(battleBeam);
+    this.volcanoBattleBeam = battleBeam;
+
+    // Clickable Raycast Hitbox covering the entire Volcano Mountain & Citadel (Layer 1)
+    const volcanoHit = new THREE.Mesh(new THREE.CylinderGeometry(68, 134, 92, 12), mats.hitMat);
+    volcanoHit.position.y = 46;
+    volcanoHit.layers.set(1);
+    volcanoHit.userData.pickKind = 'volcano';
+    volcanoHit.userData.pickId = 'central_volcano';
+    volcanoGroup.add(volcanoHit);
+    this.volcanoHitMesh = volcanoHit;
+
+    scene.add(volcanoGroup);
 
     // 2. 4 Ancient Dino Caves (North, South, West, East)
     const caveCoords: [number, number][] = [
@@ -1166,9 +1424,9 @@ class WorldMap3DController implements WorldMap3DAPI {
   }
 
   private initCalderaEmbers(scene: THREE.Scene): void {
-    const count = 48;
-    const geo = new THREE.OctahedronGeometry(1.4, 0);
-    const mat = new THREE.MeshBasicMaterial({ color: 0xffa642 });
+    const count = 72;
+    const geo = new THREE.OctahedronGeometry(1.75, 0);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffb347 });
     const inst = new THREE.InstancedMesh(geo, mat, count);
     inst.frustumCulled = false;
     scene.add(inst);
@@ -1176,14 +1434,14 @@ class WorldMap3DController implements WorldMap3DAPI {
     this.emberData = [];
     for (let i = 0; i < count; i++) {
       const ang = Math.random() * Math.PI * 2;
-      const rad = Math.random() * 78;
+      const rad = Math.random() * 54;
       this.emberData.push({
         x: Math.cos(ang) * rad,
-        y: 3 + Math.random() * 68,
+        y: 52 + Math.random() * 94,
         z: Math.sin(ang) * rad,
-        vy: 5 + Math.random() * 9,
+        vy: 8 + Math.random() * 14,
         phase: Math.random() * Math.PI * 2,
-        size: 0.65 + Math.random() * 0.9
+        size: 0.75 + Math.random() * 1.15
       });
     }
   }
@@ -1397,11 +1655,38 @@ class WorldMap3DController implements WorldMap3DAPI {
       }
     }
 
-    // Rebuild flat hitMesh array for O(fast) raycasting on tap
+    // 5. Sync Epic Central Volcano Citadel phase (battle vs 4-week peace shield) & ruler colors
+    if (payload.volcano) {
+      this.volcanoPhase = payload.volcano.phase;
+      const isBattle = payload.volcano.phase === 'battle';
+      const status = payload.volcano.holderStatus;
+      const accentHex = status === 'own' ? 0x22c55e : status === 'enemy' ? 0x38bdf8 : 0xf59e0b;
+      const emissiveHex = status === 'own' ? 0x15803d : status === 'enemy' ? 0x0284c7 : 0xd97706;
+      if (this.volcanoBannerMat) {
+        this.volcanoBannerMat.color.setHex(accentHex);
+        this.volcanoBannerMat.emissive.setHex(emissiveHex);
+      }
+      if (this.volcanoRingMat) {
+        this.volcanoRingMat.color.setHex(isBattle && status === 'neutral' ? 0xef4444 : accentHex);
+      }
+      if (this.volcanoShieldDome) {
+        this.volcanoShieldDome.visible = !isBattle;
+        (this.volcanoShieldDome.material as THREE.MeshBasicMaterial).color.setHex(accentHex);
+      }
+      if (this.volcanoBattleBeam) {
+        this.volcanoBattleBeam.visible = isBattle;
+        (this.volcanoBattleBeam.material as THREE.MeshBasicMaterial).color.setHex(
+          status === 'own' ? 0x4ade80 : status === 'enemy' ? 0x38bdf8 : 0xff5a1f
+        );
+      }
+    }
+
+    // Rebuild flat hitMesh array for O(fast) raycasting on tap (entities first, volcano monument fallback)
     this.hitMeshes = [];
     for (const e of this.settlementEntries.values()) this.hitMeshes.push(e.hitMesh);
     for (const e of this.nodeEntries.values()) if (e.hitMesh.visible) this.hitMeshes.push(e.hitMesh);
     for (const e of this.dinoEntries.values()) if (e.hitMesh.visible) this.hitMeshes.push(e.hitMesh);
+    if (this.volcanoHitMesh) this.hitMeshes.push(this.volcanoHitMesh);
 
     this.applyEntityScales();
   }
@@ -1530,24 +1815,51 @@ class WorldMap3DController implements WorldMap3DAPI {
       d.root.rotation.y = Math.sin(t * 0.7 + d.phase) * 0.35;
     }
 
-    // Pulsing central volcanic caldera magma glow & rising embers
+    // Pulsing central volcanic caldera magma glow, roaring Citadel flames, lava falls & erupting embers
+    const isBattle = this.volcanoPhase === 'battle';
     if (this.calderaLight) {
-      this.calderaLight.intensity = 2900 + Math.sin(t * 2.6) * 420;
+      this.calderaLight.intensity = (isBattle ? 5800 : 4200) + Math.sin(t * 3.1) * 750;
     }
     if (this.calderaLavaMesh) {
-      this.calderaLavaMesh.rotation.z = t * 0.025;
+      this.calderaLavaMesh.rotation.z = t * (isBattle ? 0.05 : 0.025);
+    }
+    if (this.volcanoMainFlame) {
+      const fScaleY = (isBattle ? 1.16 : 0.92) + Math.sin(t * 7.8) * 0.14 + Math.cos(t * 13.4) * 0.07;
+      const fScaleXZ = 1 + Math.sin(t * 5.2) * 0.06;
+      this.volcanoMainFlame.scale.set(fScaleXZ, fScaleY, fScaleXZ);
+      this.volcanoMainFlame.rotation.y = t * 1.1;
+    }
+    for (let i = 0; i < this.volcanoPylonFlames.length; i++) {
+      const pf = this.volcanoPylonFlames[i];
+      const f = 0.88 + Math.sin(t * 8.5 + i * 1.6) * 0.16;
+      pf.scale.set(1, f, 1);
+      pf.rotation.y = t * 1.3 + i;
+    }
+    if (this.volcanoLavaFallMat) {
+      this.volcanoLavaFallMat.emissiveIntensity = (isBattle ? 1.75 : 1.25) + Math.sin(t * 2.4) * 0.28;
+    }
+    if (this.volcanoBattleBeam && this.volcanoBattleBeam.visible) {
+      const bm = this.volcanoBattleBeam.material as THREE.MeshBasicMaterial;
+      bm.opacity = 0.18 + Math.sin(t * 3.2) * 0.08;
+      this.volcanoBattleBeam.rotation.y = t * 0.35;
+    }
+    if (this.volcanoShieldDome && this.volcanoShieldDome.visible) {
+      const sm = this.volcanoShieldDome.material as THREE.MeshBasicMaterial;
+      sm.opacity = 0.14 + Math.sin(t * 1.8) * 0.04;
+      this.volcanoShieldDome.rotation.y = t * 0.08;
     }
     if (this.emberInst) {
       for (let i = 0; i < this.emberData.length; i++) {
         const m = this.emberData[i];
-        m.y += m.vy * dt;
-        if (m.y > 76) m.y = 3;
-        const swayX = Math.sin(t * 1.6 + m.phase) * 3.5;
-        const swayZ = Math.cos(t * 1.4 + m.phase) * 3.5;
-        const fade = 1 - m.y / 78;
-        const sc = Math.max(0.15, m.size * fade);
-        _dummy.position.set(m.x + swayX, m.y, m.z + swayZ);
-        _dummy.rotation.set(t + m.phase, t * 0.8, 0);
+        m.y += m.vy * (isBattle ? 1.35 : 0.85) * dt;
+        if (m.y > 148) m.y = 52;
+        const spread = 1 + ((m.y - 52) / 96) * 0.55;
+        const swayX = Math.sin(t * 1.7 + m.phase) * 4.5;
+        const swayZ = Math.cos(t * 1.5 + m.phase) * 4.5;
+        const fade = 1 - (m.y - 52) / 98;
+        const sc = Math.max(0.18, m.size * fade);
+        _dummy.position.set(m.x * spread + swayX, m.y, m.z * spread + swayZ);
+        _dummy.rotation.set(t * 1.2 + m.phase, t * 0.9, 0);
         _dummy.scale.set(sc, sc, sc);
         _dummy.updateMatrix();
         this.emberInst.setMatrixAt(i, _dummy.matrix);

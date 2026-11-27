@@ -12,11 +12,14 @@ import type {
   ResourceKey,
   TeleportRequest,
   TeleportResponse,
+  VolcanoAttackRequest,
+  VolcanoAttackResponse,
   WorldChatMessageDTO,
   WorldDynamicSpawnDTO,
   WorldMarchDTO,
   WorldStateResponse,
   WorldTradeDTO,
+  WorldVolcanoStateDTO,
 } from '../shared/apiTypes';
 
 async function fetchJson<T>(url: string, init?: RequestInit, bearerToken?: string | null): Promise<T> {
@@ -256,6 +259,28 @@ export async function postSpawnRelocate(
 ): Promise<{ ok: boolean; spawn?: WorldDynamicSpawnDTO; serverTimeMs: number }> {
   return fetchJson(
     '/api/v1/world/spawn/relocate',
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+    bearerToken
+  );
+}
+
+export async function fetchVolcanoState(): Promise<{
+  ok: boolean;
+  volcano: WorldVolcanoStateDTO;
+  serverTimeMs: number;
+}> {
+  return fetchJson('/api/v1/world/volcano');
+}
+
+export async function postVolcanoAttack(
+  payload: VolcanoAttackRequest,
+  bearerToken: string
+): Promise<VolcanoAttackResponse> {
+  return fetchJson(
+    '/api/v1/world/volcano/attack',
     {
       method: 'POST',
       body: JSON.stringify(payload),

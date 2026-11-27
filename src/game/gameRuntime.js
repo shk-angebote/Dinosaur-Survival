@@ -1971,6 +1971,7 @@ export function initGameRuntime(hooks = {}) {
           marches: [],
           nodeOccupants: [],
           dynamicSpawns: [],
+          volcano: null,
           chat: [],
           onlinePlayers: 1,
           chatOpen: false,
@@ -2040,6 +2041,10 @@ export function initGameRuntime(hooks = {}) {
         };
         let gatherDraft = {
           nodeId: null,
+          heroIds: [],
+          troops: { slinger: 0, clubman: 0, dinorider: 0 }
+        };
+        let volcanoDraft = {
           heroIds: [],
           troops: { slinger: 0, clubman: 0, dinorider: 0 }
         };
@@ -3534,7 +3539,8 @@ export function initGameRuntime(hooks = {}) {
             targetMorale -= Math.round(14 * coldRes);
           }
           targetMorale = Math.max(30, Math.min(100, targetMorale));
-          const prodMult = 0.5 + (targetMorale / 100) * 0.5; // 65%..100%
+          const sovereignProdMult = isOwnTribeVolcanoRuler() ? 1.2 : 1.0;
+          const prodMult = (0.5 + (targetMorale / 100) * 0.5) * sovereignProdMult; // 65%..100% (+20% als Vulkan-Herrscher)
 
           // Jagdhütte (Fleisch & Fell)
           const hLvl = state.buildings.hunter.level;
@@ -4134,7 +4140,7 @@ export function initGameRuntime(hooks = {}) {
         function getDeployedHeroIds() {
           const set = new Set();
           for (const m of state.worldMarches || []) {
-            if ((m.kind === 'hunt' || (m.kind || 'gather') === 'gather') && Array.isArray(m.heroes)) {
+            if ((m.kind === 'hunt' || m.kind === 'volcano' || (m.kind || 'gather') === 'gather') && Array.isArray(m.heroes)) {
               for (const hId of m.heroes) set.add(hId);
             }
           }
@@ -4144,7 +4150,7 @@ export function initGameRuntime(hooks = {}) {
         function getDeployedTroops() {
           const out = { slinger: 0, clubman: 0, dinorider: 0 };
           for (const m of state.worldMarches || []) {
-            if ((m.kind === 'hunt' || (m.kind || 'gather') === 'gather') && m.troops) {
+            if ((m.kind === 'hunt' || m.kind === 'volcano' || (m.kind || 'gather') === 'gather') && m.troops) {
               out.slinger += m.troops.slinger || 0;
               out.clubman += m.troops.clubman || 0;
               out.dinorider += m.troops.dinorider || 0;
@@ -4746,7 +4752,8 @@ export function initGameRuntime(hooks = {}) {
             troopBase += count * tDef.powerPerUnit;
           }
           const militiaBase = heroBase === 0 && troopBase === 0 ? Math.max(1, fallbackWorkers) * 18 : 0;
-          const mult = 1 + pvpBonusPct / 100;
+          const sovereignCombatMult = isOwnTribeVolcanoRuler() ? 1.15 : 1.0;
+          const mult = (1 + pvpBonusPct / 100) * sovereignCombatMult;
           const total = Math.round((heroBase + troopBase + militiaBase) * mult);
           return { total, heroBase, troopBase, pvpBonusPct };
         }
@@ -5080,10 +5087,342 @@ export function initGameRuntime(hooks = {}) {
           }
         }
 
+        /* =====================================================================
+           ZENTRALER VULKAN ("VULKAN-ZITADELLE") — 4-WOCHEN-SERVERKAMPF
+           ===================================================================== */
+        const VOLCANO_POS = { xPct: 50, yPct: 50, wx: 600, wy: 600, coordX: 600, coordY: 600 };
+        const VOLCANO_CYCLE_INTERVAL_MS = 28 * 24 * 60 * 60 * 1000;
+        const VOLCANO_BATTLE_DURATION_MS = 6 * 60 * 60 * 1000;
+
+        function getVolcanoState() {
+          const now = Date.now();
+          const srv = mpWorld.volcano;
+          if (srv) {
+            let phase = srv.phase;
+            let battleEndsAt = Number(srv.battleEndsAt) || now + VOLCANO_BATTLE_DURATION_MS;
+            let nextBattleAt = Number(srv.nextBattleStartAt || srv.nextBattleAt) || now + VOLCANO_CYCLE_INTERVAL_MS;
+            if (phase === 'battle' && now >= battleEndsAt) {
+              phase = 'peace';
+            } else if (phase === 'peace' && now >= nextBattleAt) {
+              phase = 'battle';
+              battleEndsAt = nextBattleAt + VOLCANO_BATTLE_DURATION_MS;
+            }
+            return { ...srv, phase, battleEndsAt, nextBattleAt, nextBattleStartAt: nextBattleAt };
+          }
+          return {
+            cycleNumber: 1,
+            cycleIntervalMs: VOLCANO_CYCLE_INTERVAL_MS,
+            battleDurationMs: VOLCANO_BATTLE_DURATION_MS,
+            phase: 'battle',
+            cycleStartedAt: now,
+            battleEndsAt: now + VOLCANO_BATTLE_DURATION_MS,
+            nextBattleAt: now + VOLCANO_CYCLE_INTERVAL_MS,
+            nextBattleStartAt: now + VOLCANO_CYCLE_INTERVAL_MS,
+            holderUid: null,
+            holderTribeName: null,
+            garrisonPower: 380,
+            garrisonHeroNames: ['Vulkan-Wächter'],
+            garrisonTroops: { slinger: 0, clubman: 0, dinorider: 0 },
+            holderSince: null,
+            recentBattles: [],
+            updatedAt: now
+          };
+        }
+
+        function isOwnTribeVolcanoRuler() {
+          const v = mpWorld.volcano;
+          const ownUid = mpWorld.session ? mpWorld.session.uid : null;
+          return Boolean(v && ownUid && v.holderUid && v.holderUid === ownUid);
+        }
+
+        function getVolcanoHolderStatus(v) {
+          const ownUid = mpWorld.session ? mpWorld.session.uid : null;
+          if (!v || !v.holderUid) return 'neutral';
+          if (ownUid && v.holderUid === ownUid) return 'own';
+          return 'enemy';
+        }
+
+        function fmtVolcanoCountdown(ms) {
+          const totalSec = Math.max(0, Math.floor(ms / 1000));
+          const days = Math.floor(totalSec / 86400);
+          const hours = Math.floor((totalSec % 86400) / 3600);
+          const mins = Math.floor((totalSec % 3600) / 60);
+          const secs = totalSec % 60;
+          if (days > 0) {
+            return `${days}T ${String(hours).padStart(2, '0')}Std ${String(mins).padStart(2, '0')}Min`;
+          }
+          return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+        }
+
+        function getActiveMarchForVolcano() {
+          return (state.worldMarches || []).find((m) => m.kind === 'volcano') || null;
+        }
+
+        function initVolcanoDraft() {
+          const busyHeroes = getDeployedHeroIds();
+          const unlocked = HEROES_LIST.filter(
+            (h) => state.heroes && state.heroes[h.id] && state.heroes[h.id].unlocked && !busyHeroes.has(h.id)
+          ).sort((a, b) => getHeroPower(b, state.heroes[b.id]) - getHeroPower(a, state.heroes[a.id]));
+          const picked = [];
+          const usedRoles = new Set();
+          for (const h of unlocked) {
+            if (picked.length >= 3) break;
+            if (!usedRoles.has(h.role)) {
+              usedRoles.add(h.role);
+              picked.push(h.id);
+            }
+          }
+          for (const h of unlocked) {
+            if (picked.length >= 3) break;
+            if (!picked.includes(h.id)) picked.push(h.id);
+          }
+          volcanoDraft = {
+            heroIds: picked,
+            troops: {
+              slinger: getAvailableTroopCount('slinger'),
+              clubman: getAvailableTroopCount('clubman'),
+              dinorider: getAvailableTroopCount('dinorider')
+            }
+          };
+        }
+
+        function toggleVolcanoDraftHero(heroId) {
+          const def = HEROES_LIST.find((h) => h.id === heroId);
+          const hState = state.heroes && state.heroes[heroId];
+          if (!def || !hState || !hState.unlocked) return;
+          if (getDeployedHeroIds().has(heroId)) {
+            SoundFX.play('error');
+            showToast(`${def.name} ist bereits auf einem anderen Marsch im Einsatz.`, 'warn');
+            return;
+          }
+          const idx = volcanoDraft.heroIds.indexOf(heroId);
+          if (idx >= 0) {
+            volcanoDraft.heroIds.splice(idx, 1);
+            SoundFX.play('tap');
+            renderSheet();
+            return;
+          }
+          if (volcanoDraft.heroIds.length >= 3) {
+            SoundFX.play('error');
+            showToast('Maximal 3 Helden für den Vulkan-Sturmangriff möglich.', 'warn');
+            return;
+          }
+          volcanoDraft.heroIds.push(heroId);
+          SoundFX.play('tap');
+          renderSheet();
+        }
+
+        function adjustVolcanoDraftTroop(troopType, delta) {
+          if (!TROOP_DEFS[troopType]) return;
+          const avail = getAvailableTroopCount(troopType);
+          const cur = volcanoDraft.troops[troopType] || 0;
+          volcanoDraft.troops[troopType] = Math.max(0, Math.min(avail, cur + delta));
+          SoundFX.play('tap');
+          renderSheet();
+        }
+
+        function setVolcanoDraftTroopMax(troopType) {
+          if (!TROOP_DEFS[troopType]) return;
+          volcanoDraft.troops[troopType] = getAvailableTroopCount(troopType);
+          SoundFX.play('tap');
+          renderSheet();
+        }
+
+        function fillVolcanoDraftAllTroops() {
+          for (const key of Object.keys(TROOP_DEFS)) {
+            volcanoDraft.troops[key] = getAvailableTroopCount(key);
+          }
+          SoundFX.play('tap');
+          renderSheet();
+        }
+
+        function clearVolcanoDraftTroops() {
+          for (const key of Object.keys(TROOP_DEFS)) {
+            volcanoDraft.troops[key] = 0;
+          }
+          SoundFX.play('tap');
+          renderSheet();
+        }
+
+        function launchVolcanoMarch() {
+          const v = getVolcanoState();
+          if (v.phase !== 'battle') {
+            SoundFX.play('error');
+            showToast(`Der Kaldera-Schild ist aktiv! Nächster Server-Kampf in ${fmtVolcanoCountdown(v.nextBattleAt - Date.now())}.`, 'warn');
+            return;
+          }
+          if (getActiveMarchForVolcano()) {
+            SoundFX.play('error');
+            showToast('Es ist bereits ein eigener Sturmtrupp auf dem Weg zur Vulkan-Zitadelle.', 'warn');
+            return;
+          }
+          if (state.worldMarches.length >= getMaxWorldMarches()) {
+            SoundFX.play('error');
+            showToast(`Alle ${getMaxWorldMarches()} Marschwarteschlange(n) belegt.`, 'warn');
+            return;
+          }
+
+          const busyHeroes = getDeployedHeroIds();
+          const validHeroes = [];
+          for (const hId of volcanoDraft.heroIds || []) {
+            const hDef = HEROES_LIST.find((h) => h.id === hId);
+            const hSt = state.heroes && state.heroes[hId];
+            if (!hDef || !hSt || !hSt.unlocked || busyHeroes.has(hId)) continue;
+            if (validHeroes.includes(hId)) continue;
+            if (validHeroes.length >= 3) break;
+            validHeroes.push(hId);
+          }
+          const sendTroops = {
+            slinger: Math.min(getAvailableTroopCount('slinger'), Math.max(0, Math.floor(volcanoDraft.troops.slinger || 0))),
+            clubman: Math.min(getAvailableTroopCount('clubman'), Math.max(0, Math.floor(volcanoDraft.troops.clubman || 0))),
+            dinorider: Math.min(getAvailableTroopCount('dinorider'), Math.max(0, Math.floor(volcanoDraft.troops.dinorider || 0)))
+          };
+          const totalSoldiers = sendTroops.slinger + sendTroops.clubman + sendTroops.dinorider;
+          if (validHeroes.length === 0 && totalSoldiers === 0) {
+            SoundFX.play('error');
+            showToast('Wähle mindestens einen Helden oder Soldaten für den Marsch zur Vulkan-Zitadelle!', 'err');
+            return;
+          }
+
+          const now = Date.now();
+          const travelSec = Math.max(8, Math.min(28, getWorldMarchTravelSec(VOLCANO_POS)));
+          const powerInfo = computeGatherSquadPower(validHeroes, sendTroops, 0);
+          const heroNames = validHeroes
+            .map((hId) => HEROES_LIST.find((h) => h.id === hId)?.name || hId)
+            .slice(0, 3);
+          const isReinforce = getVolcanoHolderStatus(v) === 'own';
+
+          const marchId = `vm_${now}_${Math.floor(Math.random() * 999)}`;
+          state.worldMarches.push({
+            id: marchId,
+            kind: 'volcano',
+            targetName: 'Vulkan-Zitadelle',
+            targetX: VOLCANO_POS.xPct,
+            targetY: VOLCANO_POS.yPct,
+            heroes: validHeroes,
+            heroNames,
+            troops: sendTroops,
+            squadPower: powerInfo.total,
+            isReinforce,
+            phase: 'marching_out',
+            startedAt: now,
+            phaseEndsAt: now + travelSec * 1000,
+            travelSec,
+            arrivalPending: false
+          });
+
+          if (window.DinoMultiplayer) {
+            const home = getHomePos();
+            window.DinoMultiplayer.broadcastMarch({
+              marchId,
+              kind: 'volcano',
+              fromX: home.xPct,
+              fromY: home.yPct,
+              toX: VOLCANO_POS.xPct,
+              toY: VOLCANO_POS.yPct,
+              targetLabel: isReinforce ? '🛡 Vulkan-Garnison verstärken' : '🌋 Sturm auf Vulkan-Zitadelle',
+              durationMs: travelSec * 2 * 1000
+            });
+          }
+
+          SoundFX.play('horn');
+          showToast(
+            isReinforce
+              ? `🛡 Verstärkung (${validHeroes.length} Helden · ${totalSoldiers} Soldaten · ${fmtNum(powerInfo.total)} KK) marschiert zur Vulkan-Zitadelle!`
+              : `🌋 Sturmtrupp (${validHeroes.length} Helden · ${totalSoldiers} Soldaten · ${fmtNum(powerInfo.total)} KK) greift die Vulkan-Zitadelle an!`,
+            'warn'
+          );
+          saveState();
+          renderAll();
+          if (openSheet && openSheet.type === 'volcano') renderVolcanoSheet();
+        }
+
+        async function resolveVolcanoArrival(march) {
+          if (!march || march.arrivalPending) return;
+          march.arrivalPending = true;
+          march.phase = 'attacking';
+
+          try {
+            if (window.DinoMultiplayer && typeof window.DinoMultiplayer.attackVolcano === 'function') {
+              const resp = await window.DinoMultiplayer.attackVolcano({
+                squadPower: march.squadPower || 50,
+                heroIds: march.heroes || [],
+                heroNames: march.heroNames || [],
+                troops: march.troops || { slinger: 0, clubman: 0, dinorider: 0 }
+              });
+              const now = Date.now();
+              if (resp && resp.volcano) {
+                mpWorld.volcano = resp.volcano;
+              }
+              if (resp && resp.ok) {
+                const cas = applyPvpCasualtiesToMarch(march, resp.attackerLossRate || 0);
+                const casNote = formatCasualtyNote(cas);
+                if (resp.reinforced) {
+                  SoundFX.play('complete');
+                  showToast(`🛡 Vulkan-Garnison verstärkt! Neue Verteidigung: KK ${fmtNum(resp.defenderPower || 0)}.`, 'ok');
+                } else if (resp.won) {
+                  addInventoryItem('goldenBones', 3);
+                  addInventoryItem('heroXp', 450);
+                  state.resources.meat += 350;
+                  state.resources.wood += 350;
+                  state.resources.stone += 350;
+                  SoundFX.play('horn');
+                  showToast(
+                    `👑 SIEG! Dein Stamm hat ${resp.defenderName || 'die Vulkan-Wächter'} bezwungen und beherrscht die Vulkan-Zitadelle! (+3 Goldene Knochen, +450 XP, +350 Rohstoffe)${casNote}`,
+                    'ok'
+                  );
+                } else {
+                  SoundFX.play('error');
+                  showToast(
+                    `⚔ Sturm auf die Vulkan-Zitadelle von ${resp.defenderName || 'den Vulkan-Wächtern'} abgewehrt.${casNote}`,
+                    'warn'
+                  );
+                }
+              } else {
+                SoundFX.play('error');
+                showToast((resp && resp.error) || 'Der Kaldera-Schild blockiert den Angriff.', 'warn');
+              }
+              march.phase = 'marching_back';
+              march.startedAt = now;
+              march.phaseEndsAt = now + march.travelSec * 1000;
+            } else {
+              const now = Date.now();
+              march.phase = 'marching_back';
+              march.startedAt = now;
+              march.phaseEndsAt = now + march.travelSec * 1000;
+              showToast('Keine Serververbindung für den Vulkan-Kampf.', 'warn');
+            }
+          } catch {
+            const now = Date.now();
+            march.phase = 'marching_back';
+            march.startedAt = now;
+            march.phaseEndsAt = now + march.travelSec * 1000;
+          } finally {
+            march.arrivalPending = false;
+            saveState();
+            renderAll();
+            if (openSheet && openSheet.type === 'volcano') renderVolcanoSheet();
+          }
+        }
+
         function recallWorldMarch(marchId) {
           const march = state.worldMarches.find((m) => m.id === marchId);
           if (!march || march.phase === 'marching_back') return;
           const now = Date.now();
+
+          if (march.kind === 'volcano') {
+            if (march.phase === 'attacking') return;
+            const elapsedMs = Math.max(1500, now - march.startedAt);
+            const returnMs = Math.min(march.travelSec * 1000, elapsedMs);
+            march.phase = 'marching_back';
+            march.startedAt = now;
+            march.phaseEndsAt = now + returnMs;
+            SoundFX.play('tap');
+            showToast('Vulkan-Sturmtrupp kehrt zur Siedlung zurück.', 'info');
+            saveState();
+            renderAll();
+            return;
+          }
 
           if (march.kind === 'hunt') {
             const elapsedMs = Math.max(1500, now - march.startedAt);
@@ -5161,6 +5500,32 @@ export function initGameRuntime(hooks = {}) {
           let freshLiveBattleId = null;
 
           for (const march of state.worldMarches || []) {
+            if (march.kind === 'volcano') {
+              if (march.phase === 'attacking') {
+                remainingMarches.push(march);
+                continue;
+              }
+              let completed = false;
+              if (now >= march.phaseEndsAt) {
+                if (march.phase === 'marching_out') {
+                  if (!silentReport) {
+                    void resolveVolcanoArrival(march);
+                  } else {
+                    march.phase = 'marching_back';
+                    march.startedAt = march.phaseEndsAt;
+                    march.phaseEndsAt = march.startedAt + march.travelSec * 1000;
+                  }
+                } else if (march.phase === 'marching_back') {
+                  completed = true;
+                  if (window.DinoMultiplayer && march.id) {
+                    window.DinoMultiplayer.completeMarch(march.id);
+                  }
+                }
+              }
+              if (!completed) remainingMarches.push(march);
+              continue;
+            }
+
             if (march.kind === 'hunt') {
               const species = getDinoSpecies(march.speciesId);
               let guard = 0;
@@ -8097,7 +8462,8 @@ export function initGameRuntime(hooks = {}) {
 
           for (const march of state.worldMarches || []) {
             const isHunt = march.kind === 'hunt';
-            const livePos = isHunt ? getDinoPos(march.dinoId) : getNodePos(march.nodeId);
+            const isVolcano = march.kind === 'volcano';
+            const livePos = isVolcano ? VOLCANO_POS : isHunt ? getDinoPos(march.dinoId) : getNodePos(march.nodeId);
             const txPct = typeof march.targetX === 'number' ? march.targetX : livePos ? livePos.xPct : null;
             const tyPct = typeof march.targetY === 'number' ? march.targetY : livePos ? livePos.yPct : null;
             if (txPct === null || tyPct === null) continue;
@@ -8108,11 +8474,12 @@ export function initGameRuntime(hooks = {}) {
             if (march.phase === 'marching_out') {
               const mx = homePt.sx + (tPt.sx - homePt.sx) * prog;
               const my = homePt.sy + (tPt.sy - homePt.sy) * prog;
-              const strokeCol = isHunt ? '#f87171' : '#fbbf24';
-              svgHtml += `<line class="wm-march-line ${isHunt ? 'hunt-out' : 'out'}" x1="${homePt.sx.toFixed(1)}" y1="${homePt.sy.toFixed(1)}" x2="${tPt.sx.toFixed(1)}" y2="${tPt.sy.toFixed(1)}" />`;
+              const strokeCol = isVolcano ? '#f97316' : isHunt ? '#f87171' : '#fbbf24';
+              const lineCls = isVolcano ? 'volcano-out' : isHunt ? 'hunt-out' : 'out';
+              svgHtml += `<line class="wm-march-line ${lineCls}" x1="${homePt.sx.toFixed(1)}" y1="${homePt.sy.toFixed(1)}" x2="${tPt.sx.toFixed(1)}" y2="${tPt.sy.toFixed(1)}" />`;
               svgHtml += `<circle cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="8" fill="#171412" stroke="${strokeCol}" stroke-width="2.4" />`;
               svgHtml += `<circle cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="3.4" fill="${strokeCol}" />`;
-            } else if (march.phase === 'gathering' || march.phase === 'occupying') {
+            } else if (march.phase === 'gathering' || march.phase === 'occupying' || march.phase === 'attacking') {
               svgHtml += `<line class="wm-march-line gather" x1="${homePt.sx.toFixed(1)}" y1="${homePt.sy.toFixed(1)}" x2="${tPt.sx.toFixed(1)}" y2="${tPt.sy.toFixed(1)}" />`;
             } else if (march.phase === 'marching_back') {
               const mx = tPt.sx + (homePt.sx - tPt.sx) * prog;
@@ -8352,10 +8719,15 @@ export function initGameRuntime(hooks = {}) {
             });
           }
 
+          const volcanoState = getVolcanoState();
           window.WorldMap3D.syncEntities({
             settlements,
             nodes,
             dinos,
+            volcano: {
+              phase: volcanoState.phase,
+              holderStatus: getVolcanoHolderStatus(volcanoState)
+            },
             teleportGhost: {
               active: Boolean(teleportGhost.active),
               anchorX: teleportGhost.anchorX,
@@ -8482,7 +8854,32 @@ export function initGameRuntime(hooks = {}) {
           const bfLvl = state.buildings.bonfire.level;
           const ownUid = mpWorld.session ? mpWorld.session.uid : null;
           const ownTribeLabel = escapeHtmlMp((mpWorld.session && mpWorld.session.tribeName) || 'Meine Siedlung');
+          const volcanoState = getVolcanoState();
+          const vHolderStatus = getVolcanoHolderStatus(volcanoState);
+          const vIsBattle = volcanoState.phase === 'battle';
+          const vCountdown = vIsBattle
+            ? fmtVolcanoCountdown(volcanoState.battleEndsAt - now)
+            : fmtVolcanoCountdown(volcanoState.nextBattleAt - now);
+          const vRulerLabel = volcanoState.holderTribeName
+            ? `👑 ${escapeHtmlMp(volcanoState.holderTribeName)}`
+            : 'Vulkan-Wächter';
           let markersHtml = `
+            <button
+              class="wm-node is-volcano ${vIsBattle ? 'is-battle' : 'is-peace'} ${vHolderStatus === 'own' ? 'is-own' : vHolderStatus === 'enemy' ? 'is-enemy' : ''}"
+              data-wm-volcano="1"
+              data-wx="600"
+              data-wy="600"
+              data-y-off="24"
+              aria-label="Vulkan-Zitadelle Zentrum [600, 600]"
+            >
+              <div class="wm-caption">
+                <div class="wm-cap-row">
+                  <span class="wm-cap-lvl">${vIsBattle ? '⚔ KAMPF' : '🛡 SCHILD'}</span>
+                  <span class="wm-cap-name">Vulkan-Zitadelle</span>
+                </div>
+                <span class="wm-cap-meta">${vRulerLabel} · ${vIsBattle ? `Endet ${vCountdown}` : `In ${vCountdown}`}</span>
+              </div>
+            </button>
             <button
               class="wm-node own-settlement"
               data-wm-home="1"
@@ -8627,18 +9024,24 @@ export function initGameRuntime(hooks = {}) {
           // 2. Interaktive quadratische 1:1 Minimap (1200×1200 -> 120×120)
           const miniSvg = document.getElementById('wmMinimapSvg');
           const mScale = 120 / WORLD_GRID_COLS;
+          const vMiniRingColor = vIsBattle
+            ? '#f97316'
+            : vHolderStatus === 'own'
+            ? '#4ade80'
+            : '#38bdf8';
           let miniHtml = `
             <rect width="120" height="120" fill="#181412" />
-            <circle cx="60" cy="60" r="15" fill="rgba(249,115,22,0.28)" />
-            <circle cx="60" cy="60" r="6.5" fill="#ea580c" />
+            <circle cx="60" cy="60" r="15" fill="${vIsBattle ? 'rgba(249,115,22,0.34)' : 'rgba(56,189,248,0.18)'}" stroke="${vMiniRingColor}" stroke-width="1" />
+            <circle cx="60" cy="60" r="6.5" fill="${vHolderStatus === 'own' ? '#22c55e' : '#ea580c'}" />
           `;
           for (const march of state.worldMarches || []) {
             const isHunt = march.kind === 'hunt';
-            const livePos = isHunt ? getDinoPos(march.dinoId) : getNodePos(march.nodeId);
+            const isVolcano = march.kind === 'volcano';
+            const livePos = isVolcano ? VOLCANO_POS : isHunt ? getDinoPos(march.dinoId) : getNodePos(march.nodeId);
             const tx = typeof march.targetX === 'number' ? march.targetX : livePos ? livePos.xPct : null;
             const ty = typeof march.targetY === 'number' ? march.targetY : livePos ? livePos.yPct : null;
             if (tx === null || ty === null) continue;
-            const col = march.phase === 'marching_back' ? '#4ade80' : isHunt ? '#f87171' : '#fbbf24';
+            const col = march.phase === 'marching_back' ? '#4ade80' : isVolcano ? '#f97316' : isHunt ? '#f87171' : '#fbbf24';
             miniHtml += `<line x1="${(home.wx * mScale).toFixed(1)}" y1="${(home.wy * mScale).toFixed(1)}" x2="${(tx * 1.2).toFixed(1)}" y2="${(ty * 1.2).toFixed(1)}" stroke="${col}" stroke-width="1.2" opacity="0.88" />`;
           }
           for (const def of WORLD_NODES) {
@@ -8691,6 +9094,32 @@ export function initGameRuntime(hooks = {}) {
             marchBar.innerHTML = marches
               .map((m) => {
                 const rem = Math.max(0, (m.phaseEndsAt - now) / 1000);
+                if (m.kind === 'volcano') {
+                  const soldCnt = (m.troops?.slinger || 0) + (m.troops?.clubman || 0) + (m.troops?.dinorider || 0);
+                  const hCnt = (m.heroes || []).length;
+                  const phaseText =
+                    m.phase === 'marching_out'
+                      ? `${m.isReinforce ? 'Verstärkung' : 'Sturmangriff'} (${hCnt} Helden · ${soldCnt} Soldaten)`
+                      : m.phase === 'attacking'
+                      ? 'Gefecht um die Vulkan-Zitadelle...'
+                      : `Rückmarsch (${hCnt} Helden · ${soldCnt} Soldaten)`;
+                  return `
+                    <div class="wm-march-card is-volcano" data-wm-focus-volcano="1">
+                      <div class="wm-march-meta">
+                        <div class="wm-march-title">
+                          <span style="color:#fed7aa;">🌋 Vulkan-Zitadelle [600, 600]</span>
+                          <span class="mono">${fmtClock(rem)}</span>
+                        </div>
+                        <div class="wm-march-phase">${phaseText}</div>
+                      </div>
+                      ${
+                        m.phase === 'marching_out'
+                          ? `<button class="wm-recall-btn" data-wm-recall="${m.id}">Zurück</button>`
+                          : `<span class="mono" style="font-size:11px; color:var(--state-ok); font-weight:700;">${m.phase === 'attacking' ? 'Kampf' : 'Heimweg'}</span>`
+                      }
+                    </div>
+                  `;
+                }
                 if (m.kind === 'hunt') {
                   const sp = getDinoSpecies(m.speciesId);
                   const dDef = getWorldDinoDef(m.dinoId);
@@ -8826,6 +9255,283 @@ export function initGameRuntime(hooks = {}) {
           openSheet = { type: 'ownSettlement', id: 'home' };
           document.getElementById('detailBackdrop').classList.add('open');
           renderSheet();
+        }
+
+        function openVolcanoSheet() {
+          initVolcanoDraft();
+          openSheet = { type: 'volcano', id: 'central_volcano' };
+          document.getElementById('detailBackdrop').classList.add('open');
+          renderSheet();
+          if (window.DinoMultiplayer && typeof window.DinoMultiplayer.refreshVolcanoState === 'function') {
+            void window.DinoMultiplayer.refreshVolcanoState().then((fresh) => {
+              if (fresh) {
+                mpWorld.volcano = fresh;
+                if (openSheet && openSheet.type === 'volcano') renderVolcanoSheet();
+              }
+            });
+          }
+        }
+
+        function renderVolcanoSheet() {
+          const v = getVolcanoState();
+          const now = Date.now();
+          const isBattle = v.phase === 'battle';
+          const holderStatus = getVolcanoHolderStatus(v);
+          const activeMarch = getActiveMarchForVolcano();
+          const travelSec = Math.max(8, Math.min(28, getWorldMarchTravelSec(VOLCANO_POS)));
+
+          document.getElementById('sheetTitle').textContent = 'Vulkan-Zitadelle';
+          document.getElementById('sheetSub').textContent = `Server-Weltwunder · Zyklus #${v.cycleNumber} (alle 4 Wochen) · [X: 600, Y: 600]`;
+
+          // Bereinige volcanoDraft
+          const busyHeroes = getDeployedHeroIds();
+          volcanoDraft.heroIds = (volcanoDraft.heroIds || [])
+            .filter((id) => !busyHeroes.has(id) && state.heroes && state.heroes[id] && state.heroes[id].unlocked)
+            .slice(0, 3);
+          for (const tk of Object.keys(TROOP_DEFS)) {
+            volcanoDraft.troops[tk] = Math.min(getAvailableTroopCount(tk), Math.max(0, volcanoDraft.troops[tk] || 0));
+          }
+
+          const totalSelectedSoldiers = Object.keys(TROOP_DEFS).reduce((s, k) => s + (volcanoDraft.troops[k] || 0), 0);
+          const selectedHeroCount = volcanoDraft.heroIds.length;
+          const squadInfo = computeGatherSquadPower(volcanoDraft.heroIds, volcanoDraft.troops, 0);
+          const garrisonPower = Math.max(1, Number(v.garrisonPower) || 380);
+          const countdownText = isBattle
+            ? fmtVolcanoCountdown(v.battleEndsAt - now)
+            : fmtVolcanoCountdown(v.nextBattleAt - now);
+          const rulerName = v.holderTribeName ? escapeHtmlMp(v.holderTribeName) : 'Vulkan-Wächter (Neutral)';
+          const garrisonHeroNames = Array.isArray(v.garrisonHeroNames) && v.garrisonHeroNames.length
+            ? v.garrisonHeroNames.map((n) => escapeHtmlMp(n)).join(', ')
+            : 'Kaldera-Wache';
+
+          const ratio = squadInfo.total / garrisonPower;
+          const oddsLabel =
+            holderStatus === 'own'
+              ? 'Verstärkt eigene Garnison'
+              : selectedHeroCount === 0 && totalSelectedSoldiers === 0
+              ? 'Trupp auswählen'
+              : ratio >= 1.2
+              ? 'Hohe Eroberungschance'
+              : ratio >= 0.95
+              ? 'Offener Großkampf (±10%)'
+              : 'Garnison aktuell stärker';
+          const oddsColor =
+            holderStatus === 'own'
+              ? '#4ade80'
+              : ratio >= 1.2
+              ? '#4ade80'
+              : ratio >= 0.95
+              ? '#fbbf24'
+              : '#f87171';
+
+          let html = `
+            <div class="volcano-hero-banner ${isBattle ? '' : 'is-peace'} ${holderStatus === 'own' ? 'is-own' : ''}">
+              <div class="volcano-banner-head">
+                <span class="volcano-phase-badge ${isBattle ? 'is-battle' : 'is-peace'}">
+                  ${isBattle ? '⚔ Server-Kampf Aktiv' : '🛡 4-Wochen Kaldera-Schild'}
+                </span>
+                <span class="mono" style="font-size:11px; color:#fde68a; font-weight:700;">Zyklus #${v.cycleNumber}</span>
+              </div>
+              <div class="volcano-countdown-box">
+                <div>
+                  <div style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.04em;">
+                    ${isBattle ? 'Kampf-Fenster schließt in' : 'Nächster 4-Wochen-Kampf in'}
+                  </div>
+                  <div style="font-size:11.5px; color:var(--text-secondary); margin-top:2px;">
+                    ${isBattle ? 'Alle Stämme können die Zitadelle jetzt angreifen & erobern!' : 'Der Herrscher regiert unter dem Schutzschild bis zum nächsten Zyklus.'}
+                  </div>
+                </div>
+                <div class="mono" style="font-size:15px; font-weight:800; color:${isBattle ? '#fb923c' : '#7dd3fc'}; white-space:nowrap;">
+                  ${countdownText}
+                </div>
+              </div>
+              <div class="stat-grid">
+                <div class="stat-box">
+                  <div class="stat-label">Herrscher der Kaldera</div>
+                  <div class="stat-value" style="color:${holderStatus === 'own' ? '#4ade80' : v.holderUid ? '#fca5a5' : '#fde68a'};">
+                    ${v.holderUid ? `👑 ${rulerName}` : rulerName}
+                  </div>
+                </div>
+                <div class="stat-box">
+                  <div class="stat-label">Garnison-Kampfkraft</div>
+                  <div class="stat-value mono" style="color:#fb923c;">KK ${fmtNum(garrisonPower)}</div>
+                </div>
+              </div>
+              <div style="font-size:11px; color:var(--text-secondary);">
+                Verteidiger: <strong style="color:var(--text-primary);">${garrisonHeroNames}</strong> · Marschzeit: <span class="mono">${fmtDuration(travelSec)}</span>
+              </div>
+            </div>
+
+            <div>
+              <p class="sheet-section-title">Herrscher-Segen der Vulkan-Zitadelle ${holderStatus === 'own' ? '(AKTIV FÜR DEINEN STAMM!)' : '(Für den siegreichen Stamm)'}</p>
+              <div class="volcano-buff-grid">
+                <div class="volcano-buff-chip">
+                  <div class="volcano-buff-val">+20%</div>
+                  <div class="volcano-buff-lbl">Dorf-Produktion</div>
+                </div>
+                <div class="volcano-buff-chip">
+                  <div class="volcano-buff-val">+15%</div>
+                  <div class="volcano-buff-lbl">Trupp-Kampfkraft</div>
+                </div>
+                <div class="volcano-buff-chip">
+                  <div class="volcano-buff-val">+3 🦴</div>
+                  <div class="volcano-buff-lbl">Gold-Knochen / Sieg</div>
+                </div>
+              </div>
+            </div>
+          `;
+
+          if (activeMarch) {
+            const total = Math.max(1000, activeMarch.phaseEndsAt - activeMarch.startedAt);
+            const rem = Math.max(0, (activeMarch.phaseEndsAt - now) / 1000);
+            const pct = Math.min(100, Math.max(0, ((now - activeMarch.startedAt) / total) * 100));
+            const phaseLabel =
+              activeMarch.phase === 'marching_out'
+                ? activeMarch.isReinforce
+                  ? 'Verstärkung marschiert zur Vulkan-Zitadelle'
+                  : 'Sturmtrupp marschiert zur Vulkan-Zitadelle'
+                : activeMarch.phase === 'attacking'
+                ? 'Entscheidungsschlacht an der Kaldera...'
+                : 'Sturmtrupp auf dem Rückweg';
+            html += `
+              <div class="stat-box">
+                <div class="queue-title"><span>${phaseLabel}</span><span class="mono">${fmtClock(rem)}</span></div>
+                <div class="prog-bar"><div class="prog-fill ${activeMarch.phase === 'marching_back' ? 'done' : ''}" style="width:${pct.toFixed(1)}%"></div></div>
+                <div style="margin-top:6px; font-size:11px; color:var(--text-secondary);">
+                  Kampfkraft: <strong class="mono">KK ${fmtNum(activeMarch.squadPower || 0)}</strong>
+                </div>
+              </div>
+            `;
+            if (activeMarch.phase === 'marching_out') {
+              html += `<button class="btn-secondary" data-wm-recall="${activeMarch.id}">Sturmtrupp zurückrufen</button>`;
+            }
+          } else if (isBattle) {
+            const unlockedHeroes = HEROES_LIST.filter((h) => state.heroes && state.heroes[h.id] && state.heroes[h.id].unlocked);
+            html += `
+              <div>
+                <p class="sheet-section-title">Helden für den Vulkan-Kampf wählen (${selectedHeroCount} / 3)</p>
+                <div class="hunt-hero-grid">
+                  ${unlockedHeroes
+                    .map((h) => {
+                      const hSt = state.heroes[h.id];
+                      const busy = busyHeroes.has(h.id);
+                      const sel = volcanoDraft.heroIds.includes(h.id);
+                      const pwr = getHeroPower(h, hSt);
+                      return `
+                        <button class="hunt-hero-btn ${sel ? 'selected' : ''}" data-volcano-toggle-hero="${h.id}" ${busy ? 'disabled' : ''}>
+                          <div style="display:flex; width:100%; justify-content:space-between; align-items:center; gap:4px;">
+                            <span style="font-size:11.5px; font-weight:700; color:var(--text-primary);">${h.name.split(' ')[0]}</span>
+                            <span class="mono" style="font-size:10px; color:${busy ? '#f87171' : sel ? '#fbbf24' : 'var(--text-muted)'};">${busy ? 'Im Einsatz' : `KK ${fmtNum(pwr)}`}</span>
+                          </div>
+                          <span style="font-size:10px; color:var(--text-secondary);">St. ${hSt.level} · ${h.role}</span>
+                        </button>
+                      `;
+                    })
+                    .join('')}
+                </div>
+              </div>
+              <div>
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px;">
+                  <p class="sheet-section-title" style="margin:0;">Soldaten für den Sturmangriff</p>
+                  <div style="display:inline-flex; gap:5px;">
+                    <button class="hunt-mini-btn" data-volcano-fill-all="1">Alle</button>
+                    <button class="hunt-mini-btn" data-volcano-clear="1">0</button>
+                  </div>
+                </div>
+                <div class="hunt-troop-list">
+                  ${Object.entries(TROOP_DEFS)
+                    .map(([tk, td]) => {
+                      const avail = getAvailableTroopCount(tk);
+                      const chosen = volcanoDraft.troops[tk] || 0;
+                      return `
+                        <div class="hunt-troop-row">
+                          <div>
+                            <div style="font-size:12px; font-weight:700; color:var(--text-primary);">${td.name}</div>
+                            <div class="mono" style="font-size:10.5px; color:var(--text-secondary);">Gewählt: ${chosen} / ${avail} frei</div>
+                          </div>
+                          <div class="hunt-troop-controls">
+                            <button class="hunt-mini-btn" data-volcano-troop-delta="${tk}|-10" ${chosen <= 0 ? 'disabled' : ''}>-10</button>
+                            <button class="hunt-mini-btn" data-volcano-troop-delta="${tk}|-1" ${chosen <= 0 ? 'disabled' : ''}>−</button>
+                            <button class="hunt-mini-btn" data-volcano-troop-delta="${tk}|1" ${chosen >= avail ? 'disabled' : ''}>+</button>
+                            <button class="hunt-mini-btn" data-volcano-troop-max="${tk}" ${chosen >= avail ? 'disabled' : ''}>Max</button>
+                          </div>
+                        </div>
+                      `;
+                    })
+                    .join('')}
+                </div>
+              </div>
+              <div class="stat-box" style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:11.5px; color:var(--text-secondary);">Sturmtrupp-KK: <strong class="mono" style="color:var(--text-primary);">${fmtNum(squadInfo.total)}</strong></span>
+                <span style="font-size:11.5px; font-weight:700; color:${oddsColor};">${oddsLabel}</span>
+              </div>
+              <button
+                class="btn-primary"
+                data-volcano-launch="1"
+                ${(selectedHeroCount === 0 && totalSelectedSoldiers === 0) || state.worldMarches.length >= getMaxWorldMarches() ? 'disabled' : ''}
+              >
+                ${
+                  state.worldMarches.length >= getMaxWorldMarches()
+                    ? `Alle ${getMaxWorldMarches()} Marschwarteschlangen belegt`
+                    : holderStatus === 'own'
+                    ? `🛡 Vulkan-Garnison verstärken (KK ${fmtNum(squadInfo.total)})`
+                    : `🌋 Vulkan-Zitadelle angreifen (KK ${fmtNum(squadInfo.total)})`
+                }
+              </button>
+            `;
+          } else {
+            html += `
+              <div class="stat-box" style="text-align:center; padding:12px;">
+                <div style="font-size:12.5px; font-weight:700; color:#7dd3fc;">🛡 Kaldera-Schild aktiv</div>
+                <div style="font-size:11px; color:var(--text-secondary); margin-top:4px; line-height:1.45;">
+                  Die Vulkan-Zitadelle wird alle <strong>4 Wochen</strong> für 6 Stunden vom gesamten Server umkämpft. Rüste deine Helden & Kasernen aus, bis der Schild in <strong class="mono" style="color:#fde68a;">${countdownText}</strong> fällt!
+                </div>
+              </div>
+            `;
+          }
+
+          const logs = Array.isArray(v.recentBattles) ? v.recentBattles : [];
+          html += `
+            <div>
+              <p class="sheet-section-title">Kaldera-Chronik (Letzte Kämpfe)</p>
+              <div class="volcano-log-list">
+                ${
+                  logs.length === 0
+                    ? `<div class="volcano-log-row">Noch keine Kämpfe in diesem Server-Zyklus aufgezeichnet. Sei der erste Stamm, der die Zitadelle stürmt!</div>`
+                    : logs
+                        .slice(0, 6)
+                        .map((b) => {
+                          const atk = escapeHtmlMp(b.attackerTribeName || 'Stamm');
+                          const def = escapeHtmlMp(b.defenderTribeName || 'Vulkan-Wächter');
+                          const ts = new Date(b.timestamp || now).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+                          const isReinforce = Boolean(b.reinforced);
+                          const isConquest = Boolean(b.attackerWon && !isReinforce);
+                          const label = isReinforce
+                            ? `🛡 Verstärkt: ${atk}`
+                            : isConquest
+                            ? `👑 Eroberung: ${atk} besiegt ${def}`
+                            : `🛡 Abgewehrt: ${atk} vs. ${def}`;
+                          return `
+                            <div class="volcano-log-row ${isConquest ? 'is-conquest' : ''}">
+                              <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; margin-bottom:2px;">
+                                <strong style="color:${isConquest ? '#fed7aa' : 'var(--text-primary)'};">
+                                  ${label}
+                                </strong>
+                                <span class="mono" style="font-size:10px; color:var(--text-muted);">${ts}</span>
+                              </div>
+                              <div class="mono" style="font-size:10px; color:var(--text-muted);">
+                                Angriff KK ${fmtNum(b.attackerPower || 0)} · Verteidigung KK ${fmtNum(b.defenderPower || 0)} · Zyklus #${b.cycleNumber || v.cycleNumber}
+                              </div>
+                            </div>
+                          `;
+                        })
+                        .join('')
+                }
+              </div>
+            </div>
+          `;
+
+          document.getElementById('sheetBody').innerHTML = html;
         }
 
         function openShamanTotemSheet() {
@@ -8965,6 +9671,8 @@ export function initGameRuntime(hooks = {}) {
             renderWorldDinoSheet(openSheet.id);
           } else if (openSheet.type === 'ownSettlement') {
             renderOwnSettlementSheet();
+          } else if (openSheet.type === 'volcano') {
+            renderVolcanoSheet();
           } else if (openSheet.type === 'shamanTotem') {
             renderShamanTotemSheet();
           }
@@ -11123,7 +11831,9 @@ export function initGameRuntime(hooks = {}) {
               const pick = window.WorldMap3D.pickEntityAt(e.clientX - rect.left, e.clientY - rect.top);
               if (pick) {
                 SoundFX.play('tap');
-                if (pick.kind === 'home') {
+                if (pick.kind === 'volcano') {
+                  openVolcanoSheet();
+                } else if (pick.kind === 'home') {
                   openOwnSettlementSheet();
                 } else if (pick.kind === 'player') {
                   const pl = (mpWorld.settlements || []).find((s) => String(s.uid) === String(pick.id));
@@ -11151,6 +11861,12 @@ export function initGameRuntime(hooks = {}) {
             if (teleportGhost.active) return;
             if (worldCam.moved) {
               worldCam.moved = false;
+              return;
+            }
+            const volcanoBtn = e.target.closest('[data-wm-volcano]');
+            if (volcanoBtn) {
+              SoundFX.play('tap');
+              openVolcanoSheet();
               return;
             }
             const homeBtn = e.target.closest('[data-wm-home]');
@@ -11265,6 +11981,13 @@ export function initGameRuntime(hooks = {}) {
                 centerWorldMapOn(pos.xPct, pos.yPct);
                 openWorldNodeSheet(nodeId);
               }
+              return;
+            }
+            const focusVolcano = e.target.closest('[data-wm-focus-volcano]');
+            if (focusVolcano) {
+              SoundFX.play('tap');
+              centerWorldMapOn(VOLCANO_POS.xPct, VOLCANO_POS.yPct);
+              openVolcanoSheet();
               return;
             }
             const focusDino = e.target.closest('[data-wm-focus-dino]');
@@ -11598,6 +12321,37 @@ export function initGameRuntime(hooks = {}) {
             const wmSendBtn = e.target.closest('[data-wm-send]');
             if (wmSendBtn) {
               launchWorldMarch(wmSendBtn.dataset.wmSend);
+              return;
+            }
+            const volHeroBtn = e.target.closest('[data-volcano-toggle-hero]');
+            if (volHeroBtn) {
+              toggleVolcanoDraftHero(volHeroBtn.dataset.volcanoToggleHero);
+              return;
+            }
+            const volTroopDeltaBtn = e.target.closest('[data-volcano-troop-delta]');
+            if (volTroopDeltaBtn) {
+              const [tKey, dStr] = volTroopDeltaBtn.dataset.volcanoTroopDelta.split('|');
+              adjustVolcanoDraftTroop(tKey, Number(dStr));
+              return;
+            }
+            const volTroopMaxBtn = e.target.closest('[data-volcano-troop-max]');
+            if (volTroopMaxBtn) {
+              setVolcanoDraftTroopMax(volTroopMaxBtn.dataset.volcanoTroopMax);
+              return;
+            }
+            const volFillBtn = e.target.closest('[data-volcano-fill-all]');
+            if (volFillBtn) {
+              fillVolcanoDraftAllTroops();
+              return;
+            }
+            const volClearBtn = e.target.closest('[data-volcano-clear]');
+            if (volClearBtn) {
+              clearVolcanoDraftTroops();
+              return;
+            }
+            const volLaunchBtn = e.target.closest('[data-volcano-launch]');
+            if (volLaunchBtn) {
+              launchVolcanoMarch();
               return;
             }
             const wmRecallBtn = e.target.closest('[data-wm-recall]');
@@ -11973,11 +12727,14 @@ export function initGameRuntime(hooks = {}) {
               mpWorld.onlinePlayers = session.onlinePlayers || 1;
               renderWorldChatUI();
             },
-            onWorldUpdate: ({ settlements, marches, nodeOccupants, dynamicSpawns, onlinePlayers }) => {
+            onWorldUpdate: ({ settlements, marches, nodeOccupants, dynamicSpawns, volcano, onlinePlayers }) => {
               mpWorld.settlements = settlements || [];
               mpWorld.marches = marches || [];
               mpWorld.nodeOccupants = nodeOccupants || [];
               mpWorld.dynamicSpawns = dynamicSpawns || [];
+              if (volcano) {
+                mpWorld.volcano = volcano;
+              }
               mpWorld.onlinePlayers = onlinePlayers || 1;
               applyRemoteDynamicSpawns(mpWorld.dynamicSpawns);
               if (activeTab === 'worldmap') {
@@ -11985,6 +12742,8 @@ export function initGameRuntime(hooks = {}) {
               }
               if (openSheet && openSheet.type === 'worldNode') {
                 renderWorldNodeSheet(openSheet.id);
+              } else if (openSheet && openSheet.type === 'volcano') {
+                renderVolcanoSheet();
               }
               renderWorldChatUI();
             },

@@ -13,7 +13,12 @@ import type {
   WorldNodeOccupantDTO,
   WorldSettlementDTO,
   WorldTradeDTO,
+  WorldVolcanoStateDTO,
 } from '../shared/apiTypes.ts';
+
+export const VOLCANO_CYCLE_INTERVAL_MS = 28 * 24 * 60 * 60 * 1000; // Exakt 4 Wochen (28 Tage)
+export const VOLCANO_BATTLE_DURATION_MS = 6 * 60 * 60 * 1000; // 6 Stunden epische Server-Vulkanschlacht pro Zyklus
+export const VOLCANO_GUARDIAN_POWER = 380;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -46,6 +51,28 @@ interface PersistedWorldSnapshot {
   playerSaves: Record<string, PersistedPlayerSave>;
   trades?: WorldTradeDTO[];
   dynamicSpawns?: WorldDynamicSpawnDTO[];
+  volcanoState?: WorldVolcanoStateDTO;
+}
+
+function createInitialVolcanoState(nowMs: number): WorldVolcanoStateDTO {
+  return {
+    cycleNumber: 1,
+    cycleIntervalMs: VOLCANO_CYCLE_INTERVAL_MS,
+    battleDurationMs: VOLCANO_BATTLE_DURATION_MS,
+    phase: 'battle',
+    cycleStartedAt: nowMs,
+    battleEndsAt: nowMs + VOLCANO_BATTLE_DURATION_MS,
+    nextBattleStartAt: nowMs + VOLCANO_CYCLE_INTERVAL_MS,
+    holderUid: null,
+    holderTribeName: null,
+    holderSince: null,
+    garrisonPower: VOLCANO_GUARDIAN_POWER,
+    garrisonHeroNames: ['Vulkan-Wächter'],
+    garrisonTroops: { slinger: 20, clubman: 24, dinorider: 10 },
+    reignCount: 0,
+    recentBattles: [],
+    updatedAt: nowMs,
+  };
 }
 
 export class PersistentWorldStore {
@@ -56,6 +83,7 @@ export class PersistentWorldStore {
   readonly trades = new Map<string, WorldTradeDTO>();
   readonly chatHistory: WorldChatMessageDTO[] = [];
   readonly playerSaves = new Map<string, PersistedPlayerSave>();
+  volcanoState: WorldVolcanoStateDTO = createInitialVolcanoState(Date.now());
 
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private dirty = false;
@@ -117,6 +145,16 @@ export class PersistentWorldStore {
           }
         }
       }
+      if (parsed.volcanoState && typeof parsed.volcanoState === 'object' && typeof parsed.volcanoState.cycleNumber === 'number') {
+        const vs = parsed.volcanoState;
+        this.volcanoState = {
+          ...createInitialVolcanoState(Date.now()),
+          ...vs,
+          cycleIntervalMs: VOLCANO_CYCLE_INTERVAL_MS,
+          battleDurationMs: VOLCANO_BATTLE_DURATION_MS,
+          recentBattles: Array.isArray(vs.recentBattles) ? vs.recentBattles.slice(0, 16) : [],
+        };
+      }
     } catch (err) {
       console.error('[WorldStore] Laden fehlgeschlagen, starte mit leerem Weltstand:', err);
     }
@@ -157,6 +195,7 @@ export class PersistentWorldStore {
         playerSaves: savesObj,
         trades: recentTrades,
         dynamicSpawns: Array.from(this.dynamicSpawns.values()),
+        volcanoState: this.volcanoState,
       };
       fs.writeFileSync(TEMP_FILE, JSON.stringify(payload), 'utf8');
       fs.renameSync(TEMP_FILE, STATE_FILE);
@@ -193,6 +232,63 @@ export class PersistentWorldStore {
 
   upsertDynamicSpawn(dto: WorldDynamicSpawnDTO): void {
     this.dynamicSpawns.set(dto.key, dto);
+    this.schedulePersist();
+  }
+
+  /**
+   * Synchronisiert den server-autoritativen 4-Wochen-Zyklus der zentralen Vulkan-Zitadelle.
+   * Öffnet alle 28 Tage automatisch das 6-stündige Server-Schlachtfenster und schützt
+   * den Sieger anschließend für die nächsten 4 Wochen unter dem Kaldera-Schild.
+   */
+  syncVolcanoCycle(nowMs: number): {
+    state: WorldVolcanoStateDTO;
+    changed: boolean;
+    announcement?: string;
+  } {
+    const v = this.volcanoState;
+    let changed = false;
+    let announcement: string | undefined;
+
+    // Vorlauf über eventuell verpasste 4-Wochen-Zyklen (z. B. nach längerer Server-Pause)
+    let guard = 0;
+    while (guard < 24) {
+      guard++;
+      if (v.phase === 'battle' && nowMs >= v.battleEndsAt) {
+        v.phase = 'peace';
+        v.nextBattleStartAt = v.cycleStartedAt + VOLCANO_CYCLE_INTERVAL_MS;
+        if (v.nextBattleStartAt <= v.battleEndsAt) {
+          v.nextBattleStartAt = v.battleEndsAt + VOLCANO_CYCLE_INTERVAL_MS;
+        }
+        if (v.holderUid) {
+          v.reignCount = (v.reignCount || 0) + 1;
+        }
+        v.updatedAt = nowMs;
+        changed = true;
+        announcement = v.holderTribeName
+          ? `🌋 Die Vulkanschlacht (Zyklus #${v.cycleNumber}) ist beendet! Stamm „${v.holderTribeName}“ herrscht für die nächsten 4 Wochen über die Vulkan-Zitadelle!`
+          : `🌋 Die Vulkanschlacht (Zyklus #${v.cycleNumber}) ist beendet. Die Vulkan-Wächter halten die Zitadelle bis in 4 Wochen.`;
+      } else if (v.phase === 'peace' && nowMs >= v.nextBattleStartAt) {
+        v.cycleNumber = (v.cycleNumber || 1) + 1;
+        v.phase = 'battle';
+        v.cycleStartedAt = v.nextBattleStartAt;
+        v.battleEndsAt = v.cycleStartedAt + VOLCANO_BATTLE_DURATION_MS;
+        v.nextBattleStartAt = v.cycleStartedAt + VOLCANO_CYCLE_INTERVAL_MS;
+        v.updatedAt = nowMs;
+        changed = true;
+        announcement = `🌋 ALARM IN DER KALDERA! Der 4-Wochen-Schild der Vulkan-Zitadelle (Zyklus #${v.cycleNumber}) ist gefallen — alle Stämme können jetzt um die Herrschaft kämpfen!`;
+      } else {
+        break;
+      }
+    }
+
+    if (changed) {
+      this.schedulePersist();
+    }
+    return { state: v, changed, announcement };
+  }
+
+  setVolcanoState(next: WorldVolcanoStateDTO): void {
+    this.volcanoState = next;
     this.schedulePersist();
   }
 

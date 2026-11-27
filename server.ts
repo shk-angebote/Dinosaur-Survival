@@ -17,6 +17,7 @@ import type {
   RealtimeEvent,
   ResourceKey,
   TeleportRequest,
+  VolcanoAttackRequest,
   WorldChatMessageDTO,
   WorldDynamicSpawnDTO,
   WorldMarchDTO,
@@ -24,6 +25,7 @@ import type {
   WorldNodeOccupantDTO,
   WorldSettlementDTO,
   WorldTradeDTO,
+  WorldVolcanoBattleLogDTO,
 } from './src/shared/apiTypes.ts';
 import { getPublicGameConfig } from './src/shared/gameConfig.ts';
 import {
@@ -40,7 +42,7 @@ import {
   verifyBearerHeader,
   verifyGuestSessionToken,
 } from './src/server/firebaseTokenVerifier.ts';
-import { PersistentWorldStore } from './src/server/worldStore.ts';
+import { PersistentWorldStore, VOLCANO_GUARDIAN_POWER } from './src/server/worldStore.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -114,6 +116,7 @@ async function startServer() {
   function buildWorldSnapshot() {
     const nowMs = Date.now();
     worldStore.pruneExpiredMarches(nowMs);
+    const volcanoSync = worldStore.syncVolcanoCycle(nowMs);
     return {
       serverTimeMs: nowMs,
       onlinePlayers: getOnlineCount(),
@@ -123,8 +126,31 @@ async function startServer() {
       trades: worldStore.getRecentTrades(),
       nodeOccupants: Array.from(worldStore.nodeOccupants.values()),
       dynamicSpawns: Array.from(worldStore.dynamicSpawns.values()),
+      volcano: volcanoSync.state,
     };
   }
+
+  // Automatische 4-Wochen-Zyklus-Überwachung für die zentrale Vulkan-Zitadelle
+  setInterval(() => {
+    const nowMs = Date.now();
+    const synced = worldStore.syncVolcanoCycle(nowMs);
+    if (synced.changed) {
+      broadcast({ type: 'world:volcano', payload: synced.state });
+      if (synced.announcement) {
+        const sysMsg: WorldChatMessageDTO = {
+          messageId: `sys_volcano_${nowMs}_${Math.floor(Math.random() * 999)}`,
+          uid: 'system_caldera',
+          tribeName: 'Caldera-Chronik',
+          bonfireLevel: 25,
+          text: synced.announcement,
+          channel: 'world',
+          createdAt: nowMs,
+        };
+        worldStore.appendChat(sysMsg);
+        broadcast({ type: 'chat:message', payload: sysMsg });
+      }
+    }
+  }, 15000);
 
   wss.on('connection', (ws) => {
     const initEvent: RealtimeEvent = { type: 'world:init', payload: buildWorldSnapshot() };
@@ -392,7 +418,7 @@ async function startServer() {
       marchId: body.marchId,
       uid: identity.uid,
       tribeName: sanitizeText(body.tribeName || existing?.tribeName || 'Urzeit-Stamm', 28) || 'Urzeit-Stamm',
-      kind: body.kind === 'hunt' ? 'hunt' : 'gather',
+      kind: body.kind === 'hunt' ? 'hunt' : body.kind === 'volcano' ? 'volcano' : 'gather',
       fromX: Math.max(0, Math.min(100, Number(body.fromX ?? existing?.fromX ?? 0))),
       fromY: Math.max(0, Math.min(100, Number(body.fromY ?? existing?.fromY ?? 0))),
       toX: Math.max(0, Math.min(100, Number(body.toX ?? existing?.toX ?? 0))),
@@ -786,6 +812,197 @@ async function startServer() {
     worldStore.upsertDynamicSpawn(dto);
     broadcast({ type: 'world:spawn_update', payload: dto });
     res.json({ ok: true, spawn: dto, serverTimeMs: nowMs });
+  });
+
+  // 16. Zentrale Vulkan-Zitadelle: Status & 4-Wochen-Server-Schlacht
+  app.get('/api/v1/world/volcano', (_req, res) => {
+    const nowMs = Date.now();
+    const synced = worldStore.syncVolcanoCycle(nowMs);
+    res.json({
+      ok: true,
+      volcano: synced.state,
+      serverTimeMs: nowMs,
+    });
+  });
+
+  app.post('/api/v1/world/volcano/attack', async (req, res) => {
+    const identity = await verifyBearerHeader(req.headers.authorization);
+    if (!identity) {
+      res.status(401).json({ ok: false, error: 'Sitzungstoken erforderlich.' });
+      return;
+    }
+
+    const nowMs = Date.now();
+    const synced = worldStore.syncVolcanoCycle(nowMs);
+    const v = synced.state;
+
+    if (v.phase !== 'battle') {
+      res.status(409).json({
+        ok: false,
+        won: false,
+        attackerLossRate: 0,
+        defenderLossRate: 0,
+        defenderName: v.holderTribeName || 'Vulkan-Wächter',
+        defenderPower: v.garrisonPower,
+        volcano: v,
+        serverTimeMs: nowMs,
+        error: 'Der Vulkan-Schild ist aktiv! Kämpfe sind erst beim nächsten 4-Wochen-Event wieder möglich.',
+      });
+      return;
+    }
+
+    const body = (req.body || {}) as Partial<VolcanoAttackRequest>;
+    const settlement = worldStore.settlements.get(identity.uid);
+    const tribeName =
+      sanitizeText(body.tribeName || settlement?.tribeName || 'Glutstamm', 28) || 'Glutstamm';
+    const rawPower = Math.floor(Number(body.squadPower || 0));
+    if (!Number.isFinite(rawPower) || rawPower < 10) {
+      res.status(400).json({ ok: false, error: 'Mindestens ein gültiger Kampftrupp erforderlich.' });
+      return;
+    }
+    const squadPower = Math.max(10, Math.min(250000, rawPower));
+    const heroNames = Array.isArray(body.heroNames)
+      ? body.heroNames
+          .slice(0, 3)
+          .map((n) => sanitizeText(n, 28))
+          .filter(Boolean)
+      : [];
+    const troops = {
+      slinger: Math.max(0, Math.min(20000, Math.floor(Number(body.troops?.slinger || 0)))),
+      clubman: Math.max(0, Math.min(20000, Math.floor(Number(body.troops?.clubman || 0)))),
+      dinorider: Math.max(0, Math.min(20000, Math.floor(Number(body.troops?.dinorider || 0)))),
+    };
+
+    // Bereits Herrscher der Zitadelle → Garnison verstärken!
+    if (v.holderUid && v.holderUid === identity.uid) {
+      const nextGarrisonPower = Math.max(v.garrisonPower, Math.round(v.garrisonPower * 0.65 + squadPower * 0.55));
+      v.holderTribeName = tribeName;
+      v.garrisonPower = Math.min(350000, nextGarrisonPower);
+      if (heroNames.length > 0) v.garrisonHeroNames = heroNames;
+      v.garrisonTroops = {
+        slinger: Math.min(30000, (v.garrisonTroops?.slinger || 0) + troops.slinger),
+        clubman: Math.min(30000, (v.garrisonTroops?.clubman || 0) + troops.clubman),
+        dinorider: Math.min(30000, (v.garrisonTroops?.dinorider || 0) + troops.dinorider),
+      };
+      v.updatedAt = nowMs;
+
+      const reinforceLog: WorldVolcanoBattleLogDTO = {
+        battleId: `volc_${nowMs}_${Math.floor(Math.random() * 9999)}`,
+        cycleNumber: v.cycleNumber,
+        attackerUid: identity.uid,
+        attackerTribeName: tribeName,
+        attackerPower: squadPower,
+        defenderUid: identity.uid,
+        defenderTribeName: tribeName,
+        defenderPower: v.garrisonPower,
+        attackerWon: true,
+        reinforced: true,
+        attackerLossRate: 0,
+        defenderLossRate: 0,
+        timestamp: nowMs,
+      };
+      v.recentBattles = [reinforceLog, ...(v.recentBattles || [])].slice(0, 12);
+      worldStore.setVolcanoState(v);
+      broadcast({ type: 'world:volcano', payload: v });
+      res.json({
+        ok: true,
+        won: true,
+        reinforced: true,
+        attackerLossRate: 0,
+        defenderLossRate: 0,
+        defenderName: tribeName,
+        defenderPower: v.garrisonPower,
+        battle: reinforceLog,
+        volcano: v,
+        serverTimeMs: nowMs,
+      });
+      return;
+    }
+
+    // Serverseitige Belagerungsschlacht um die Vulkan-Zitadelle
+    const defenderUid = v.holderUid || null;
+    const defenderName = v.holderTribeName || 'Vulkan-Wächter';
+    const defenderPower = Math.max(80, v.garrisonPower || VOLCANO_GUARDIAN_POWER);
+    const atkRoll = 0.9 + Math.random() * 0.2; // ±10% Schlachtglück
+    const defRoll = 0.9 + Math.random() * 0.2;
+    const attackerWon = squadPower * atkRoll >= defenderPower * defRoll;
+
+    const ratio = attackerWon
+      ? squadPower / Math.max(1, defenderPower)
+      : defenderPower / Math.max(1, squadPower);
+    const winnerLossRate = Number(Math.max(0.06, Math.min(0.2, 0.18 - (ratio - 1) * 0.08)).toFixed(3));
+    const loserLossRate = Number(Math.max(0.16, Math.min(0.32, 0.24 + (ratio - 1) * 0.08)).toFixed(3));
+    const attackerLossRate = attackerWon ? winnerLossRate : loserLossRate;
+    const defenderLossRate = attackerWon ? loserLossRate : winnerLossRate;
+
+    const battle: WorldVolcanoBattleLogDTO = {
+      battleId: `volc_${nowMs}_${Math.floor(Math.random() * 9999)}`,
+      cycleNumber: v.cycleNumber,
+      attackerUid: identity.uid,
+      attackerTribeName: tribeName,
+      attackerPower: squadPower,
+      defenderUid,
+      defenderTribeName: defenderName,
+      defenderPower,
+      attackerWon,
+      attackerLossRate,
+      defenderLossRate,
+      timestamp: nowMs,
+    };
+
+    if (attackerWon) {
+      v.holderUid = identity.uid;
+      v.holderTribeName = tribeName;
+      v.holderSince = nowMs;
+      v.garrisonPower = Math.max(120, Math.round(squadPower * (1 - attackerLossRate * 0.45)));
+      v.garrisonHeroNames = heroNames.length > 0 ? heroNames : ['Stammes-Garde'];
+      v.garrisonTroops = {
+        slinger: Math.max(0, troops.slinger - Math.floor(troops.slinger * attackerLossRate)),
+        clubman: Math.max(0, troops.clubman - Math.floor(troops.clubman * attackerLossRate)),
+        dinorider: Math.max(0, troops.dinorider - Math.floor(troops.dinorider * attackerLossRate)),
+      };
+    } else {
+      v.garrisonPower = Math.max(80, Math.round(defenderPower * (1 - defenderLossRate * 0.35)));
+      if (v.garrisonTroops) {
+        v.garrisonTroops = {
+          slinger: Math.max(0, Math.floor((v.garrisonTroops.slinger || 0) * (1 - defenderLossRate * 0.4))),
+          clubman: Math.max(0, Math.floor((v.garrisonTroops.clubman || 0) * (1 - defenderLossRate * 0.4))),
+          dinorider: Math.max(0, Math.floor((v.garrisonTroops.dinorider || 0) * (1 - defenderLossRate * 0.4))),
+        };
+      }
+    }
+
+    v.recentBattles = [battle, ...(v.recentBattles || [])].slice(0, 12);
+    v.updatedAt = nowMs;
+    worldStore.setVolcanoState(v);
+    broadcast({ type: 'world:volcano', payload: v });
+
+    // Server-Chronik im Welt-Chat bei Machtwechsel
+    if (attackerWon) {
+      const chatNotice: WorldChatMessageDTO = {
+        messageId: `sys_volc_win_${nowMs}_${Math.floor(Math.random() * 999)}`,
+        uid: 'system_caldera',
+        tribeName: 'Caldera-Chronik',
+        bonfireLevel: 25,
+        text: `🌋 Stamm „${tribeName}“ (KK ${squadPower}) hat ${defenderName} besiegt und die zentrale Vulkan-Zitadelle erobert!`,
+        channel: 'world',
+        createdAt: nowMs,
+      };
+      worldStore.appendChat(chatNotice);
+      broadcast({ type: 'chat:message', payload: chatNotice });
+    }
+
+    res.json({
+      ok: true,
+      won: attackerWon,
+      attackerLossRate,
+      defenderLossRate,
+      defenderName,
+      defenderPower,
+      battle,
+      volcano: v,
+      serverTimeMs: nowMs,
+    });
   });
 
   // ==================== FRONTEND AUSLIEFERUNG (VITE DEV ODER PROD DIST) ====================

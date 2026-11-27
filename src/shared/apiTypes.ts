@@ -22,7 +22,7 @@ export interface WorldMarchDTO {
   marchId: string;
   uid: string;
   tribeName: string;
-  kind: 'gather' | 'hunt';
+  kind: 'gather' | 'hunt' | 'volcano';
   fromX: number;
   fromY: number;
   toX: number;
@@ -134,6 +134,65 @@ export interface NodeOccupyResponse {
   error?: string;
 }
 
+export type VolcanoPhase = 'battle' | 'peace';
+
+export interface WorldVolcanoBattleLogDTO {
+  battleId: string;
+  cycleNumber: number;
+  attackerUid: string;
+  attackerTribeName: string;
+  attackerPower: number;
+  defenderUid: string | null;
+  defenderTribeName: string;
+  defenderPower: number;
+  attackerWon: boolean;
+  reinforced?: boolean;
+  attackerLossRate: number;
+  defenderLossRate: number;
+  timestamp: number;
+}
+
+export interface WorldVolcanoStateDTO {
+  cycleNumber: number;
+  cycleIntervalMs: number;
+  battleDurationMs: number;
+  phase: VolcanoPhase;
+  cycleStartedAt: number;
+  battleEndsAt: number;
+  nextBattleStartAt: number;
+  holderUid: string | null;
+  holderTribeName: string | null;
+  holderSince: number | null;
+  garrisonPower: number;
+  garrisonHeroNames: string[];
+  garrisonTroops: Record<TroopKey, number>;
+  reignCount: number;
+  recentBattles: WorldVolcanoBattleLogDTO[];
+  updatedAt: number;
+}
+
+export interface VolcanoAttackRequest {
+  tribeName: string;
+  squadPower: number;
+  heroIds: string[];
+  heroNames: string[];
+  troops: Record<TroopKey, number>;
+}
+
+export interface VolcanoAttackResponse {
+  ok: boolean;
+  won: boolean;
+  reinforced?: boolean;
+  attackerLossRate: number;
+  defenderLossRate: number;
+  defenderName: string;
+  defenderPower: number;
+  battle?: WorldVolcanoBattleLogDTO;
+  volcano: WorldVolcanoStateDTO;
+  serverTimeMs: number;
+  error?: string;
+}
+
 export interface BuildValidationRequest {
   buildingId: string;
   currentLevel: number;
@@ -217,6 +276,7 @@ export interface WorldStateResponse {
   trades?: WorldTradeDTO[];
   nodeOccupants?: WorldNodeOccupantDTO[];
   dynamicSpawns?: WorldDynamicSpawnDTO[];
+  volcano?: WorldVolcanoStateDTO;
 }
 
 export interface TeleportRequest {
@@ -267,6 +327,7 @@ export type RealtimeEvent =
   | { type: 'world:node_occupant'; payload: { nodeId: string; occupant: WorldNodeOccupantDTO | null } }
   | { type: 'world:node_contest'; payload: WorldNodeContestResultDTO }
   | { type: 'world:spawn_update'; payload: WorldDynamicSpawnDTO }
+  | { type: 'world:volcano'; payload: WorldVolcanoStateDTO }
   | { type: 'chat:message'; payload: WorldChatMessageDTO }
   | { type: 'world:presence'; payload: { onlinePlayers: number; serverTimeMs: number } };
 
