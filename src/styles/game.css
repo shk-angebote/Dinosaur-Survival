@@ -4763,6 +4763,146 @@
   opacity: 0.45;
   cursor: not-allowed;
 }
+.mp-trade-hint {
+  font-size: 10px;
+  color: #a8a29e;
+  line-height: 1.3;
+}
+.mp-fab-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(245, 158, 11, 0.24);
+  border: 1px solid rgba(251, 191, 36, 0.55);
+  color: #fde68a;
+  font-size: 10px;
+  font-weight: 700;
+}
+.mp-trades-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.mp-trade-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid rgba(245, 239, 230, 0.12);
+  background: rgba(24, 21, 19, 0.94);
+}
+.mp-trade-card.needs-action {
+  border-color: rgba(251, 191, 36, 0.48);
+  background: rgba(38, 28, 16, 0.86);
+}
+.mp-trade-card.status-completed {
+  border-color: rgba(74, 222, 128, 0.32);
+  background: rgba(16, 32, 22, 0.72);
+}
+.mp-trade-card.status-cancelled {
+  opacity: 0.65;
+}
+.mp-trade-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.mp-trade-dir-tag {
+  font-size: 9.5px;
+  font-weight: 700;
+  color: #93c5fd;
+  background: rgba(30, 64, 175, 0.25);
+  border: 1px solid rgba(96, 165, 250, 0.28);
+  padding: 1px 5px;
+  border-radius: 5px;
+  flex-shrink: 0;
+}
+.mp-trade-status-tag {
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 5px;
+  flex-shrink: 0;
+}
+.mp-trade-status-tag.is-pending {
+  color: #fde68a;
+  background: rgba(146, 64, 14, 0.35);
+}
+.mp-trade-status-tag.is-completed {
+  color: #86efac;
+  background: rgba(22, 101, 52, 0.35);
+}
+.mp-trade-status-tag.is-cancelled {
+  color: #a8a29e;
+  background: rgba(68, 64, 60, 0.45);
+}
+.mp-trade-exchange {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 4px 7px;
+  border-radius: 6px;
+  background: rgba(12, 10, 9, 0.6);
+}
+.mp-trade-exchange .is-give {
+  color: #fca5a5;
+}
+.mp-trade-exchange .mp-trade-arrow {
+  color: #a8a29e;
+}
+.mp-trade-exchange .is-get {
+  color: #86efac;
+}
+.mp-trade-confirms {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.mp-confirm-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+}
+.mp-confirm-pill.is-done {
+  color: #86efac;
+  background: rgba(22, 101, 52, 0.36);
+  border: 1px solid rgba(74, 222, 128, 0.4);
+}
+.mp-confirm-pill.is-wait {
+  color: #d6cfc2;
+  background: rgba(41, 37, 36, 0.68);
+  border: 1px solid rgba(245, 239, 230, 0.14);
+}
+.mp-trade-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.mp-trade-cancel-btn {
+  padding: 5px 9px;
+  border-radius: 7px;
+  border: 1px solid rgba(248, 113, 113, 0.42);
+  background: rgba(127, 29, 29, 0.45);
+  color: #fecaca;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.mp-trade-cancel-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 .mp-nearby-info {
   min-width: 0;
   flex: 1;

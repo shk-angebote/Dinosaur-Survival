@@ -7,6 +7,7 @@
 4. **Immutable Chat Messages (`world_chat/{messageId}`)**: Signed-in users may only create messages under their own `uid` with `channel == 'world'`, `text.size()` between 1 and 240, and `createdAt == request.time`. Messages cannot be edited or deleted by clients.
 5. **Terminal State Locking (`world_marches/{marchId}`)**: Once a march reaches `status == 'completed'`, it can never be updated again.
 6. **Strict Timestamp Integrity**: All `createdAt` and `updatedAt` fields must equal `request.time` on write.
+7. **Dual-Confirmation Trade Integrity (`world_trades/{tradeId}`)**: Trades start `pending` with `fromConfirmed: false` and `toConfirmed: false`. Only `fromUid` may flip `fromConfirmed` to `true`, only `toUid` may flip `toConfirmed` to `true`, and `status` may only transition to `completed` once both sides are `true`. Trade terms are immutable, and terminal states (`completed`, `cancelled`) are permanently locked. Only trade participants may read or list their trades.
 
 ## 2. The "Dirty Dozen" Adversarial Payloads (Must All Be Rejected)
 1. **Cross-User Private Save Read**: User B attempts `get` on `/users/userA/private/save` -> `PERMISSION_DENIED`.
@@ -21,3 +22,6 @@
 10. **March Terminal State Reopen**: User A attempts to change `/world_marches/m1` from `status: 'completed'` back to `'active'` -> `PERMISSION_DENIED`.
 11. **Oversized String Payload (Denial of Wallet)**: User A submits 500-character `tribeName` or 5000-character chat `text` -> `PERMISSION_DENIED`.
 12. **Unauthenticated Access**: Unauthenticated caller attempts `list` on `/world_settlements` or `/world_chat` -> `PERMISSION_DENIED`.
+13. **Unilateral Trade Confirmation / Forgery**: User A attempts to create `/world_trades/t1` already marked `toConfirmed: true` or `status: 'completed'`, or updates `toConfirmed: true` on behalf of User B -> `PERMISSION_DENIED`.
+14. **Trade Term Tampering**: User B attempts to alter `offerAmount` or `requestResource` while confirming `/world_trades/t1` -> `PERMISSION_DENIED`.
+15. **Third-Party Trade Snooping**: User C attempts `get` or `list` on `/world_trades/t1` between User A and User B -> `PERMISSION_DENIED`.

@@ -8941,6 +8941,54 @@ export function initGameRuntime(hooks = {}) {
               }
               renderWorldChatUI();
             },
+            onTradeCompleted: (trade, myUid) => {
+              try {
+                if (!trade || trade.status !== 'completed' || !trade.fromConfirmed || !trade.toConfirmed) return;
+                const validKeys = ['meat', 'wood', 'stone', 'fur'];
+                const isSender = trade.fromUid === myUid;
+                const isRecipient = trade.toUid === myUid;
+                if (!isSender && !isRecipient) return;
+                const giveRes = isSender ? trade.offerResource : trade.requestResource;
+                const giveAmt = Math.max(1, Math.floor(Number(isSender ? trade.offerAmount : trade.requestAmount) || 0));
+                const getRes = isSender ? trade.requestResource : trade.offerResource;
+                const getAmt = Math.max(1, Math.floor(Number(isSender ? trade.requestAmount : trade.offerAmount) || 0));
+                if (!validKeys.includes(giveRes) || !validKeys.includes(getRes) || giveRes === getRes) return;
+
+                state.resources[giveRes] = Math.max(0, Number(state.resources[giveRes] || 0) - giveAmt);
+                state.resources[getRes] = Number(state.resources[getRes] || 0) + getAmt;
+
+                if (typeof SoundFX !== 'undefined' && typeof SoundFX.play === 'function') {
+                  SoundFX.play('upgrade');
+                }
+                if (typeof saveState === 'function') saveState();
+                if (typeof renderAll === 'function') renderAll();
+                if (typeof emitSnapshot === 'function') emitSnapshot();
+
+                const partnerName = isSender ? trade.toTribeName : trade.fromTribeName;
+                const partnerUid = isSender ? trade.toUid : trade.fromUid;
+                const giveLabel = RESOURCE_LABELS[giveRes] || giveRes;
+                const getLabel = RESOURCE_LABELS[getRes] || getRes;
+                if (typeof showToast === 'function') {
+                  showToast(
+                    `Handel mit ${partnerName} beidseitig bestätigt: -${giveAmt} ${giveLabel} → +${getAmt} ${getLabel}`,
+                    'ok'
+                  );
+                }
+
+                const partnerSettlement = (mpWorld.settlements || []).find((s) => s.uid === partnerUid);
+                if (partnerSettlement && typeof broadcastNeighborCaravan === 'function') {
+                  broadcastNeighborCaravan(partnerSettlement, `Handel: ${partnerName}`);
+                }
+                if (isSender && window.DinoMultiplayer) {
+                  void window.DinoMultiplayer.sendChat(
+                    `🤝 Handel mit ${partnerName} beidseitig bestätigt: ${giveAmt} ${giveLabel} ↔ ${getAmt} ${getLabel}.`,
+                    state?.buildings?.bonfire?.level || 1
+                  ).catch(() => {});
+                }
+              } catch {
+                // ignore non-fatal trade settlement error
+              }
+            },
             onCloudStateLoaded: (cloudState, tribeName) => {
               if (cloudState && typeof cloudState === 'object' && cloudState.buildings) {
                 try {

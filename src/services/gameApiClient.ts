@@ -7,11 +7,13 @@ import type {
   MigrateGuestResponse,
   PlayerSaveDTO,
   RealtimeEvent,
+  ResourceKey,
   TeleportRequest,
   TeleportResponse,
   WorldChatMessageDTO,
   WorldMarchDTO,
   WorldStateResponse,
+  WorldTradeDTO,
 } from '../shared/apiTypes';
 
 async function fetchJson<T>(url: string, init?: RequestInit, bearerToken?: string | null): Promise<T> {
@@ -169,6 +171,46 @@ export async function postChatMessage(
 ): Promise<{ ok: boolean; message?: WorldChatMessageDTO; serverTimeMs: number }> {
   return fetchJson(
     '/api/v1/chat',
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+    bearerToken
+  );
+}
+
+export async function postProposeTrade(
+  payload: {
+    tradeId: string;
+    fromTribeName: string;
+    toUid: string;
+    toTribeName: string;
+    offerResource: ResourceKey;
+    offerAmount: number;
+    requestResource: ResourceKey;
+    requestAmount: number;
+  },
+  bearerToken: string
+): Promise<{ ok: boolean; trade?: WorldTradeDTO; error?: string; serverTimeMs?: number }> {
+  return fetchJson(
+    '/api/v1/world/trade/propose',
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+    bearerToken
+  );
+}
+
+export async function postRespondTrade(
+  payload: {
+    tradeId: string;
+    action: 'confirm' | 'cancel';
+  },
+  bearerToken: string
+): Promise<{ ok: boolean; trade?: WorldTradeDTO; error?: string; serverTimeMs?: number }> {
+  return fetchJson(
+    '/api/v1/world/trade/respond',
     {
       method: 'POST',
       body: JSON.stringify(payload),

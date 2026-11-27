@@ -43,6 +43,25 @@ export interface WorldChatMessageDTO {
   createdAt: number;
 }
 
+export type WorldTradeStatus = 'pending' | 'completed' | 'cancelled';
+
+export interface WorldTradeDTO {
+  tradeId: string;
+  fromUid: string;
+  fromTribeName: string;
+  toUid: string;
+  toTribeName: string;
+  offerResource: ResourceKey;
+  offerAmount: number;
+  requestResource: ResourceKey;
+  requestAmount: number;
+  fromConfirmed: boolean;
+  toConfirmed: boolean;
+  status: WorldTradeStatus;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface BuildValidationRequest {
   buildingId: string;
   currentLevel: number;
@@ -123,6 +142,7 @@ export interface WorldStateResponse {
   settlements: WorldSettlementDTO[];
   marches: WorldMarchDTO[];
   chat: WorldChatMessageDTO[];
+  trades?: WorldTradeDTO[];
 }
 
 export interface TeleportRequest {
@@ -169,6 +189,7 @@ export type RealtimeEvent =
   | { type: 'world:settlement'; payload: WorldSettlementDTO }
   | { type: 'world:settlement_removed'; payload: { uid: string } }
   | { type: 'world:march'; payload: WorldMarchDTO }
+  | { type: 'world:trade'; payload: WorldTradeDTO }
   | { type: 'chat:message'; payload: WorldChatMessageDTO }
   | { type: 'world:presence'; payload: { onlinePlayers: number; serverTimeMs: number } };
 

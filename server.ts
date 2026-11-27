@@ -14,10 +14,12 @@ import type {
   BuildValidationRequest,
   DinoHuntCombatRequest,
   RealtimeEvent,
+  ResourceKey,
   TeleportRequest,
   WorldChatMessageDTO,
   WorldMarchDTO,
   WorldSettlementDTO,
+  WorldTradeDTO,
 } from './src/shared/apiTypes.ts';
 import { getPublicGameConfig } from './src/shared/gameConfig.ts';
 import {
@@ -114,6 +116,7 @@ async function startServer() {
       settlements: Array.from(worldStore.settlements.values()),
       marches: Array.from(worldStore.activeMarches.values()),
       chat: worldStore.chatHistory.slice(-60),
+      trades: worldStore.getRecentTrades(),
     };
   }
 
@@ -430,6 +433,145 @@ async function startServer() {
     worldStore.appendChat(msg);
     broadcast({ type: 'chat:message', payload: msg });
     res.json({ ok: true, message: msg, serverTimeMs: nowMs });
+  });
+
+  // 12. Zweiseitiger Ressourcen-Handel (Beide Teilnehmer müssen bestätigen)
+  const VALID_TRADE_RESOURCES: ReadonlySet<string> = new Set(['meat', 'wood', 'stone', 'fur']);
+
+  app.post('/api/v1/world/trade/propose', async (req, res) => {
+    const identity = await verifyBearerHeader(req.headers.authorization);
+    if (!identity) {
+      res.status(401).json({ ok: false, error: 'Sitzungstoken erforderlich.' });
+      return;
+    }
+    const body = (req.body || {}) as Partial<WorldTradeDTO>;
+    const toUid = typeof body.toUid === 'string' ? body.toUid.trim() : '';
+    if (!isValidId(toUid) || toUid === identity.uid) {
+      res.status(400).json({ ok: false, error: 'Ungültiger Handelspartner.' });
+      return;
+    }
+    if (
+      typeof body.offerResource !== 'string' ||
+      typeof body.requestResource !== 'string' ||
+      !VALID_TRADE_RESOURCES.has(body.offerResource) ||
+      !VALID_TRADE_RESOURCES.has(body.requestResource) ||
+      body.offerResource === body.requestResource
+    ) {
+      res.status(400).json({ ok: false, error: 'Ungültige Ressourcenauswahl.' });
+      return;
+    }
+    const offerAmount = Math.floor(Number(body.offerAmount || 0));
+    const requestAmount = Math.floor(Number(body.requestAmount || 0));
+    if (
+      !Number.isFinite(offerAmount) ||
+      !Number.isFinite(requestAmount) ||
+      offerAmount < 1 ||
+      offerAmount > 5000 ||
+      requestAmount < 1 ||
+      requestAmount > 5000
+    ) {
+      res.status(400).json({ ok: false, error: 'Ungültige Handelsmenge (1–5000).' });
+      return;
+    }
+
+    const nowMs = Date.now();
+    const tradeId = isValidId(body.tradeId)
+      ? body.tradeId.slice(0, 96)
+      : `trd_${nowMs}_${Math.floor(Math.random() * 99999)}`;
+
+    if (worldStore.trades.has(tradeId)) {
+      res.status(409).json({ ok: false, error: 'Tausch-ID existiert bereits.' });
+      return;
+    }
+
+    const fromTribeName =
+      sanitizeText(
+        body.fromTribeName || worldStore.settlements.get(identity.uid)?.tribeName || 'Urzeit-Stamm',
+        28
+      ) || 'Urzeit-Stamm';
+    const toTribeName =
+      sanitizeText(
+        body.toTribeName || worldStore.settlements.get(toUid)?.tribeName || 'Nachbar-Stamm',
+        28
+      ) || 'Nachbar-Stamm';
+
+    const trade: WorldTradeDTO = {
+      tradeId,
+      fromUid: identity.uid,
+      fromTribeName,
+      toUid,
+      toTribeName,
+      offerResource: body.offerResource as ResourceKey,
+      offerAmount,
+      requestResource: body.requestResource as ResourceKey,
+      requestAmount,
+      fromConfirmed: false,
+      toConfirmed: false,
+      status: 'pending',
+      createdAt: nowMs,
+      updatedAt: nowMs,
+    };
+
+    worldStore.upsertTrade(trade);
+    broadcast({ type: 'world:trade', payload: trade });
+    res.json({ ok: true, trade, serverTimeMs: nowMs });
+  });
+
+  app.post('/api/v1/world/trade/respond', async (req, res) => {
+    const identity = await verifyBearerHeader(req.headers.authorization);
+    if (!identity) {
+      res.status(401).json({ ok: false, error: 'Sitzungstoken erforderlich.' });
+      return;
+    }
+    const body = (req.body || {}) as { tradeId?: string; action?: string };
+    if (!isValidId(body.tradeId) || (body.action !== 'confirm' && body.action !== 'cancel')) {
+      res.status(400).json({ ok: false, error: 'Ungültige Tausch-Antwort.' });
+      return;
+    }
+    const existing = worldStore.trades.get(body.tradeId);
+    if (!existing) {
+      res.status(404).json({ ok: false, error: 'Tauschangebot nicht gefunden.' });
+      return;
+    }
+    const isSender = existing.fromUid === identity.uid;
+    const isRecipient = existing.toUid === identity.uid;
+    if (!isSender && !isRecipient) {
+      res.status(403).json({ ok: false, error: 'Keine Berechtigung für dieses Tauschangebot.' });
+      return;
+    }
+    if (existing.status !== 'pending') {
+      res.status(409).json({
+        ok: false,
+        error: 'Dieser Tausch ist bereits abgeschlossen oder abgebrochen.',
+        trade: existing,
+      });
+      return;
+    }
+
+    const nowMs = Date.now();
+    let updated: WorldTradeDTO;
+    if (body.action === 'cancel') {
+      updated = {
+        ...existing,
+        status: 'cancelled',
+        updatedAt: nowMs,
+      };
+    } else {
+      const nextFromConfirmed = isSender ? true : existing.fromConfirmed;
+      const nextToConfirmed = isRecipient ? true : existing.toConfirmed;
+      const bothConfirmed = nextFromConfirmed && nextToConfirmed;
+      updated = {
+        ...existing,
+        fromConfirmed: nextFromConfirmed,
+        toConfirmed: nextToConfirmed,
+        status: bothConfirmed ? 'completed' : 'pending',
+        updatedAt: nowMs,
+      };
+    }
+
+    worldStore.upsertTrade(updated);
+    broadcast({ type: 'world:trade', payload: updated });
+    res.json({ ok: true, trade: updated, serverTimeMs: nowMs });
   });
 
   // ==================== FRONTEND AUSLIEFERUNG (VITE DEV ODER PROD DIST) ====================

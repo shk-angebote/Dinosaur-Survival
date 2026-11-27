@@ -203,6 +203,89 @@
         }
       },
       "required": ["messageId", "uid", "tribeName", "bonfireLevel", "text", "channel", "createdAt"]
+    },
+    "WorldTrade": {
+      "title": "WorldTrade",
+      "description": "Zweiseitiges Ressourcen-Tauschangebot zwischen zwei Stämmen mit doppelter Bestätigung (fromConfirmed & toConfirmed).",
+      "type": "object",
+      "properties": {
+        "tradeId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 96,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "fromUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "fromTribeName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 28
+        },
+        "toUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "toTribeName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 28
+        },
+        "offerResource": {
+          "type": "string",
+          "enum": ["meat", "wood", "stone", "fur"]
+        },
+        "offerAmount": {
+          "type": "integer"
+        },
+        "requestResource": {
+          "type": "string",
+          "enum": ["meat", "wood", "stone", "fur"]
+        },
+        "requestAmount": {
+          "type": "integer"
+        },
+        "fromConfirmed": {
+          "type": "boolean"
+        },
+        "toConfirmed": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "completed", "cancelled"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "tradeId",
+        "fromUid",
+        "fromTribeName",
+        "toUid",
+        "toTribeName",
+        "offerResource",
+        "offerAmount",
+        "requestResource",
+        "requestAmount",
+        "fromConfirmed",
+        "toConfirmed",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -225,6 +308,10 @@
     "/world_chat/{messageId}": {
       "schema": { "$ref": "#/entities/WorldChatMessage" },
       "description": "Globaler Echtzeit-Welt-Chat."
+    },
+    "/world_trades/{tradeId}": {
+      "schema": { "$ref": "#/entities/WorldTrade" },
+      "description": "Zweiseitige Ressourcen-Tauschangebote mit beidseitiger Bestätigung."
     }
   }
 }

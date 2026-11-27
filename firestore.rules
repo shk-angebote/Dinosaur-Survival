@@ -93,6 +93,25 @@ service cloud.firestore {
         && data.createdAt == request.time;
     }
 
+    function isValidWorldTrade(data, tradeId) {
+      return data.keys().hasAll(['tradeId', 'fromUid', 'fromTribeName', 'toUid', 'toTribeName', 'offerResource', 'offerAmount', 'requestResource', 'requestAmount', 'fromConfirmed', 'toConfirmed', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['tradeId', 'fromUid', 'fromTribeName', 'toUid', 'toTribeName', 'offerResource', 'offerAmount', 'requestResource', 'requestAmount', 'fromConfirmed', 'toConfirmed', 'status', 'createdAt', 'updatedAt'])
+        && data.tradeId is string && data.tradeId.size() >= 3 && data.tradeId.size() <= 96 && data.tradeId == tradeId && isValidId(data.tradeId)
+        && data.fromUid is string && data.fromUid.size() >= 1 && data.fromUid.size() <= 128 && isValidId(data.fromUid)
+        && data.fromTribeName is string && data.fromTribeName.size() >= 2 && data.fromTribeName.size() <= 28
+        && data.toUid is string && data.toUid.size() >= 1 && data.toUid.size() <= 128 && isValidId(data.toUid) && data.toUid != data.fromUid
+        && data.toTribeName is string && data.toTribeName.size() >= 2 && data.toTribeName.size() <= 28
+        && data.offerResource is string && data.offerResource.size() >= 3 && data.offerResource.size() <= 8 && data.offerResource in ['meat', 'wood', 'stone', 'fur']
+        && data.offerAmount is int && data.offerAmount >= 1 && data.offerAmount <= 5000
+        && data.requestResource is string && data.requestResource.size() >= 3 && data.requestResource.size() <= 8 && data.requestResource in ['meat', 'wood', 'stone', 'fur'] && data.requestResource != data.offerResource
+        && data.requestAmount is int && data.requestAmount >= 1 && data.requestAmount <= 5000
+        && data.fromConfirmed is bool
+        && data.toConfirmed is bool
+        && data.status is string && data.status.size() >= 7 && data.status.size() <= 10 && data.status in ['pending', 'completed', 'cancelled']
+        && data.createdAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
     // 4. Collection Rules
 
     // Spieler-Unterkollektionen: Öffentliches Profil vs. Privater Spielstand (PII-Isolation)
@@ -165,6 +184,68 @@ service cloud.firestore {
         && isValidId(messageId)
         && isValidWorldChatMessage(incoming(), messageId);
       allow update, delete: if false;
+    }
+
+    // Zweiseitiger Ressourcen-Handel (Beide Teilnehmer müssen bestätigen; unveränderliche Konditionen & Terminal-State-Lock)
+    match /world_trades/{tradeId} {
+      allow get: if isSignedIn()
+        && isValidId(tradeId)
+        && (existing().fromUid == request.auth.uid || existing().toUid == request.auth.uid);
+      allow list: if isSignedIn()
+        && request.query.limit <= 30
+        && (existing().fromUid == request.auth.uid || existing().toUid == request.auth.uid);
+      allow create: if isSignedIn()
+        && isValidId(tradeId)
+        && isValidWorldTrade(incoming(), tradeId)
+        && incoming().fromUid == request.auth.uid
+        && incoming().fromConfirmed == false
+        && incoming().toConfirmed == false
+        && incoming().status == 'pending'
+        && incoming().createdAt == request.time;
+      allow update: if isSignedIn()
+        && isValidId(tradeId)
+        && isValidWorldTrade(incoming(), tradeId)
+        && existing().status == 'pending'
+        && incoming().tradeId == existing().tradeId
+        && incoming().fromUid == existing().fromUid
+        && incoming().fromTribeName == existing().fromTribeName
+        && incoming().toUid == existing().toUid
+        && incoming().toTribeName == existing().toTribeName
+        && incoming().offerResource == existing().offerResource
+        && incoming().offerAmount == existing().offerAmount
+        && incoming().requestResource == existing().requestResource
+        && incoming().requestAmount == existing().requestAmount
+        && incoming().createdAt == existing().createdAt
+        && (
+          (
+            existing().fromUid == request.auth.uid
+            && existing().fromConfirmed == false
+            && incoming().fromConfirmed == true
+            && incoming().toConfirmed == existing().toConfirmed
+            && (
+              (existing().toConfirmed == true && incoming().status == 'completed' && incoming().diff(existing()).affectedKeys().hasOnly(['fromConfirmed', 'status', 'updatedAt']))
+              || (existing().toConfirmed == false && incoming().status == 'pending' && incoming().diff(existing()).affectedKeys().hasOnly(['fromConfirmed', 'updatedAt']))
+            )
+          )
+          || (
+            existing().toUid == request.auth.uid
+            && existing().toConfirmed == false
+            && incoming().toConfirmed == true
+            && incoming().fromConfirmed == existing().fromConfirmed
+            && (
+              (existing().fromConfirmed == true && incoming().status == 'completed' && incoming().diff(existing()).affectedKeys().hasOnly(['toConfirmed', 'status', 'updatedAt']))
+              || (existing().fromConfirmed == false && incoming().status == 'pending' && incoming().diff(existing()).affectedKeys().hasOnly(['toConfirmed', 'updatedAt']))
+            )
+          )
+          || (
+            (existing().fromUid == request.auth.uid || existing().toUid == request.auth.uid)
+            && incoming().fromConfirmed == existing().fromConfirmed
+            && incoming().toConfirmed == existing().toConfirmed
+            && incoming().status == 'cancelled'
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+          )
+        );
+      allow delete: if false;
     }
   }
 }

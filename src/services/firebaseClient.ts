@@ -18,6 +18,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
@@ -27,9 +28,11 @@ import {
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import type {
+  ResourceKey,
   WorldChatMessageDTO,
   WorldMarchDTO,
   WorldSettlementDTO,
+  WorldTradeDTO,
 } from '../shared/apiTypes';
 
 export enum OperationType {
@@ -385,14 +388,159 @@ export async function publishChatToFirestore(msg: {
   }
 }
 
+function normalizeTradeResource(raw: unknown): ResourceKey {
+  if (raw === 'meat' || raw === 'wood' || raw === 'stone' || raw === 'fur') return raw;
+  return 'wood';
+}
+
+function parseTradeDoc(id: string, d: Record<string, unknown>): WorldTradeDTO {
+  const createdAt =
+    typeof (d.createdAt as { toMillis?: () => number } | undefined)?.toMillis === 'function'
+      ? (d.createdAt as { toMillis: () => number }).toMillis()
+      : Date.now();
+  const updatedAt =
+    typeof (d.updatedAt as { toMillis?: () => number } | undefined)?.toMillis === 'function'
+      ? (d.updatedAt as { toMillis: () => number }).toMillis()
+      : createdAt;
+  const status =
+    d.status === 'completed' || d.status === 'cancelled' ? d.status : 'pending';
+  return {
+    tradeId: String(d.tradeId || id),
+    fromUid: String(d.fromUid || ''),
+    fromTribeName: sanitizeTribeName(String(d.fromTribeName || 'Stamm')),
+    toUid: String(d.toUid || ''),
+    toTribeName: sanitizeTribeName(String(d.toTribeName || 'Nachbar')),
+    offerResource: normalizeTradeResource(d.offerResource),
+    offerAmount: clampInt(Number(d.offerAmount || 1), 1, 5000),
+    requestResource: normalizeTradeResource(d.requestResource),
+    requestAmount: clampInt(Number(d.requestAmount || 1), 1, 5000),
+    fromConfirmed: Boolean(d.fromConfirmed),
+    toConfirmed: Boolean(d.toConfirmed),
+    status,
+    createdAt,
+    updatedAt,
+  };
+}
+
+export async function createTradeInFirestore(trade: {
+  tradeId: string;
+  fromUid: string;
+  fromTribeName: string;
+  toUid: string;
+  toTribeName: string;
+  offerResource: ResourceKey;
+  offerAmount: number;
+  requestResource: ResourceKey;
+  requestAmount: number;
+}): Promise<void> {
+  if (!auth.currentUser || auth.currentUser.uid !== trade.fromUid) return;
+  const tradeId = sanitizeId(trade.tradeId);
+  const toUid = sanitizeId(trade.toUid);
+  if (tradeId.length < 3 || !toUid || toUid === trade.fromUid) return;
+  const path = `world_trades/${tradeId}`;
+  try {
+    await setDoc(doc(db, 'world_trades', tradeId), {
+      tradeId,
+      fromUid: trade.fromUid,
+      fromTribeName: sanitizeTribeName(trade.fromTribeName),
+      toUid,
+      toTribeName: sanitizeTribeName(trade.toTribeName),
+      offerResource: normalizeTradeResource(trade.offerResource),
+      offerAmount: clampInt(trade.offerAmount, 1, 5000),
+      requestResource: normalizeTradeResource(trade.requestResource),
+      requestAmount: clampInt(trade.requestAmount, 1, 5000),
+      fromConfirmed: false,
+      toConfirmed: false,
+      status: 'pending',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export async function confirmTradeInFirestore(tradeIdRaw: string): Promise<WorldTradeDTO | null> {
+  const myUid = auth.currentUser?.uid;
+  if (!myUid) return null;
+  const tradeId = sanitizeId(tradeIdRaw);
+  if (tradeId.length < 3) return null;
+  const path = `world_trades/${tradeId}`;
+  const ref = doc(db, 'world_trades', tradeId);
+  try {
+    return await runTransaction(db, async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists()) return null;
+      const current = parseTradeDoc(snap.id, snap.data() as Record<string, unknown>);
+      if (current.status !== 'pending') return current;
+
+      const isSender = current.fromUid === myUid;
+      const isRecipient = current.toUid === myUid;
+      if (!isSender && !isRecipient) return null;
+
+      if (isSender) {
+        if (current.fromConfirmed) return current;
+        const willComplete = current.toConfirmed;
+        tx.update(
+          ref,
+          willComplete
+            ? { fromConfirmed: true, status: 'completed', updatedAt: serverTimestamp() }
+            : { fromConfirmed: true, updatedAt: serverTimestamp() }
+        );
+        return {
+          ...current,
+          fromConfirmed: true,
+          status: willComplete ? 'completed' : 'pending',
+          updatedAt: Date.now(),
+        };
+      } else {
+        if (current.toConfirmed) return current;
+        const willComplete = current.fromConfirmed;
+        tx.update(
+          ref,
+          willComplete
+            ? { toConfirmed: true, status: 'completed', updatedAt: serverTimestamp() }
+            : { toConfirmed: true, updatedAt: serverTimestamp() }
+        );
+        return {
+          ...current,
+          toConfirmed: true,
+          status: willComplete ? 'completed' : 'pending',
+          updatedAt: Date.now(),
+        };
+      }
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function cancelTradeInFirestore(tradeIdRaw: string): Promise<void> {
+  if (!auth.currentUser) return;
+  const tradeId = sanitizeId(tradeIdRaw);
+  if (tradeId.length < 3) return;
+  const path = `world_trades/${tradeId}`;
+  try {
+    await updateDoc(doc(db, 'world_trades', tradeId), {
+      status: 'cancelled',
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.includes('No document to update') || msg.includes('not-found')) return;
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
 // --- Real-time Firestore World Listeners (ONLY attach when authenticated!) ---
 
 export function subscribeFirestoreWorld(handlers: {
   onSettlements: (list: WorldSettlementDTO[]) => void;
   onMarches: (list: WorldMarchDTO[]) => void;
   onChat: (list: WorldChatMessageDTO[]) => void;
+  onTrades?: (list: WorldTradeDTO[]) => void;
   onListenerStatus?: (
-    channel: 'settlements' | 'marches' | 'chat',
+    channel: 'settlements' | 'marches' | 'chat' | 'trades',
     status: 'ok' | 'error',
     detail: string
   ) => void;
@@ -401,6 +549,7 @@ export function subscribeFirestoreWorld(handlers: {
     return () => {};
   }
 
+  const currentUid = auth.currentUser.uid;
   const unsubs: Unsubscribe[] = [];
 
   const settlementsPath = 'world_settlements';
@@ -528,6 +677,73 @@ export function subscribeFirestoreWorld(handlers: {
           `${errObj?.code || 'error'}: ${errObj?.message || String(error)}`
         );
         handleFirestoreError(error, OperationType.LIST, chatPath);
+      }
+    )
+  );
+
+  // Zwei getrennte participant-scoped Queries für world_trades (kein Composite-Index nötig, 100% Rule-konform)
+  const tradesPath = 'world_trades';
+  const outgoingTrades = new Map<string, WorldTradeDTO>();
+  const incomingTrades = new Map<string, WorldTradeDTO>();
+  const emitMergedTrades = (src: string) => {
+    const merged = new Map<string, WorldTradeDTO>();
+    outgoingTrades.forEach((t, id) => merged.set(id, t));
+    incomingTrades.forEach((t, id) => merged.set(id, t));
+    const list = Array.from(merged.values());
+    handlers.onListenerStatus?.('trades', 'ok', `${list.length} Tauschangebote (${src})`);
+    handlers.onTrades?.(list);
+  };
+
+  const outgoingQuery = query(
+    collection(db, tradesPath),
+    where('fromUid', '==', currentUid),
+    limit(25)
+  );
+  unsubs.push(
+    onSnapshot(
+      outgoingQuery,
+      (snap) => {
+        outgoingTrades.clear();
+        snap.forEach((docSnap) => {
+          outgoingTrades.set(docSnap.id, parseTradeDoc(docSnap.id, docSnap.data() as Record<string, unknown>));
+        });
+        emitMergedTrades(snap.metadata.fromCache ? 'Cache' : 'Server');
+      },
+      (error) => {
+        const errObj = error as { code?: string; message?: string };
+        handlers.onListenerStatus?.(
+          'trades',
+          'error',
+          `${errObj?.code || 'error'}: ${errObj?.message || String(error)}`
+        );
+        handleFirestoreError(error, OperationType.LIST, tradesPath);
+      }
+    )
+  );
+
+  const incomingQuery = query(
+    collection(db, tradesPath),
+    where('toUid', '==', currentUid),
+    limit(25)
+  );
+  unsubs.push(
+    onSnapshot(
+      incomingQuery,
+      (snap) => {
+        incomingTrades.clear();
+        snap.forEach((docSnap) => {
+          incomingTrades.set(docSnap.id, parseTradeDoc(docSnap.id, docSnap.data() as Record<string, unknown>));
+        });
+        emitMergedTrades(snap.metadata.fromCache ? 'Cache' : 'Server');
+      },
+      (error) => {
+        const errObj = error as { code?: string; message?: string };
+        handlers.onListenerStatus?.(
+          'trades',
+          'error',
+          `${errObj?.code || 'error'}: ${errObj?.message || String(error)}`
+        );
+        handleFirestoreError(error, OperationType.LIST, tradesPath);
       }
     )
   );

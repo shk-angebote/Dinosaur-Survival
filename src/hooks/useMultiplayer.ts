@@ -5,9 +5,11 @@ import bridge, {
   type PlayerSession,
 } from '../multiplayerBridge';
 import type {
+  ResourceKey,
   WorldChatMessageDTO,
   WorldMarchDTO,
   WorldSettlementDTO,
+  WorldTradeDTO,
 } from '../shared/apiTypes';
 
 export interface MultiplayerSnapshot {
@@ -15,6 +17,7 @@ export interface MultiplayerSnapshot {
   settlements: WorldSettlementDTO[];
   marches: WorldMarchDTO[];
   chat: WorldChatMessageDTO[];
+  trades: WorldTradeDTO[];
   onlinePlayers: number;
   diagnostics: ConnectionDiagnostics;
   logs: DiagnosticLogEntry[];
@@ -28,6 +31,7 @@ function readSnapshot(): MultiplayerSnapshot {
     settlements: world.settlements,
     marches: world.marches,
     chat: world.chat,
+    trades: world.trades,
     onlinePlayers: world.onlinePlayers,
     diagnostics: bridge.getDiagnostics(),
     logs: bridge.getLogs(),
@@ -67,6 +71,26 @@ export function useMultiplayer() {
     bridge.clearLogs();
   }, []);
 
+  const proposeTrade = useCallback(
+    async (req: {
+      toUid: string;
+      toTribeName: string;
+      offerResource: ResourceKey;
+      offerAmount: number;
+      requestResource: ResourceKey;
+      requestAmount: number;
+    }) => bridge.proposeTrade(req),
+    []
+  );
+
+  const confirmTrade = useCallback(async (tradeId: string) => {
+    return bridge.confirmTrade(tradeId);
+  }, []);
+
+  const cancelTrade = useCallback(async (tradeId: string) => {
+    return bridge.cancelTrade(tradeId);
+  }, []);
+
   return {
     ...snapshot,
     sendChat,
@@ -75,5 +99,8 @@ export function useMultiplayer() {
     setTribeName,
     runDiagnostics,
     clearLogs,
+    proposeTrade,
+    confirmTrade,
+    cancelTrade,
   };
 }

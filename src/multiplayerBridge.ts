@@ -5,13 +5,18 @@ import type {
   DinoHuntCombatRequest,
   DinoHuntCombatResponse,
   RealtimeEvent,
+  ResourceKey,
   TeleportResponse,
   WorldChatMessageDTO,
   WorldMarchDTO,
   WorldSettlementDTO,
+  WorldTradeDTO,
 } from './shared/apiTypes';
 import {
+  cancelTradeInFirestore,
   completeMarchInFirestore,
+  confirmTradeInFirestore,
+  createTradeInFirestore,
   FIREBASE_DIAGNOSTIC_CONFIG,
   getFirebaseIdToken,
   loadCloudSave,
@@ -36,6 +41,8 @@ import {
   postDinoHuntCombat,
   postMarch,
   postMigrateGuest,
+  postProposeTrade,
+  postRespondTrade,
   postServerPlayerSave,
   postSettlement,
   postValidateBuild,
@@ -44,6 +51,7 @@ import {
 
 const GUEST_UID_KEY = 'glut_basalt_guest_uid_v1';
 const TRIBE_NAME_KEY = 'glut_basalt_tribe_name_v1';
+const SETTLED_TRADES_KEY = 'glut_basalt_settled_trades_v1';
 
 export type SyncState = 'connecting' | 'synced' | 'saving' | 'offline';
 export type ChannelHealth = 'idle' | 'connecting' | 'ok' | 'degraded' | 'error' | 'offline';
@@ -72,6 +80,7 @@ export interface ConnectionDiagnostics {
     settlements: ChannelHealth;
     marches: ChannelHealth;
     chat: ChannelHealth;
+    trades: ChannelHealth;
   };
   apiStatus: ChannelHealth;
   apiDetail: string;
@@ -107,6 +116,7 @@ export interface BridgeCallbacks {
     onlinePlayers: number;
   }) => void;
   onChatUpdate?: (messages: WorldChatMessageDTO[]) => void;
+  onTradeCompleted?: (trade: WorldTradeDTO, myUid: string) => void;
   onCloudStateLoaded?: (cloudState: Record<string, unknown>, tribeName: string) => void;
   getCurrentLocalState?: () => Record<string, unknown> | null;
   getCurrentSettlementMeta?: () => {
@@ -115,6 +125,25 @@ export interface BridgeCallbacks {
     tileX: number;
     tileY: number;
   } | null;
+}
+
+function loadSettledTradeIds(): string[] {
+  try {
+    const raw = localStorage.getItem(SETTLED_TRADES_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string').slice(-200) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveSettledTradeIds(ids: Set<string>): void {
+  try {
+    localStorage.setItem(SETTLED_TRADES_KEY, JSON.stringify(Array.from(ids).slice(-200)));
+  } catch {
+    // ignore storage quota errors
+  }
 }
 
 function getOrCreateGuestUid(): string {
@@ -163,6 +192,8 @@ class DinoMultiplayerBridge {
   private settlementsMap = new Map<string, WorldSettlementDTO>();
   private marchesMap = new Map<string, WorldMarchDTO>();
   private chatMap = new Map<string, WorldChatMessageDTO>();
+  private tradesMap = new Map<string, WorldTradeDTO>();
+  private settledTradeIds = new Set<string>(loadSettledTradeIds());
 
   private socket: GameRealtimeSocket | null = null;
   private unsubAuth: (() => void) | null = null;
@@ -186,6 +217,7 @@ class DinoMultiplayerBridge {
       settlements: 'idle',
       marches: 'idle',
       chat: 'idle',
+      trades: 'idle',
     },
     apiStatus: 'connecting',
     apiDetail: 'Prüfe /api/v1/world/state...',
@@ -256,7 +288,8 @@ class DinoMultiplayerBridge {
       } else if (
         d.firestoreListeners.settlements === 'error' ||
         d.firestoreListeners.marches === 'error' ||
-        d.firestoreListeners.chat === 'error'
+        d.firestoreListeners.chat === 'error' ||
+        d.firestoreListeners.trades === 'error'
       ) {
         d.rootCauseHint = `Authentifiziert, aber ein Firestore-Echtzeit-Listener wurde blockiert (${d.lastError || 'Details im Log'}).`;
       } else if (d.firestoreStatus === 'offline') {
@@ -335,21 +368,69 @@ class DinoMultiplayerBridge {
     settlements: WorldSettlementDTO[];
     marches: WorldMarchDTO[];
     chat: WorldChatMessageDTO[];
+    trades: WorldTradeDTO[];
     onlinePlayers: number;
   } {
     const now = Date.now() + this.serverOffsetMs;
+    const myUid = this.getSession().uid;
     const marches = Array.from(this.marchesMap.values()).filter(
       (m) => m.status === 'active' && m.endsAt + 8000 >= now
     );
     const chat = Array.from(this.chatMap.values())
       .sort((a, b) => a.createdAt - b.createdAt)
       .slice(-60);
+    const trades = Array.from(this.tradesMap.values())
+      .filter((t) => t.fromUid === myUid || t.toUid === myUid)
+      .sort((a, b) => {
+        if (a.status === 'pending' && b.status !== 'pending') return -1;
+        if (a.status !== 'pending' && b.status === 'pending') return 1;
+        return (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt);
+      })
+      .slice(0, 30);
     return {
       settlements: Array.from(this.settlementsMap.values()),
       marches,
       chat,
+      trades,
       onlinePlayers: this.onlinePlayers,
     };
+  }
+
+  private upsertTradeAndCheckSettlement(trade: WorldTradeDTO): void {
+    const prev = this.tradesMap.get(trade.tradeId);
+    if (
+      !prev ||
+      trade.updatedAt >= prev.updatedAt ||
+      (prev.status === 'pending' && trade.status !== 'pending')
+    ) {
+      this.tradesMap.set(trade.tradeId, trade);
+    }
+    const latest = this.tradesMap.get(trade.tradeId);
+    if (latest) {
+      this.trySettleCompletedTrade(latest);
+    }
+  }
+
+  private trySettleCompletedTrade(trade: WorldTradeDTO): void {
+    if (trade.status !== 'completed' || !trade.fromConfirmed || !trade.toConfirmed) return;
+    if (!this.callbacks.onTradeCompleted) return;
+    const myUid = this.getSession().uid;
+    if (trade.fromUid !== myUid && trade.toUid !== myUid) return;
+    if (this.settledTradeIds.has(trade.tradeId)) return;
+
+    this.settledTradeIds.add(trade.tradeId);
+    saveSettledTradeIds(this.settledTradeIds);
+    try {
+      this.callbacks.onTradeCompleted(trade, myUid);
+    } catch (err) {
+      console.error('[Trade Settlement Error]', err);
+    }
+  }
+
+  private sweepPendingSettlements(): void {
+    this.tradesMap.forEach((trade) => {
+      this.trySettleCompletedTrade(trade);
+    });
   }
 
   private async ensureGuestToken(): Promise<string | null> {
@@ -390,6 +471,7 @@ class DinoMultiplayerBridge {
 
   init(callbacks: BridgeCallbacks): void {
     this.callbacks = callbacks;
+    queueMicrotask(() => this.sweepPendingSettlements());
     if (this.initialized) {
       this.emitSession();
       this.emitWorld();
@@ -495,6 +577,9 @@ class DinoMultiplayerBridge {
       for (const c of world.chat || []) {
         this.chatMap.set(c.messageId, c);
       }
+      for (const t of world.trades || []) {
+        this.upsertTradeAndCheckSettlement(t);
+      }
       this.syncState = 'synced';
       this.emitSession();
       this.emitWorld();
@@ -558,6 +643,9 @@ class DinoMultiplayerBridge {
       for (const c of w.chat || []) {
         this.chatMap.set(c.messageId, c);
       }
+      for (const t of w.trades || []) {
+        this.upsertTradeAndCheckSettlement(t);
+      }
       this.emitSession();
       this.emitWorld();
       this.emitChat();
@@ -574,6 +662,9 @@ class DinoMultiplayerBridge {
         this.marchesMap.set(ev.payload.marchId, ev.payload);
       }
       this.emitWorld();
+    } else if (ev.type === 'world:trade') {
+      this.upsertTradeAndCheckSettlement(ev.payload);
+      this.notifyListeners();
     } else if (ev.type === 'chat:message') {
       this.chatMap.set(ev.payload.messageId, ev.payload);
       this.emitChat();
@@ -598,7 +689,12 @@ class DinoMultiplayerBridge {
       this.diagnostics.authDetail = 'Gast-Modus (nicht mit Google angemeldet)';
       this.diagnostics.firestoreStatus = 'idle';
       this.diagnostics.firestoreDetail = 'Inaktiv (Google-Login erforderlich)';
-      this.diagnostics.firestoreListeners = { settlements: 'idle', marches: 'idle', chat: 'idle' };
+      this.diagnostics.firestoreListeners = {
+        settlements: 'idle',
+        marches: 'idle',
+        chat: 'idle',
+        trades: 'idle',
+      };
       this.pushLog('info', 'Auth', 'Kein Google-Konto angemeldet — Gast-Modus aktiv', `guestUid: ${this.guestUid}`);
       this.emitSession();
       await this.ensureGuestToken();
@@ -614,6 +710,7 @@ class DinoMultiplayerBridge {
       settlements: 'connecting',
       marches: 'connecting',
       chat: 'connecting',
+      trades: 'connecting',
     };
     this.pushLog(
       'success',
@@ -726,6 +823,12 @@ class DinoMultiplayerBridge {
           this.chatMap.set(c.messageId, c);
         }
         this.emitChat();
+      },
+      onTrades: (list) => {
+        for (const t of list) {
+          this.upsertTradeAndCheckSettlement(t);
+        }
+        this.notifyListeners();
       },
     });
 
@@ -1245,6 +1348,214 @@ class DinoMultiplayerBridge {
       ok: false,
       error: 'Bitte unten links mit Google anmelden, um den Live-Welt-Chat zu nutzen.',
     };
+  }
+
+  async proposeTrade(req: {
+    toUid: string;
+    toTribeName: string;
+    offerResource: ResourceKey;
+    offerAmount: number;
+    requestResource: ResourceKey;
+    requestAmount: number;
+  }): Promise<{ ok: boolean; trade?: WorldTradeDTO; error?: string }> {
+    const session = this.getSession();
+    if (!req.toUid || req.toUid === session.uid) {
+      return { ok: false, error: 'Ungültiger Handelspartner.' };
+    }
+    if (req.offerResource === req.requestResource) {
+      return { ok: false, error: 'Bitte zwei unterschiedliche Ressourcen wählen.' };
+    }
+    const offerAmount = Math.max(1, Math.min(5000, Math.floor(Number(req.offerAmount || 0))));
+    const requestAmount = Math.max(1, Math.min(5000, Math.floor(Number(req.requestAmount || 0))));
+    const tradeId = sanitizeId(`trd_${Date.now()}_${Math.floor(Math.random() * 99999)}`);
+    const now = Date.now();
+    let created: WorldTradeDTO | undefined;
+    let lastError: string | undefined;
+
+    if (this.serverAvailable || this.wsConnected) {
+      const token = await this.getActiveBearerToken();
+      if (token) {
+        try {
+          const resp = await postProposeTrade(
+            {
+              tradeId,
+              fromTribeName: session.tribeName,
+              toUid: req.toUid,
+              toTribeName: sanitizeTribeName(req.toTribeName, 'Nachbar'),
+              offerResource: req.offerResource,
+              offerAmount,
+              requestResource: req.requestResource,
+              requestAmount,
+            },
+            token
+          );
+          if (resp.ok && resp.trade) {
+            created = resp.trade;
+            this.upsertTradeAndCheckSettlement(resp.trade);
+            this.notifyListeners();
+          } else if (resp.error) {
+            lastError = resp.error;
+          }
+        } catch (err) {
+          lastError = this.formatErrorDetail(err);
+        }
+      }
+    }
+
+    if (this.firebaseUser) {
+      try {
+        await createTradeInFirestore({
+          tradeId,
+          fromUid: this.firebaseUser.uid,
+          fromTribeName: session.tribeName,
+          toUid: req.toUid,
+          toTribeName: sanitizeTribeName(req.toTribeName, 'Nachbar'),
+          offerResource: req.offerResource,
+          offerAmount,
+          requestResource: req.requestResource,
+          requestAmount,
+        });
+        if (!created) {
+          created = {
+            tradeId,
+            fromUid: this.firebaseUser.uid,
+            fromTribeName: session.tribeName,
+            toUid: req.toUid,
+            toTribeName: sanitizeTribeName(req.toTribeName, 'Nachbar'),
+            offerResource: req.offerResource,
+            offerAmount,
+            requestResource: req.requestResource,
+            requestAmount,
+            fromConfirmed: false,
+            toConfirmed: false,
+            status: 'pending',
+            createdAt: now,
+            updatedAt: now,
+          };
+          this.upsertTradeAndCheckSettlement(created);
+          this.notifyListeners();
+        }
+        this.pushLog('info', 'Firestore', `Tauschangebot an ${req.toTribeName} gesendet`, tradeId);
+      } catch (err) {
+        const detail = this.formatErrorDetail(err);
+        this.pushLog('error', 'Firestore', 'Tauschangebot fehlgeschlagen', detail);
+        if (!created) {
+          return { ok: false, error: detail || 'Tauschangebot konnte nicht gespeichert werden.' };
+        }
+      }
+    }
+
+    if (created) {
+      return { ok: true, trade: created };
+    }
+    return {
+      ok: false,
+      error:
+        lastError ||
+        'Bitte mit Google anmelden oder Online-Verbindung herstellen, um ein zweiseitiges Tauschangebot zu senden.',
+    };
+  }
+
+  async confirmTrade(tradeIdRaw: string): Promise<{ ok: boolean; trade?: WorldTradeDTO; error?: string }> {
+    const tradeId = sanitizeId(tradeIdRaw);
+    if (tradeId.length < 3) return { ok: false, error: 'Ungültige Tausch-ID.' };
+    let updated: WorldTradeDTO | undefined;
+    let lastError: string | undefined;
+
+    if (this.serverAvailable || this.wsConnected) {
+      const token = await this.getActiveBearerToken();
+      if (token) {
+        try {
+          const resp = await postRespondTrade({ tradeId, action: 'confirm' }, token);
+          if (resp.ok && resp.trade) {
+            updated = resp.trade;
+            this.upsertTradeAndCheckSettlement(resp.trade);
+            this.notifyListeners();
+          } else if (resp.error) {
+            lastError = resp.error;
+          }
+        } catch (err) {
+          lastError = this.formatErrorDetail(err);
+        }
+      }
+    }
+
+    if (this.firebaseUser) {
+      try {
+        const fsTrade = await confirmTradeInFirestore(tradeId);
+        if (fsTrade) {
+          updated = fsTrade;
+          this.upsertTradeAndCheckSettlement(fsTrade);
+          this.notifyListeners();
+          this.pushLog(
+            'success',
+            'Firestore',
+            fsTrade.status === 'completed'
+              ? `Tausch ${tradeId} beidseitig bestätigt!`
+              : `Eigene Bestätigung für Tausch ${tradeId} gespeichert`
+          );
+        }
+      } catch (err) {
+        const detail = this.formatErrorDetail(err);
+        this.pushLog('error', 'Firestore', 'Tausch-Bestätigung fehlgeschlagen', detail);
+        if (!updated) {
+          return { ok: false, error: detail || 'Tausch konnte nicht bestätigt werden.' };
+        }
+      }
+    }
+
+    if (updated) return { ok: true, trade: updated };
+    return { ok: false, error: lastError || 'Tausch konnte nicht bestätigt werden.' };
+  }
+
+  async cancelTrade(tradeIdRaw: string): Promise<{ ok: boolean; error?: string }> {
+    const tradeId = sanitizeId(tradeIdRaw);
+    if (tradeId.length < 3) return { ok: false, error: 'Ungültige Tausch-ID.' };
+    let cancelled = false;
+    let lastError: string | undefined;
+
+    if (this.serverAvailable || this.wsConnected) {
+      const token = await this.getActiveBearerToken();
+      if (token) {
+        try {
+          const resp = await postRespondTrade({ tradeId, action: 'cancel' }, token);
+          if (resp.ok && resp.trade) {
+            this.upsertTradeAndCheckSettlement(resp.trade);
+            this.notifyListeners();
+            cancelled = true;
+          } else if (resp.error) {
+            lastError = resp.error;
+          }
+        } catch (err) {
+          lastError = this.formatErrorDetail(err);
+        }
+      }
+    }
+
+    if (this.firebaseUser) {
+      try {
+        await cancelTradeInFirestore(tradeId);
+        const existing = this.tradesMap.get(tradeId);
+        if (existing) {
+          this.tradesMap.set(tradeId, {
+            ...existing,
+            status: 'cancelled',
+            updatedAt: Date.now(),
+          });
+          this.notifyListeners();
+        }
+        cancelled = true;
+      } catch (err) {
+        const detail = this.formatErrorDetail(err);
+        this.pushLog('error', 'Firestore', 'Tausch-Abbruch fehlgeschlagen', detail);
+        if (!cancelled) {
+          return { ok: false, error: detail || 'Tausch konnte nicht abgebrochen werden.' };
+        }
+      }
+    }
+
+    if (cancelled) return { ok: true };
+    return { ok: false, error: lastError || 'Tausch konnte nicht abgebrochen werden.' };
   }
 
   saveToCloud(stateObj: Record<string, unknown>, immediate = false): void {

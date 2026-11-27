@@ -2,12 +2,11 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useMultiplayer } from '../hooks/useMultiplayer';
 import type {
   NeighborActionResult,
-  NeighborTradeRequest,
   ResourceKey,
   ResourceStock,
   VisitSettlementTarget,
 } from '../game/gameRuntime';
-import type { WorldMarchDTO, WorldSettlementDTO } from '../shared/apiTypes';
+import type { WorldMarchDTO, WorldSettlementDTO, WorldTradeDTO } from '../shared/apiTypes';
 import bridge, {
   type ChannelHealth,
   type DiagnosticLogLevel,
@@ -18,7 +17,6 @@ interface MultiplayerHubDrawerProps {
   resources?: ResourceStock;
   onJumpToTile?: (tileX: number, tileY: number) => void;
   onVisitSettlement?: (target: VisitSettlementTarget) => void;
-  onTradeResources?: (req: NeighborTradeRequest) => NeighborActionResult;
   onSupportBonfire?: (target: VisitSettlementTarget) => NeighborActionResult;
   onForceSave?: () => void;
 }
@@ -140,7 +138,6 @@ export const MultiplayerHubDrawer: React.FC<MultiplayerHubDrawerProps> = ({
   resources,
   onJumpToTile,
   onVisitSettlement,
-  onTradeResources,
   onSupportBonfire,
   onForceSave,
 }) => {
@@ -148,6 +145,7 @@ export const MultiplayerHubDrawer: React.FC<MultiplayerHubDrawerProps> = ({
     session,
     settlements,
     marches,
+    trades,
     onlinePlayers,
     diagnostics,
     logs,
@@ -156,12 +154,16 @@ export const MultiplayerHubDrawer: React.FC<MultiplayerHubDrawerProps> = ({
     setTribeName,
     runDiagnostics,
     clearLogs,
+    proposeTrade,
+    confirmTrade,
+    cancelTrade,
   } = useMultiplayer();
   const [open, setOpen] = useState(false);
   const [nameInput, setNameInput] = useState(session.tribeName);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [busyAuth, setBusyAuth] = useState(false);
   const [busyProbe, setBusyProbe] = useState(false);
+  const [busyTradeId, setBusyTradeId] = useState<string | null>(null);
   const [logsExpanded, setLogsExpanded] = useState(false);
   const [onlyCloseNeighbors, setOnlyCloseNeighbors] = useState(false);
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
@@ -257,7 +259,7 @@ export const MultiplayerHubDrawer: React.FC<MultiplayerHubDrawerProps> = ({
       `Host: ${diagnostics.hostname} | Browser Online: ${diagnostics.browserOnline}`,
       `Auth: ${diagnostics.authStatus} (${diagnostics.authDetail}) | isGuest=${session.isGuest} | uid=${session.uid}`,
       `Firestore: ${diagnostics.firestoreStatus} (${diagnostics.firestoreDetail}) | cloudSynced=${session.cloudSynced}`,
-      `Listener: settlements=${diagnostics.firestoreListeners.settlements}, marches=${diagnostics.firestoreListeners.marches}, chat=${diagnostics.firestoreListeners.chat}`,
+      `Listener: settlements=${diagnostics.firestoreListeners.settlements}, marches=${diagnostics.firestoreListeners.marches}, chat=${diagnostics.firestoreListeners.chat}, trades=${diagnostics.firestoreListeners.trades}`,
       `API: ${diagnostics.apiStatus} (${diagnostics.apiDetail}) | WS: ${diagnostics.wsStatus} (${diagnostics.wsDetail})`,
       `Projekt: ${diagnostics.firebaseProjectId} | DB: ${diagnostics.firestoreDatabaseId}`,
       diagnostics.rootCauseHint ? `Diagnose: ${diagnostics.rootCauseHint}` : '',
@@ -355,26 +357,110 @@ export const MultiplayerHubDrawer: React.FC<MultiplayerHubDrawerProps> = ({
     }
   };
 
-  const handleExecuteTrade = (s: WorldSettlementDTO, isClose: boolean) => {
-    if (!onTradeResources) return;
+  const pendingTrades = useMemo(
+    () => trades.filter((t) => t.status === 'pending'),
+    [trades]
+  );
+
+  const recentClosedTrades = useMemo(
+    () => trades.filter((t) => t.status !== 'pending').slice(0, 3),
+    [trades]
+  );
+
+  const awaitingMyConfirmCount = useMemo(
+    () =>
+      pendingTrades.filter(
+        (t) =>
+          (t.fromUid === session.uid && !t.fromConfirmed) ||
+          (t.toUid === session.uid && !t.toConfirmed)
+      ).length,
+    [pendingTrades, session.uid]
+  );
+
+  const resourceLabel = (key: ResourceKey): string =>
+    RESOURCE_OPTIONS.find((r) => r.key === key)?.label || key;
+
+  const handleProposeTrade = async (s: WorldSettlementDTO, isClose: boolean) => {
+    const offerStock = resources?.[offerResource] ?? 0;
+    if (offerStock < offerAmount) {
+      setNearbyNotice({
+        ok: false,
+        text: `Zu wenig ${resourceLabel(offerResource)} (${offerStock}/${offerAmount}).`,
+      });
+      return;
+    }
     const requestAmount = isClose ? offerAmount : Math.max(1, Math.round(offerAmount * 0.8));
-    const res = onTradeResources({
-      target: {
-        uid: s.uid,
-        tribeName: s.tribeName,
-        bonfireLevel: s.bonfireLevel,
-        power: s.power,
-        tileX: s.tileX,
-        tileY: s.tileY,
-      },
+    setBusyTradeId(`new_${s.uid}`);
+    const res = await proposeTrade({
+      toUid: s.uid,
+      toTribeName: s.tribeName,
       offerResource,
       offerAmount,
       requestResource,
       requestAmount,
     });
-    setNearbyNotice({ ok: res.ok, text: res.message });
+    setBusyTradeId(null);
     if (res.ok) {
+      setNearbyNotice({
+        ok: true,
+        text: `Tauschangebot an ${s.tribeName} gesendet. Beide Stämme müssen den Tausch bestätigen.`,
+      });
       setTradeTargetUid(null);
+    } else {
+      setNearbyNotice({
+        ok: false,
+        text: res.error || 'Tauschangebot konnte nicht gesendet werden.',
+      });
+    }
+  };
+
+  const handleConfirmTrade = async (trade: WorldTradeDTO) => {
+    const isSender = trade.fromUid === session.uid;
+    const myGiveRes = isSender ? trade.offerResource : trade.requestResource;
+    const myGiveAmt = isSender ? trade.offerAmount : trade.requestAmount;
+    const myStock = resources?.[myGiveRes] ?? 0;
+    if (myStock < myGiveAmt) {
+      setNearbyNotice({
+        ok: false,
+        text: `Zu wenig ${resourceLabel(myGiveRes)} zur Bestätigung (${myStock}/${myGiveAmt}).`,
+      });
+      return;
+    }
+    setBusyTradeId(trade.tradeId);
+    const res = await confirmTrade(trade.tradeId);
+    setBusyTradeId(null);
+    if (res.ok && res.trade) {
+      const partnerName = isSender ? trade.toTribeName : trade.fromTribeName;
+      if (res.trade.status === 'completed') {
+        setNearbyNotice({
+          ok: true,
+          text: `Beide haben bestätigt! Handel mit ${partnerName} wurde ausgeführt.`,
+        });
+      } else {
+        setNearbyNotice({
+          ok: true,
+          text: `Deine Bestätigung ist gespeichert. Warte auf die Bestätigung von ${partnerName}.`,
+        });
+      }
+    } else {
+      setNearbyNotice({
+        ok: false,
+        text: res.error || 'Tausch konnte nicht bestätigt werden.',
+      });
+    }
+  };
+
+  const handleCancelTrade = async (trade: WorldTradeDTO) => {
+    setBusyTradeId(trade.tradeId);
+    const res = await cancelTrade(trade.tradeId);
+    setBusyTradeId(null);
+    if (res.ok) {
+      setNearbyNotice({ ok: true, text: 'Tauschangebot wurde abgebrochen.' });
+    } else {
+      setNearbyNotice({
+        ok: false,
+        text: res.error || 'Tauschangebot konnte nicht abgebrochen werden.',
+      });
     }
   };
 
@@ -450,6 +536,14 @@ export const MultiplayerHubDrawer: React.FC<MultiplayerHubDrawerProps> = ({
         <span className="mono" style={{ color: '#c9bfb2', fontSize: 11 }}>
           · {Math.max(1, onlinePlayers)}
         </span>
+        {awaitingMyConfirmCount > 0 && (
+          <span
+            className="mp-fab-badge mono"
+            title={`${awaitingMyConfirmCount} offene Tauschangebote warten auf deine Bestätigung`}
+          >
+            ⇄ {awaitingMyConfirmCount}
+          </span>
+        )}
       </button>
 
       <aside
@@ -671,6 +765,13 @@ export const MultiplayerHubDrawer: React.FC<MultiplayerHubDrawerProps> = ({
                   />
                   Chat
                 </span>
+                <span className="mp-diag-chip">
+                  <span
+                    className="mp-diag-dot"
+                    style={{ background: healthColor(diagnostics.firestoreListeners.trades) }}
+                  />
+                  Handel
+                </span>
                 <span className="mp-diag-chip mono" title={`DB: ${diagnostics.firestoreDatabaseId}`}>
                   Sync: {session.cloudSynced ? 'Ja' : 'Nein'}
                 </span>
@@ -758,6 +859,110 @@ export const MultiplayerHubDrawer: React.FC<MultiplayerHubDrawerProps> = ({
               )}
             </div>
           </div>
+
+          {/* Offene & kürzliche Tauschangebote (Beidseitige Bestätigung) */}
+          {(pendingTrades.length > 0 || recentClosedTrades.length > 0) && (
+            <div className="mp-trades-wrap">
+              <div className="mp-world-list-head">
+                <span>Offene Tauschangebote ({pendingTrades.length})</span>
+                <span className="mono" style={{ color: awaitingMyConfirmCount > 0 ? '#fbbf24' : '#86efac' }}>
+                  {awaitingMyConfirmCount > 0
+                    ? `${awaitingMyConfirmCount} zu bestätigen`
+                    : 'Beidseitiger Tausch'}
+                </span>
+              </div>
+
+              <div className="mp-nearby-list">
+                {[...pendingTrades, ...recentClosedTrades].map((trade) => {
+                  const isSender = trade.fromUid === session.uid;
+                  const partnerName = isSender ? trade.toTribeName : trade.fromTribeName;
+                  const myGiveRes = isSender ? trade.offerResource : trade.requestResource;
+                  const myGiveAmt = isSender ? trade.offerAmount : trade.requestAmount;
+                  const myGetRes = isSender ? trade.requestResource : trade.offerResource;
+                  const myGetAmt = isSender ? trade.requestAmount : trade.offerAmount;
+                  const myConfirmed = isSender ? trade.fromConfirmed : trade.toConfirmed;
+                  const partnerConfirmed = isSender ? trade.toConfirmed : trade.fromConfirmed;
+                  const myStock = resources?.[myGiveRes] ?? 0;
+                  const hasEnoughStock = myStock >= myGiveAmt;
+                  const isBusy = busyTradeId === trade.tradeId;
+                  const isPending = trade.status === 'pending';
+
+                  return (
+                    <div
+                      key={trade.tradeId}
+                      className={`mp-trade-card status-${trade.status}${
+                        isPending && !myConfirmed ? ' needs-action' : ''
+                      }`}
+                    >
+                      <div className="mp-trade-card-head">
+                        <div className="mp-nearby-top">
+                          <span className="mp-world-row-name">{partnerName}</span>
+                          <span className="mp-trade-dir-tag">
+                            {isSender ? 'Ausgehend' : 'Eingehend'}
+                          </span>
+                        </div>
+                        <span className={`mp-trade-status-tag is-${trade.status}`}>
+                          {trade.status === 'completed'
+                            ? 'Abgeschlossen'
+                            : trade.status === 'cancelled'
+                            ? 'Abgebrochen'
+                            : 'Offen'}
+                        </span>
+                      </div>
+
+                      <div className="mp-trade-exchange mono">
+                        <span className="is-give">
+                          −{myGiveAmt} {resourceLabel(myGiveRes)}
+                        </span>
+                        <span className="mp-trade-arrow">⇄</span>
+                        <span className="is-get">
+                          +{myGetAmt} {resourceLabel(myGetRes)}
+                        </span>
+                      </div>
+
+                      <div className="mp-trade-confirms">
+                        <span className={`mp-confirm-pill${myConfirmed ? ' is-done' : ' is-wait'}`}>
+                          {myConfirmed ? '✓' : '○'} Du
+                        </span>
+                        <span
+                          className={`mp-confirm-pill${partnerConfirmed ? ' is-done' : ' is-wait'}`}
+                        >
+                          {partnerConfirmed ? '✓' : '○'} {partnerName}
+                        </span>
+                      </div>
+
+                      {isPending && (
+                        <div className="mp-trade-card-actions">
+                          <button
+                            type="button"
+                            className="mp-trade-submit"
+                            disabled={myConfirmed || !hasEnoughStock || isBusy}
+                            onClick={() => void handleConfirmTrade(trade)}
+                          >
+                            {isBusy
+                              ? 'Bestätigt…'
+                              : myConfirmed
+                              ? `✓ Bestätigt · Warte auf ${partnerName}`
+                              : !hasEnoughStock
+                              ? `Zu wenig ${resourceLabel(myGiveRes)} (${myStock}/${myGiveAmt})`
+                              : 'Tausch bestätigen'}
+                          </button>
+                          <button
+                            type="button"
+                            className="mp-trade-cancel-btn"
+                            disabled={isBusy}
+                            onClick={() => void handleCancelTrade(trade)}
+                          >
+                            {isSender ? 'Abbrechen' : 'Ablehnen'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Spieler in der Nähe (nach Distanz sortiert inkl. Siedlungsstatus & Besuchen-Button) */}
           <div className="mp-nearby-wrap">
@@ -934,16 +1139,22 @@ export const MultiplayerHubDrawer: React.FC<MultiplayerHubDrawerProps> = ({
                             </span>
                           </div>
 
+                          <div className="mp-trade-hint">
+                            Beide Stämme müssen das Angebot bestätigen, bevor Ressourcen getauscht werden.
+                          </div>
+
                           <div className="mp-trade-footer">
                             <button
                               type="button"
                               className="mp-trade-submit"
-                              disabled={offerStock < offerAmount}
-                              onClick={() => handleExecuteTrade(s, isClose)}
+                              disabled={offerStock < offerAmount || busyTradeId === `new_${s.uid}`}
+                              onClick={() => void handleProposeTrade(s, isClose)}
                             >
-                              {offerStock < offerAmount
+                              {busyTradeId === `new_${s.uid}`
+                                ? 'Sendet…'
+                                : offerStock < offerAmount
                                 ? `Zu wenig ${offerLabel}`
-                                : 'Karawane senden'}
+                                : 'Tauschangebot senden'}
                             </button>
                             <button
                               type="button"

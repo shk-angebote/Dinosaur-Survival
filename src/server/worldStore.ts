@@ -10,6 +10,7 @@ import type {
   WorldChatMessageDTO,
   WorldMarchDTO,
   WorldSettlementDTO,
+  WorldTradeDTO,
 } from '../shared/apiTypes.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -41,11 +42,13 @@ interface PersistedWorldSnapshot {
   settlements: WorldSettlementDTO[];
   chatHistory: WorldChatMessageDTO[];
   playerSaves: Record<string, PersistedPlayerSave>;
+  trades?: WorldTradeDTO[];
 }
 
 export class PersistentWorldStore {
   readonly settlements = new Map<string, WorldSettlementDTO>();
   readonly activeMarches = new Map<string, WorldMarchDTO>();
+  readonly trades = new Map<string, WorldTradeDTO>();
   readonly chatHistory: WorldChatMessageDTO[] = [];
   readonly playerSaves = new Map<string, PersistedPlayerSave>();
 
@@ -95,6 +98,13 @@ export class PersistentWorldStore {
           }
         }
       }
+      if (Array.isArray(parsed.trades)) {
+        for (const t of parsed.trades.slice(-200)) {
+          if (t && typeof t.tradeId === 'string' && typeof t.fromUid === 'string' && typeof t.toUid === 'string') {
+            this.trades.set(t.tradeId, t);
+          }
+        }
+      }
     } catch (err) {
       console.error('[WorldStore] Laden fehlgeschlagen, starte mit leerem Weltstand:', err);
     }
@@ -123,12 +133,17 @@ export class PersistentWorldStore {
         savesObj[uid] = save;
       }
 
+      const recentTrades = Array.from(this.trades.values())
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+        .slice(0, 200);
+
       const payload: PersistedWorldSnapshot = {
         version: 1,
         savedAt: Date.now(),
         settlements: Array.from(this.settlements.values()),
         chatHistory: this.chatHistory.slice(-100),
         playerSaves: savesObj,
+        trades: recentTrades,
       };
       fs.writeFileSync(TEMP_FILE, JSON.stringify(payload), 'utf8');
       fs.renameSync(TEMP_FILE, STATE_FILE);
@@ -156,6 +171,25 @@ export class PersistentWorldStore {
         this.activeMarches.delete(id);
       }
     }
+  }
+
+  upsertTrade(dto: WorldTradeDTO): void {
+    this.trades.set(dto.tradeId, dto);
+    if (this.trades.size > 240) {
+      const oldest = Array.from(this.trades.values())
+        .sort((a, b) => (a.updatedAt || 0) - (b.updatedAt || 0))
+        .slice(0, this.trades.size - 200);
+      for (const old of oldest) {
+        this.trades.delete(old.tradeId);
+      }
+    }
+    this.schedulePersist();
+  }
+
+  getRecentTrades(): WorldTradeDTO[] {
+    return Array.from(this.trades.values())
+      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+      .slice(0, 120);
   }
 
   appendChat(msg: WorldChatMessageDTO): boolean {

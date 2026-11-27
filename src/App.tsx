@@ -6,7 +6,6 @@ import type {
   GameRuntimeHandle,
   GameRuntimeSnapshot,
   NeighborActionResult,
-  NeighborTradeRequest,
   ResourceStock,
   VisitSettlementTarget,
 } from './game/gameRuntime';
@@ -50,16 +49,6 @@ export default function App() {
     runtimeRef.current?.visitSettlement(target);
   }, []);
 
-  const handleTradeResources = useCallback(
-    (req: NeighborTradeRequest): NeighborActionResult => {
-      if (!runtimeRef.current) {
-        return { ok: false, message: 'Spiel-Runtime noch nicht bereit.' };
-      }
-      return runtimeRef.current.tradeResourcesWithNeighbor(req);
-    },
-    []
-  );
-
   const handleSupportBonfire = useCallback((target: VisitSettlementTarget): NeighborActionResult => {
     if (!runtimeRef.current) {
       return { ok: false, message: 'Spiel-Runtime noch nicht bereit.' };
@@ -79,7 +68,6 @@ export default function App() {
         resources={resources}
         onJumpToTile={handleJumpToTile}
         onVisitSettlement={handleVisitSettlement}
-        onTradeResources={handleTradeResources}
         onSupportBonfire={handleSupportBonfire}
         onForceSave={handleForceSave}
       />
