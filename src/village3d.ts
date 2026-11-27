@@ -29,6 +29,7 @@ export interface BuildingSnapshot {
   isResearching: boolean;
   isTraining: boolean;
   isHealing?: boolean;
+  isVisible?: boolean;
   isLocked: boolean;
   canUpgrade: boolean;
   metaText: string;
@@ -2459,18 +2460,33 @@ class Village3DController implements Village3DAPI {
 
     if (!this.initialized || !this.labelLayerEl) return;
 
-    // Update 3D building visibility & state (built vs unbuilt plot, scaffolding, subtle level scale)
+    // Update 3D building visibility & state (hidden until unlocked, built vs unbuilt plot, scaffolding, subtle level scale)
     for (const b of snapshot.buildings) {
       const rig = this.rigs.get(b.id);
       if (!rig) continue;
+      const isVisibleInUi = b.isVisible !== false;
       const isBuilt = b.level > 0;
-      rig.builtGroup.visible = isBuilt;
-      rig.unbuiltGroup.visible = !isBuilt;
-      rig.scaffoldGroup.visible = b.isBuilding;
+
+      rig.root.visible = isVisibleInUi;
+      rig.hitMesh.visible = isVisibleInUi;
+      rig.builtGroup.visible = isVisibleInUi && isBuilt;
+      rig.unbuiltGroup.visible = isVisibleInUi && !isBuilt;
+      rig.scaffoldGroup.visible = isVisibleInUi && b.isBuilding;
       rig.baseScale = isBuilt ? Math.min(1.12, 1.0 + Math.max(0, b.level - 1) * 0.018) : 1.0;
 
-      // Create or update floating HTML label plate without destroying DOM node
       let btn = this.labelEls.get(b.id);
+      if (!isVisibleInUi) {
+        if (this.hoveredId === b.id) this.hoveredId = null;
+        if (btn) {
+          btn.style.display = 'none';
+          btn.style.opacity = '0';
+          btn.style.pointerEvents = 'none';
+          btn.setAttribute('aria-hidden', 'true');
+        }
+        continue;
+      }
+
+      // Create or update floating HTML label plate without destroying DOM node
       if (!btn) {
         btn = document.createElement('button');
         btn.type = 'button';
@@ -2479,6 +2495,8 @@ class Village3DController implements Village3DAPI {
         this.labelLayerEl.appendChild(btn);
         this.labelEls.set(b.id, btn);
       }
+      btn.style.display = '';
+      btn.removeAttribute('aria-hidden');
 
       const classes = [
         'b-node',
@@ -2703,8 +2721,14 @@ class Village3DController implements Village3DAPI {
     _raycaster.setFromCamera(_pointer, this.camera);
     _raycaster.layers.set(1);
     const hits = _raycaster.intersectObjects(this.hitMeshes, false);
-    if (hits.length > 0) {
-      return (hits[0].object.userData.buildingId as BuildingId) || null;
+    for (const hit of hits) {
+      const id = hit.object.userData.buildingId as BuildingId | undefined;
+      if (!id) continue;
+      const bSnap = this.snapMap.get(id);
+      if (bSnap && bSnap.isVisible === false) continue;
+      const rig = this.rigs.get(id);
+      if (rig && !rig.root.visible) continue;
+      return id;
     }
     return null;
   }
@@ -2730,6 +2754,14 @@ class Village3DController implements Village3DAPI {
     for (const [id, rig] of this.rigs) {
       const btn = this.labelEls.get(id);
       if (!btn) continue;
+      const bSnap = this.snapMap.get(id);
+      if (!rig.root.visible || (bSnap && bSnap.isVisible === false)) {
+        btn.style.display = 'none';
+        btn.style.opacity = '0';
+        btn.style.pointerEvents = 'none';
+        continue;
+      }
+      btn.style.display = '';
 
       _vec3.copy(rig.labelAnchor).project(this.camera);
       const sx = (_vec3.x * 0.5 + 0.5) * width;
@@ -2829,8 +2861,9 @@ class Village3DController implements Village3DAPI {
       this.keyLight.intensity = THREE.MathUtils.damp(this.keyLight.intensity, isAshStorm ? 1.15 : 1.48, 2.5, dt);
     }
 
-    // Animate all 11 buildings + hover polish
+    // Animate visible buildings + hover polish
     for (const [id, rig] of this.rigs) {
+      if (!rig.root.visible) continue;
       const bSnap = this.snapMap.get(id);
       rig.animate(t, dt, bSnap, snap);
       const targetHover = this.hoveredId === id ? 1 : 0;

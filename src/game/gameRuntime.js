@@ -293,6 +293,135 @@ export function initGameRuntime(hooks = {}) {
           'warehouse'
         ];
 
+        // Zentrales BuildingRegistry-System: verwaltet Errichtungs-Voraussetzungen und UI-Sichtbarkeit aller Gebäude
+        const BuildingRegistry = (() => {
+          const entries = new Map();
+
+          function normalizeReqs(reqs) {
+            if (!Array.isArray(reqs)) return [];
+            return reqs
+              .filter((r) => r && typeof r.buildingId === 'string' && Number(r.minLevel) > 0)
+              .map((r) => ({ buildingId: r.buildingId, minLevel: Math.floor(Number(r.minLevel)) }));
+          }
+
+          function register(id, config = {}) {
+            if (!id) return;
+            entries.set(id, {
+              id,
+              hideUntilUnlocked: Boolean(config.hideUntilUnlocked),
+              requirements: normalizeReqs(config.requirements)
+            });
+          }
+
+          function get(id) {
+            return entries.get(id) || null;
+          }
+
+          function getAll() {
+            return Array.from(entries.values());
+          }
+
+          function getRequirements(id) {
+            const entry = entries.get(id);
+            if (entry) return entry.requirements;
+            const def = BUILDINGS[id];
+            return def && Array.isArray(def.unlockReq) ? def.unlockReq : [];
+          }
+
+          function areRequirementsMet(id, st = state) {
+            const reqs = getRequirements(id);
+            if (!reqs.length) return true;
+            const bMap = st && st.buildings ? st.buildings : {};
+            return reqs.every((req) => ((bMap[req.buildingId] && bMap[req.buildingId].level) || 0) >= req.minLevel);
+          }
+
+          function isVisibleInUI(id, st = state) {
+            const entry = entries.get(id);
+            if (!entry || !entry.hideUntilUnlocked) return true;
+            const bMap = st && st.buildings ? st.buildings : {};
+            if (((bMap[id] && bMap[id].level) || 0) > 0) return true;
+            if (st && st.activeBuild && st.activeBuild.buildingId === id) return true;
+            return areRequirementsMet(id, st);
+          }
+
+          function getVisibleBuildingIds(st = state) {
+            return BUILDING_ORDER.filter((id) => isVisibleInUI(id, st));
+          }
+
+          function getMissingRequirements(id, st = state) {
+            const reqs = getRequirements(id);
+            const bMap = st && st.buildings ? st.buildings : {};
+            return reqs
+              .map((req) => {
+                const cur = (bMap[req.buildingId] && bMap[req.buildingId].level) || 0;
+                const rDef = BUILDINGS[req.buildingId];
+                return {
+                  buildingId: req.buildingId,
+                  name: rDef ? rDef.name : req.buildingId,
+                  shortName: rDef ? rDef.shortName : req.buildingId,
+                  currentLevel: cur,
+                  minLevel: req.minLevel,
+                  met: cur >= req.minLevel
+                };
+              })
+              .filter((item) => !item.met);
+          }
+
+          function getMissingRequirementsText(id, st = state) {
+            const missing = getMissingRequirements(id, st);
+            if (!missing.length) return '';
+            return missing.map((m) => `${m.name} St. ${m.minLevel}`).join(' & ');
+          }
+
+          return {
+            register,
+            get,
+            getAll,
+            getRequirements,
+            areRequirementsMet,
+            isVisibleInUI,
+            getVisibleBuildingIds,
+            getMissingRequirements,
+            getMissingRequirementsText
+          };
+        })();
+
+        for (const id of BUILDING_ORDER) {
+          const def = BUILDINGS[id];
+          BuildingRegistry.register(id, {
+            hideUntilUnlocked: false,
+            requirements: (def && def.unlockReq) || []
+          });
+        }
+
+        // Die 4 neuen Spezialgebäude erscheinen erst im Dorf-UI, sobald ihre Voraussetzungen erfüllt sind
+        BuildingRegistry.register('warehouse', {
+          hideUntilUnlocked: true,
+          requirements: [
+            { buildingId: 'lumber', minLevel: 1 },
+            { buildingId: 'quarry', minLevel: 1 }
+          ]
+        });
+        BuildingRegistry.register('marketplace', {
+          hideUntilUnlocked: true,
+          requirements: [
+            { buildingId: 'bonfire', minLevel: 2 },
+            { buildingId: 'hut', minLevel: 1 }
+          ]
+        });
+        BuildingRegistry.register('infirmary', {
+          hideUntilUnlocked: true,
+          requirements: [
+            { buildingId: 'bonfire', minLevel: 2 },
+            { buildingId: 'hunter', minLevel: 1 }
+          ]
+        });
+        BuildingRegistry.register('graveyard', {
+          hideUntilUnlocked: true,
+          requirements: [{ buildingId: 'infirmary', minLevel: 1 }]
+        });
+        window.BuildingRegistry = BuildingRegistry;
+
         const TROOP_DEFS = {
           slinger: {
             id: 'slinger',
@@ -706,8 +835,8 @@ export function initGameRuntime(hooks = {}) {
             name: 'Schamanen-Totem',
             category: 'bones',
             accent: '#2dd4bf',
-            desc: 'Mystisches Geister-Totem: Erweckt auf dem Friedhof gefallene Einheiten wieder zum Leben.',
-            actionType: 'goto_graveyard'
+            desc: 'Aktives Ritual-Item: Direkt im Inventar oder am Friedhof einsetzbar, um gefallene Einheiten wiederzubeleben.',
+            actionType: 'use_shaman_totem'
           }
         ];
 
@@ -2094,9 +2223,10 @@ export function initGameRuntime(hooks = {}) {
               neededLevel: rot.minLevel
             });
           } else {
-            // 1) Spezifische Freischalt-Voraussetzungen (beim Neubau oder für bestimmte Stufen)
-            if (def.unlockReq && def.unlockReq.length > 0) {
-              for (const req of def.unlockReq) {
+            // 1) Spezifische Freischalt-Voraussetzungen aus der zentralen BuildingRegistry
+            const registryReqs = BuildingRegistry.getRequirements(buildingId);
+            if (registryReqs && registryReqs.length > 0) {
+              for (const req of registryReqs) {
                 const rDef = BUILDINGS[req.buildingId];
                 const rLvl = state.buildings[req.buildingId].level;
                 checks.push({
@@ -2716,10 +2846,20 @@ export function initGameRuntime(hooks = {}) {
             openBuildingSheet('hero_cave', state.buildings.hero_cave.level > 0 ? 'summon' : 'building');
             return;
           }
-          if (itemDef.actionType === 'goto_graveyard') {
-            switchTab('village');
-            if (window.Village3D) window.Village3D.centerOn('graveyard');
-            openBuildingSheet('graveyard', state.buildings.graveyard.level > 0 ? 'revive' : 'building');
+          if (itemDef.actionType === 'use_shaman_totem') {
+            const status = ShamanTotemSystem.getStatus(state);
+            if (!status.graveyardVisible) {
+              const missingText = BuildingRegistry.getMissingRequirementsText('graveyard', state);
+              SoundFX.play('error');
+              showToast(`Friedhof noch nicht freigeschaltet${missingText ? ` (Benötigt: ${missingText})` : ''}.`, 'warn');
+              return;
+            }
+            if (useAll) {
+              ShamanTotemSystem.executeRevival({ mode: status.usableTotemsForAll > 1 ? 'all' : 'auto' });
+              return;
+            }
+            SoundFX.play('tap');
+            openShamanTotemSheet();
             return;
           }
           if (itemDef.actionType === 'goto_heroes') {
@@ -2920,48 +3060,219 @@ export function initGameRuntime(hooks = {}) {
           return 5 + level * 3;
         }
 
-        function reviveFallenTroops() {
-          const gyLvl = state.buildings.graveyard ? state.buildings.graveyard.level : 0;
-          if (gyLvl <= 0) {
-            SoundFX.play('error');
-            showToast('Errichte zuerst den Friedhof!', 'err');
-            return;
+        // Aktives SchamanenTotem-System: Wiederbelebung gefallener Einheiten direkt aus dem Inventar oder am Friedhof
+        const ShamanTotemSystem = (() => {
+          const PRIORITY_ORDER = ['dinorider', 'clubman', 'slinger'];
+          const draft = { slinger: 0, clubman: 0, dinorider: 0 };
+
+          function getFallenSnapshot(st = state) {
+            const f = (st && st.fallenTroops) || {};
+            return {
+              slinger: Math.max(0, Math.floor(f.slinger || 0)),
+              clubman: Math.max(0, Math.floor(f.clubman || 0)),
+              dinorider: Math.max(0, Math.floor(f.dinorider || 0))
+            };
           }
-          const totalFallen = getTotalFallenTroops();
-          if (totalFallen <= 0) {
-            SoundFX.play('error');
-            showToast('Derzeit ruhen keine gefallenen Einheiten auf dem Friedhof.', 'info');
-            return;
+
+          function getStatus(st = state) {
+            const graveyardVisible = BuildingRegistry.isVisibleInUI('graveyard', st);
+            const graveyardLevel = (st && st.buildings && st.buildings.graveyard && st.buildings.graveyard.level) || 0;
+            const graveyardBuilt = graveyardLevel > 0;
+            const totems = Math.max(0, Math.floor((st && st.inventory && st.inventory.shamanTotem) || 0));
+            const fallen = getFallenSnapshot(st);
+            const totalFallen = fallen.slinger + fallen.clubman + fallen.dinorider;
+            const revivePerTotem = getGraveyardRevivePerTotem(graveyardLevel);
+            const totemsNeededForAll = revivePerTotem > 0 && totalFallen > 0 ? Math.ceil(totalFallen / revivePerTotem) : 0;
+            const usableTotemsForAll = Math.min(totems, totemsNeededForAll);
+            const canRevive = graveyardBuilt && totems > 0 && totalFallen > 0;
+
+            return {
+              graveyardVisible,
+              graveyardLevel,
+              graveyardBuilt,
+              totems,
+              fallen,
+              totalFallen,
+              revivePerTotem,
+              totemsNeededForAll,
+              usableTotemsForAll,
+              canRevive
+            };
           }
-          const totems = (state.inventory && state.inventory.shamanTotem) || 0;
-          if (totems <= 0) {
-            SoundFX.play('error');
-            showToast('Kein Schamanen-Totem im Inventar. Erbeute Totems bei der Dinojagd!', 'err');
-            return;
+
+          function computeAutoSelection(budget, fallen) {
+            let rem = Math.max(0, Math.floor(budget || 0));
+            const picked = { slinger: 0, clubman: 0, dinorider: 0 };
+            for (const key of PRIORITY_ORDER) {
+              if (rem <= 0) break;
+              const avail = Math.max(0, Math.floor((fallen && fallen[key]) || 0));
+              if (avail <= 0) continue;
+              const take = Math.min(avail, rem);
+              picked[key] = take;
+              rem -= take;
+            }
+            return picked;
           }
-          let budget = getGraveyardRevivePerTotem(gyLvl);
-          let revivedTotal = 0;
-          const revivedParts = [];
-          if (!state.troops) state.troops = { slinger: 0, clubman: 0, dinorider: 0 };
-          // Stärkste Einheiten zuerst wiedererwecken
-          for (const key of ['dinorider', 'clubman', 'slinger']) {
-            if (budget <= 0) break;
-            const avail = (state.fallenTroops && state.fallenTroops[key]) || 0;
-            if (avail <= 0) continue;
-            const take = Math.min(avail, budget);
-            state.fallenTroops[key] = avail - take;
-            state.troops[key] = (state.troops[key] || 0) + take;
-            budget -= take;
-            revivedTotal += take;
-            revivedParts.push(`${take}× ${TROOP_DEFS[key].name}`);
+
+          function getDraftTotal() {
+            return (draft.slinger || 0) + (draft.clubman || 0) + (draft.dinorider || 0);
           }
-          if (revivedTotal <= 0) return;
-          state.inventory.shamanTotem = totems - 1;
-          SoundFX.play('complete');
-          showToast(`Schamanen-Totem erweckt ${revivedParts.join(', ')} wieder zum Leben!`, 'ok');
-          saveState();
-          renderAll();
-          if (openSheet) renderSheet();
+
+          function sanitizeDraft(st = state) {
+            const status = getStatus(st);
+            let remaining = status.revivePerTotem;
+            for (const key of PRIORITY_ORDER) {
+              const avail = status.fallen[key] || 0;
+              const clamped = Math.min(avail, remaining, Math.max(0, Math.floor(draft[key] || 0)));
+              draft[key] = clamped;
+              remaining -= clamped;
+            }
+            return { ...draft };
+          }
+
+          function initDraft(st = state) {
+            const status = getStatus(st);
+            const auto = computeAutoSelection(status.revivePerTotem, status.fallen);
+            draft.slinger = auto.slinger;
+            draft.clubman = auto.clubman;
+            draft.dinorider = auto.dinorider;
+            return { ...draft };
+          }
+
+          function clearDraft() {
+            draft.slinger = 0;
+            draft.clubman = 0;
+            draft.dinorider = 0;
+          }
+
+          function adjustDraft(troopType, delta) {
+            if (!TROOP_DEFS[troopType]) return;
+            const status = getStatus(state);
+            sanitizeDraft(state);
+            const avail = status.fallen[troopType] || 0;
+            const cur = draft[troopType] || 0;
+            const otherTotal = getDraftTotal() - cur;
+            const maxAllowed = Math.min(avail, Math.max(0, status.revivePerTotem - otherTotal));
+            draft[troopType] = Math.max(0, Math.min(maxAllowed, cur + delta));
+          }
+
+          function setDraftMax(troopType) {
+            if (!TROOP_DEFS[troopType]) return;
+            const status = getStatus(state);
+            sanitizeDraft(state);
+            const avail = status.fallen[troopType] || 0;
+            const cur = draft[troopType] || 0;
+            const otherTotal = getDraftTotal() - cur;
+            draft[troopType] = Math.min(avail, Math.max(0, status.revivePerTotem - otherTotal));
+          }
+
+          function executeRevival({ mode = 'auto', selection = null } = {}) {
+            const status = getStatus(state);
+            if (!status.graveyardVisible) {
+              const missingText = BuildingRegistry.getMissingRequirementsText('graveyard', state);
+              SoundFX.play('error');
+              showToast(`Friedhof noch nicht freigeschaltet${missingText ? ` (Benötigt: ${missingText})` : ''}.`, 'warn');
+              return { ok: false, reason: 'graveyard_locked' };
+            }
+            if (!status.graveyardBuilt) {
+              SoundFX.play('error');
+              showToast('Errichte zuerst den Friedhof im Dorf, um das Schamanen-Totem einzusetzen!', 'err');
+              return { ok: false, reason: 'no_graveyard' };
+            }
+            if (status.totalFallen <= 0) {
+              SoundFX.play('error');
+              showToast('Derzeit ruhen keine gefallenen Einheiten auf dem Friedhof.', 'info');
+              return { ok: false, reason: 'no_fallen' };
+            }
+            if (status.totems <= 0) {
+              SoundFX.play('error');
+              showToast('Kein Schamanen-Totem im Inventar. Erbeute Totems bei der Dinojagd!', 'err');
+              return { ok: false, reason: 'no_totems' };
+            }
+
+            let totemsUsed = 1;
+            let plan = null;
+
+            if (mode === 'custom') {
+              const source = selection || draft;
+              let remaining = status.revivePerTotem;
+              plan = { slinger: 0, clubman: 0, dinorider: 0 };
+              for (const key of PRIORITY_ORDER) {
+                const avail = status.fallen[key] || 0;
+                const want = Math.max(0, Math.floor((source && source[key]) || 0));
+                const take = Math.min(avail, remaining, want);
+                plan[key] = take;
+                remaining -= take;
+              }
+              const chosenSum = plan.slinger + plan.clubman + plan.dinorider;
+              if (chosenSum <= 0) {
+                SoundFX.play('error');
+                showToast('Wähle mindestens 1 gefallene Einheit für das Ritual aus.', 'warn');
+                return { ok: false, reason: 'empty_selection' };
+              }
+            } else if (mode === 'all') {
+              totemsUsed = Math.max(1, status.usableTotemsForAll);
+              plan = computeAutoSelection(totemsUsed * status.revivePerTotem, status.fallen);
+            } else {
+              totemsUsed = 1;
+              plan = computeAutoSelection(status.revivePerTotem, status.fallen);
+            }
+
+            if (!state.troops) state.troops = { slinger: 0, clubman: 0, dinorider: 0 };
+            if (!state.fallenTroops) state.fallenTroops = { slinger: 0, clubman: 0, dinorider: 0 };
+
+            let revivedTotal = 0;
+            const revivedParts = [];
+            for (const key of PRIORITY_ORDER) {
+              const take = plan[key] || 0;
+              if (take <= 0) continue;
+              state.fallenTroops[key] = Math.max(0, (state.fallenTroops[key] || 0) - take);
+              state.troops[key] = (state.troops[key] || 0) + take;
+              revivedTotal += take;
+              revivedParts.push(`${take}× ${TROOP_DEFS[key].name}`);
+            }
+
+            if (revivedTotal <= 0) return { ok: false, reason: 'none_revived' };
+
+            state.inventory.shamanTotem = Math.max(0, status.totems - totemsUsed);
+            initDraft(state);
+
+            SoundFX.play('complete');
+            const totemLabel = totemsUsed > 1 ? `${totemsUsed}× Schamanen-Totem` : 'Schamanen-Totem';
+            showToast(`${totemLabel} erweckt ${revivedParts.join(', ')} wieder zum Leben!`, 'ok');
+            saveState();
+            renderAll();
+            if (openSheet) renderSheet();
+
+            return {
+              ok: true,
+              totemsUsed,
+              revivedTotal,
+              revivedMap: plan,
+              revivedParts
+            };
+          }
+
+          return {
+            PRIORITY_ORDER,
+            getStatus,
+            computeAutoSelection,
+            getDraft: () => sanitizeDraft(state),
+            getDraftTotal: () => {
+              sanitizeDraft(state);
+              return getDraftTotal();
+            },
+            initDraft,
+            clearDraft,
+            adjustDraft,
+            setDraftMax,
+            executeRevival
+          };
+        })();
+        window.ShamanTotemSystem = ShamanTotemSystem;
+
+        function reviveFallenTroops(mode = 'auto') {
+          return ShamanTotemSystem.executeRevival({ mode });
         }
 
         function getStaminaRegenIntervalMs() {
@@ -3217,6 +3528,7 @@ export function initGameRuntime(hooks = {}) {
 
         function finishActiveBuild() {
           if (!state.activeBuild) return null;
+          const visibleBefore = new Set(BuildingRegistry.getVisibleBuildingIds(state));
           const bId = state.activeBuild.buildingId;
           const target = state.activeBuild.targetLevel;
           state.buildings[bId].level = target;
@@ -3227,7 +3539,10 @@ export function initGameRuntime(hooks = {}) {
             addInventoryItem('goldenBones', 1);
             addInventoryItem('speedup5m', 1);
           }
-          return { name: BUILDINGS[bId].name, level: target };
+          const newlyUnlocked = BuildingRegistry.getVisibleBuildingIds(state)
+            .filter((id) => !visibleBefore.has(id))
+            .map((id) => BUILDINGS[id].name);
+          return { name: BUILDINGS[bId].name, level: target, newlyUnlocked };
         }
 
         function finishActiveResearch() {
@@ -4369,6 +4684,9 @@ export function initGameRuntime(hooks = {}) {
             if (done) {
               SoundFX.play('complete');
               showToast(`${done.name} erreicht Stufe ${done.level}! (+1 Knochen)`, 'ok');
+              if (done.newlyUnlocked && done.newlyUnlocked.length > 0) {
+                showToast(`Neu im Dorf freigeschaltet: ${done.newlyUnlocked.join(', ')}!`, 'ok');
+              }
               if (openSheet && openSheet.type === 'building') renderSheet();
             }
           }
@@ -4497,6 +4815,9 @@ export function initGameRuntime(hooks = {}) {
           if (done) {
             SoundFX.play('complete');
             showToast(`${done.name} sofort auf Stufe ${done.level} fertiggestellt!`, 'ok');
+            if (done.newlyUnlocked && done.newlyUnlocked.length > 0) {
+              showToast(`Neu im Dorf freigeschaltet: ${done.newlyUnlocked.join(', ')}!`, 'ok');
+            }
             saveState();
             renderAll();
             if (openSheet) renderSheet();
@@ -4999,6 +5320,7 @@ export function initGameRuntime(hooks = {}) {
           for (const id of BUILDING_ORDER) {
             const def = BUILDINGS[id];
             const bState = state.buildings[id];
+            const isVisibleInUI = BuildingRegistry.isVisibleInUI(id, state);
             const isBuilding = Boolean(state.activeBuild && state.activeBuild.buildingId === id);
             const isResearchingHere = id === 'workshop' && Boolean(state.activeResearch);
             const isTrainingHere = Boolean(def.troopType && state.activeTraining && state.activeTraining.troopType === def.troopType);
@@ -5093,6 +5415,7 @@ export function initGameRuntime(hooks = {}) {
               isResearching: isResearchingHere,
               isTraining: isTrainingHere,
               isHealing: isHealingHere,
+              isVisible: isVisibleInUI,
               isLocked: isLockedUnbuilt,
               canUpgrade: canUpgradeNow,
               metaText,
@@ -5729,7 +6052,7 @@ export function initGameRuntime(hooks = {}) {
           const filters = [
             { id: 'all', label: 'Alle' },
             { id: 'gear', label: `Ausrüstung (${(inv.gearChest || 0) + bag.length})` },
-            { id: 'bones', label: 'Knochen & XP' },
+            { id: 'bones', label: 'Knochen & Totems' },
             { id: 'resources', label: 'Ressourcen' },
             { id: 'boosts', label: 'Beschleuniger' }
           ];
@@ -5740,10 +6063,10 @@ export function initGameRuntime(hooks = {}) {
           let html = `
             <div class="section-head">
               <h2 class="section-title">Stammes-Inventar</h2>
-              <p class="section-sub">Öffne Ausrüstungskisten, verwalte Knochen für die Heldenhöhle und nutze Rohstoff-Pakete sowie Beschleuniger.</p>
+              <p class="section-sub">Öffne Ausrüstungskisten, nutze Schamanen-Totems zur Wiederbelebung gefallener Krieger und verwalte Pakete sowie Beschleuniger.</p>
             </div>
             <div class="summary-strip">
-              <span>Kisten: <strong class="mono" style="color:#fbbf24;">${inv.gearChest || 0}</strong> · Gear: <strong class="mono" style="color:#86efac;">${bag.length}</strong></span>
+              <span>Kisten: <strong class="mono" style="color:#fbbf24;">${inv.gearChest || 0}</strong> · Gear: <strong class="mono" style="color:#86efac;">${bag.length}</strong> · Totems: <strong class="mono" style="color:#2dd4bf;">${inv.shamanTotem || 0}</strong></span>
               <span>Knochen: <strong class="mono" style="color:#fde68a;">${inv.bones || 0}</strong> · Pakete: <strong class="mono">${totalCrates}</strong> · Boosts: <strong class="mono">${totalBoosts}</strong></span>
             </div>
             <div class="filter-row" role="tablist">
@@ -5759,6 +6082,7 @@ export function initGameRuntime(hooks = {}) {
           for (const item of list) {
             const qty = inv[item.id] || 0;
             let btnHtml = '';
+            let extraMetaHtml = '';
             if (item.actionType === 'open_gear_chest') {
               btnHtml = `
                 <button class="inv-use-btn" data-inv-use="${item.id}" ${qty > 0 ? '' : 'disabled'}>Öffnen</button>
@@ -5782,8 +6106,30 @@ export function initGameRuntime(hooks = {}) {
               btnHtml = `<button class="inv-use-btn" data-inv-use="${item.id}">Fähigkeiten</button>`;
             } else if (item.actionType === 'goto_cave') {
               btnHtml = `<button class="inv-use-btn" data-inv-use="${item.id}">Heldenhöhle</button>`;
-            } else if (item.actionType === 'goto_graveyard') {
-              btnHtml = `<button class="inv-use-btn" data-inv-use="${item.id}">Friedhof</button>`;
+            } else if (item.actionType === 'use_shaman_totem') {
+              const totemStatus = ShamanTotemSystem.getStatus(state);
+              if (!totemStatus.graveyardVisible) {
+                const missingText = BuildingRegistry.getMissingRequirementsText('graveyard', state);
+                extraMetaHtml = `<div class="inv-desc" style="color:#fbbf24; margin-top:3px;">Friedhof gesperrt · Benötigt: ${missingText}</div>`;
+                btnHtml = `<button class="inv-use-btn secondary" data-inv-use="${item.id}" title="Benötigt: ${missingText}">Gesperrt</button>`;
+              } else if (!totemStatus.graveyardBuilt) {
+                extraMetaHtml = `<div class="inv-desc" style="color:#fbbf24; margin-top:3px;">Friedhof noch nicht errichtet${totemStatus.totalFallen > 0 ? ` · ${totemStatus.totalFallen} Gefallene warten` : ''}</div>`;
+                btnHtml = `<button class="inv-use-btn secondary" data-inv-use="${item.id}">Friedhof bauen</button>`;
+              } else {
+                extraMetaHtml = `<div class="inv-desc" style="color:${totemStatus.totalFallen > 0 ? '#5eead4' : 'var(--text-muted)'}; margin-top:3px;">Friedhof St. ${totemStatus.graveyardLevel} · ${totemStatus.totalFallen} Gefallene · 1 Totem → bis ${totemStatus.revivePerTotem} Einh.</div>`;
+                if (totemStatus.canRevive) {
+                  btnHtml = `
+                    <button class="inv-use-btn" data-inv-use="${item.id}">Einsetzen</button>
+                    <button class="inv-use-btn secondary" data-inv-use-all="${item.id}">
+                      ${totemStatus.usableTotemsForAll > 1 ? `Alle (${totemStatus.usableTotemsForAll}×)` : 'Sofort (1×)'}
+                    </button>
+                  `;
+                } else if (totemStatus.totems <= 0) {
+                  btnHtml = `<button class="inv-use-btn" data-inv-use="${item.id}" disabled>Kein Totem</button>`;
+                } else {
+                  btnHtml = `<button class="inv-use-btn" data-inv-use="${item.id}" disabled>0 Gefallene</button>`;
+                }
+              }
             } else if (item.actionType === 'goto_heroes') {
               btnHtml = `<button class="inv-use-btn secondary" data-inv-use="${item.id}">Zu Helden</button>`;
             }
@@ -5797,6 +6143,7 @@ export function initGameRuntime(hooks = {}) {
                 <div class="inv-meta">
                   <div class="inv-name">${item.name}</div>
                   <div class="inv-desc">${item.desc}</div>
+                  ${extraMetaHtml}
                 </div>
                 <div class="inv-btn-col">${btnHtml}</div>
               </div>
@@ -6119,11 +6466,12 @@ export function initGameRuntime(hooks = {}) {
               </div>
             `;
           }
-          const fallen = state.fallenTroops || { slinger: 0, clubman: 0, dinorider: 0 };
-          const totalFallen = getTotalFallenTroops();
-          const totems = (state.inventory && state.inventory.shamanTotem) || 0;
-          const reviveCap = getGraveyardRevivePerTotem(lvl);
-          const canRevive = totalFallen > 0 && totems > 0;
+          const status = ShamanTotemSystem.getStatus(state);
+          const fallen = status.fallen;
+          const totalFallen = status.totalFallen;
+          const totems = status.totems;
+          const reviveCap = status.revivePerTotem;
+          const canRevive = status.canRevive;
 
           return `
             <p class="info-line">Gefallene Einheiten, die nicht mehr im Krankenzelt aufgenommen werden konnten, finden hier ihre Ruhe. Opfere ein <strong>Schamanen-Totem</strong>, um bis zu <strong>${reviveCap} gefallene Krieger</strong> sofort wiederzuerwecken.</p>
@@ -6165,11 +6513,23 @@ export function initGameRuntime(hooks = {}) {
                 <span class="summon-stock" style="color:#2dd4bf;">1 Totem → bis ${reviveCap} Einh.</span>
               </div>
               <div class="summon-odds">
-                Stärkste Einheiten (Dinoreiter → Keulenschwinger → Steinschleuderer) werden zuerst erweckt. Schamanen-Totems findest du als Beute bei der Dinojagd.
+                Stärkste Einheiten (Dinoreiter → Keulenschwinger → Steinschleuderer) werden zuerst erweckt — oder wähle gezielt über das Totem-Ritual. Schamanen-Totems findest du als Beute bei der Dinojagd und kannst sie direkt im Inventar einsetzen.
               </div>
               <button class="btn-primary" style="margin-top:8px;" data-revive-fallen="1" ${canRevive ? '' : 'disabled'}>
                 ${totalFallen <= 0 ? 'Keine gefallenen Einheiten' : totems <= 0 ? 'Kein Schamanen-Totem vorhanden' : `Mit 1× Schamanen-Totem wiedererwecken (bis ${Math.min(totalFallen, reviveCap)})`}
               </button>
+              ${
+                canRevive
+                  ? `<div class="btn-row" style="margin-top:6px;">
+                      <button class="btn-secondary" data-open-totem-ritual="1">Gezielt wählen</button>
+                      ${
+                        status.usableTotemsForAll > 1
+                          ? `<button class="btn-secondary" data-totem-cast-all="1">Alle erwecken (${status.usableTotemsForAll}× Totems)</button>`
+                          : ''
+                      }
+                    </div>`
+                  : ''
+              }
             </div>
           `;
         }
@@ -7490,6 +7850,16 @@ export function initGameRuntime(hooks = {}) {
            ===================================================================== */
         function openBuildingSheet(buildingId, preferredSubTab) {
           const def = BUILDINGS[buildingId];
+          if (!def) return;
+          if (!BuildingRegistry.isVisibleInUI(buildingId, state)) {
+            const missingText = BuildingRegistry.getMissingRequirementsText(buildingId, state);
+            SoundFX.play('error');
+            showToast(
+              `${def.name} noch nicht freigeschaltet${missingText ? ` (Benötigt: ${missingText})` : ''}.`,
+              'warn'
+            );
+            return;
+          }
           let defaultSub = preferredSubTab || 'building';
           if (!preferredSubTab) {
             if (buildingId === 'workshop') {
@@ -7538,6 +7908,126 @@ export function initGameRuntime(hooks = {}) {
           renderSheet();
         }
 
+        function openShamanTotemSheet() {
+          ShamanTotemSystem.initDraft(state);
+          openSheet = { type: 'shamanTotem', id: 'shamanTotem' };
+          document.getElementById('detailBackdrop').classList.add('open');
+          renderSheet();
+        }
+
+        function renderShamanTotemSheet() {
+          const status = ShamanTotemSystem.getStatus(state);
+          document.getElementById('sheetTitle').textContent = 'Schamanen-Totem';
+          document.getElementById('sheetSub').textContent = status.graveyardBuilt
+            ? `Aktives Ritual-Item · Friedhof St. ${status.graveyardLevel} · ${status.totems}× verfügbar`
+            : `Aktives Ritual-Item · ${status.totems}× im Inventar`;
+
+          if (!status.graveyardBuilt) {
+            const missingText = BuildingRegistry.getMissingRequirementsText('graveyard', state);
+            document.getElementById('sheetBody').innerHTML = `
+              <div class="summon-banner" style="--banner-accent:rgba(45, 212, 191, 0.5);">
+                <div class="summon-head">
+                  <span class="summon-title" style="color:#5eead4;">
+                    ${getInventoryIconSVG('shamanTotem', '#2dd4bf')}
+                    <span>Friedhof erforderlich</span>
+                  </span>
+                  <span class="summon-stock" style="color:#2dd4bf;">${status.totems}× Totem</span>
+                </div>
+                <div class="summon-odds">
+                  Um gefallene Krieger mit einem <strong>Schamanen-Totem</strong> wiederzubeleben, muss der <strong>Friedhof</strong> im Dorf errichtet sein.
+                  ${status.totalFallen > 0 ? `<br/>Aktuell warten <strong>${status.totalFallen} gefallene Krieger</strong> auf ihre Wiedererweckung.` : ''}
+                </div>
+                ${
+                  status.graveyardVisible
+                    ? `<button class="btn-primary" style="margin-top:8px;" data-jump-building="graveyard" data-jump-subtab="building">Friedhof errichten →</button>`
+                    : `<div class="req-row missing" style="margin-top:8px;">
+                        <div class="req-main"><span class="req-mark">✕</span><span>Voraussetzung: ${missingText || 'Krankenzelt St. 1'}</span></div>
+                      </div>`
+                }
+              </div>
+            `;
+            return;
+          }
+
+          const draft = ShamanTotemSystem.getDraft();
+          const selectedTotal = ShamanTotemSystem.getDraftTotal();
+          const budget = status.revivePerTotem;
+          const remainingSlots = Math.max(0, budget - selectedTotal);
+          const canCastCustom = status.canRevive && selectedTotal > 0;
+
+          const troopRows = ShamanTotemSystem.PRIORITY_ORDER.map((key) => {
+            const td = TROOP_DEFS[key];
+            const avail = status.fallen[key] || 0;
+            const chosen = draft[key] || 0;
+            const maxForThis = Math.min(avail, chosen + remainingSlots);
+            return `
+              <div class="hunt-troop-row">
+                <div>
+                  <div style="font-size:12px; font-weight:700; color:var(--text-primary);">${td.name} <span style="font-size:10.5px; color:var(--text-muted);">(${td.role})</span></div>
+                  <div class="mono" style="font-size:10.5px; color:${avail > 0 ? '#fca5a5' : 'var(--text-muted)'};">Gewählt: ${chosen} / ${avail} gefallen</div>
+                </div>
+                <div class="hunt-troop-controls">
+                  <button class="hunt-mini-btn" data-totem-delta="${key}|-5" ${chosen <= 0 ? 'disabled' : ''}>-5</button>
+                  <button class="hunt-mini-btn" data-totem-delta="${key}|-1" ${chosen <= 0 ? 'disabled' : ''}>−</button>
+                  <button class="hunt-mini-btn" data-totem-delta="${key}|1" ${chosen >= maxForThis ? 'disabled' : ''}>+</button>
+                  <button class="hunt-mini-btn" data-totem-max="${key}" ${chosen >= maxForThis ? 'disabled' : ''}>Max</button>
+                </div>
+              </div>
+            `;
+          }).join('');
+
+          document.getElementById('sheetBody').innerHTML = `
+            <div class="stat-grid">
+              <div class="stat-box">
+                <div class="stat-label">Schamanen-Totems</div>
+                <div class="stat-value mono" style="color:#2dd4bf;">${status.totems} verfügbar</div>
+              </div>
+              <div class="stat-box">
+                <div class="stat-label">Gefallene (Friedhof St. ${status.graveyardLevel})</div>
+                <div class="stat-value mono" style="color:${status.totalFallen > 0 ? '#f87171' : '#4ade80'};">${status.totalFallen} Einheiten</div>
+              </div>
+            </div>
+            <div>
+              <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px;">
+                <p class="sheet-section-title" style="margin:0;">Einheiten wählen (${selectedTotal} / ${budget} pro Totem)</p>
+                <div style="display:inline-flex; gap:5px;">
+                  <button class="hunt-mini-btn" data-totem-auto="1" ${status.totalFallen <= 0 ? 'disabled' : ''}>Auto</button>
+                  <button class="hunt-mini-btn" data-totem-clear="1" ${selectedTotal <= 0 ? 'disabled' : ''}>0</button>
+                </div>
+              </div>
+              <div class="hunt-troop-list">${troopRows}</div>
+            </div>
+            <div class="summon-banner" style="--banner-accent:rgba(45, 212, 191, 0.5);">
+              <div class="summon-head">
+                <span class="summon-title" style="color:#5eead4;">
+                  ${getInventoryIconSVG('shamanTotem', '#2dd4bf')}
+                  <span>Wiederbelebung auslösen</span>
+                </span>
+                <span class="summon-stock" style="color:#2dd4bf;">1 Totem → bis ${budget} Einh.</span>
+              </div>
+              <div class="summon-odds">
+                Wiederbelebte Krieger kehren sofort kampfbereit in dein Stammesheer zurück. Ein Ausbau des Friedhofs erhöht die Kapazität pro Totem (+3 Einheiten/Stufe).
+              </div>
+              <button class="btn-primary" style="margin-top:8px;" data-totem-cast-custom="1" ${canCastCustom ? '' : 'disabled'}>
+                ${
+                  status.totalFallen <= 0
+                    ? 'Keine gefallenen Einheiten'
+                    : status.totems <= 0
+                    ? 'Kein Schamanen-Totem vorhanden'
+                    : selectedTotal <= 0
+                    ? 'Einheiten auswählen'
+                    : `1× Schamanen-Totem einsetzen (${selectedTotal} Einh. wiederbeleben)`
+                }
+              </button>
+              ${
+                status.canRevive && status.usableTotemsForAll > 1
+                  ? `<button class="btn-secondary" style="margin-top:6px; width:100%;" data-totem-cast-all="1">Alle mit ${status.usableTotemsForAll}× Schamanen-Totems wiederbeleben</button>`
+                  : ''
+              }
+            </div>
+          `;
+        }
+
         function closeSheet() {
           openSheet = null;
           document.getElementById('detailBackdrop').classList.remove('open');
@@ -7555,6 +8045,8 @@ export function initGameRuntime(hooks = {}) {
             renderWorldDinoSheet(openSheet.id);
           } else if (openSheet.type === 'ownSettlement') {
             renderOwnSettlementSheet();
+          } else if (openSheet.type === 'shamanTotem') {
+            renderShamanTotemSheet();
           }
         }
 
@@ -7763,7 +8255,13 @@ export function initGameRuntime(hooks = {}) {
             <div class="req-list">
               <div class="req-row ${hasStamina ? 'met' : 'missing'}">
                 <div class="req-main"><span class="req-mark">${hasStamina ? '✓' : '✕'}</span><span>Jagd-Ausdauer (${curStamina} / ${DINO_HUNT_STAMINA_COST} benötigt)</span></div>
-                ${!hasStamina ? `<button class="jump-btn" data-jump-building="marketplace" data-jump-subtab="${state.buildings.marketplace.level > 0 ? 'market' : 'building'}">Marktplatz →</button>` : ''}
+                ${
+                  !hasStamina
+                    ? BuildingRegistry.isVisibleInUI('marketplace', state)
+                      ? `<button class="jump-btn" data-jump-building="marketplace" data-jump-subtab="${state.buildings.marketplace.level > 0 ? 'market' : 'building'}">Marktplatz →</button>`
+                      : `<span style="font-size:10px; color:var(--text-muted); text-align:right;">Marktplatz: ${BuildingRegistry.getMissingRequirementsText('marketplace', state)}</span>`
+                    : ''
+                }
               </div>
               <div class="req-row ${hasQueueSlot ? 'met' : 'missing'}">
                 <div class="req-main"><span class="req-mark">${hasQueueSlot ? '✓' : '✕'}</span><span>Marschwarteschlange frei (${activeMarches}/${maxMarches} · Marsch ${fmtDuration(travelSec)})</span></div>
@@ -9884,8 +10382,13 @@ export function initGameRuntime(hooks = {}) {
             }
             const jump = e.target.closest('[data-jump-building]');
             if (jump) {
+              const targetId = jump.dataset.jumpBuilding;
+              if (!BuildingRegistry.isVisibleInUI(targetId, state)) {
+                openBuildingSheet(targetId, 'building');
+                return;
+              }
               switchTab('village');
-              openBuildingSheet(jump.dataset.jumpBuilding, 'building');
+              openBuildingSheet(targetId, 'building');
             }
           });
 
@@ -10019,7 +10522,52 @@ export function initGameRuntime(hooks = {}) {
             }
             const reviveFallenBtn = e.target.closest('[data-revive-fallen]');
             if (reviveFallenBtn) {
-              reviveFallenTroops();
+              reviveFallenTroops('auto');
+              return;
+            }
+            const openTotemRitualBtn = e.target.closest('[data-open-totem-ritual]');
+            if (openTotemRitualBtn) {
+              SoundFX.play('tap');
+              openShamanTotemSheet();
+              return;
+            }
+            const totemDeltaBtn = e.target.closest('[data-totem-delta]');
+            if (totemDeltaBtn) {
+              const [tk, dStr] = totemDeltaBtn.dataset.totemDelta.split('|');
+              SoundFX.play('tap');
+              ShamanTotemSystem.adjustDraft(tk, Number(dStr || 0));
+              renderSheet();
+              return;
+            }
+            const totemMaxBtn = e.target.closest('[data-totem-max]');
+            if (totemMaxBtn) {
+              SoundFX.play('tap');
+              ShamanTotemSystem.setDraftMax(totemMaxBtn.dataset.totemMax);
+              renderSheet();
+              return;
+            }
+            const totemAutoBtn = e.target.closest('[data-totem-auto]');
+            if (totemAutoBtn) {
+              SoundFX.play('tap');
+              ShamanTotemSystem.initDraft(state);
+              renderSheet();
+              return;
+            }
+            const totemClearBtn = e.target.closest('[data-totem-clear]');
+            if (totemClearBtn) {
+              SoundFX.play('tap');
+              ShamanTotemSystem.clearDraft();
+              renderSheet();
+              return;
+            }
+            const totemCastCustomBtn = e.target.closest('[data-totem-cast-custom]');
+            if (totemCastCustomBtn) {
+              ShamanTotemSystem.executeRevival({ mode: 'custom', selection: ShamanTotemSystem.getDraft() });
+              return;
+            }
+            const totemCastAllBtn = e.target.closest('[data-totem-cast-all]');
+            if (totemCastAllBtn) {
+              ShamanTotemSystem.executeRevival({ mode: 'all' });
               return;
             }
             const claimMarketBtn = e.target.closest('[data-claim-market-stamina]');
@@ -10084,6 +10632,10 @@ export function initGameRuntime(hooks = {}) {
             if (jumpBtn) {
               const targetId = jumpBtn.dataset.jumpBuilding;
               const subTab = jumpBtn.dataset.jumpSubtab || 'building';
+              if (!BuildingRegistry.isVisibleInUI(targetId, state)) {
+                openBuildingSheet(targetId, subTab);
+                return;
+              }
               SoundFX.play('tap');
               if (activeTab !== 'village') switchTab('village');
               if (window.Village3D) window.Village3D.centerOn(targetId);
@@ -10625,6 +11177,12 @@ export function initGameRuntime(hooks = {}) {
       } catch {
         return { ok: false, message: "Signalfeuer-Unterstützung fehlgeschlagen." };
       }
+    },
+    getBuildingRegistry() {
+      return BuildingRegistry;
+    },
+    getShamanTotemSystem() {
+      return ShamanTotemSystem;
     },
     forceSave() {
       try {
