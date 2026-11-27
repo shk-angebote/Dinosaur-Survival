@@ -787,20 +787,23 @@ export function initGameRuntime(hooks = {}) {
           fur: '#d8b4fe'
         };
 
-        const WORLD_MAP_WIDTH = 1440;
-        const WORLD_MAP_HEIGHT = 810;
-        const WORLD_TILE_SIZE = 30; // Exaktes 48 x 27 Quadrat-Raster (30px pro Kachel)
-        const WORLD_GRID_COLS = WORLD_MAP_WIDTH / WORLD_TILE_SIZE; // 48
-        const WORLD_GRID_ROWS = WORLD_MAP_HEIGHT / WORLD_TILE_SIZE; // 27
+        const WORLD_TILE_SIZE = 30;
+        const WORLD_GRID_COLS = 1200;
+        const WORLD_GRID_ROWS = 1200;
+        const WORLD_MAP_WIDTH = WORLD_GRID_COLS * WORLD_TILE_SIZE;   // 36000
+        const WORLD_MAP_HEIGHT = WORLD_GRID_ROWS * WORLD_TILE_SIZE;  // 36000
         const TILE_FREE = 0;
         const TILE_BLOCKED = 1;  // Vulkan, Lava, Klippen, Dino-Höhlen (NPC-Festungen)
         const TILE_OCCUPIED = 2; // Sammelstellen & fremde Lager
 
-        // Standard-Anker (2x2 Kacheln: x..x+1, y..y+1) unten links auf dem befestigten Lager
-        const DEFAULT_HOME_TILE = { x: 9, y: 21 };
+        const WORLD_CAM_DEFAULT_ZOOM = 2.6; // px pro Kachel (~150×240 sichtbare Kacheln um das Dorf)
+        const WORLD_CAM_MAX_ZOOM = 56;      // px pro Kachel (Einzelkachel-Nahansicht & 2×2-Teleport)
 
-        // Statisches Weltkarten-Raster (Uint8Array für O(1)-Validierung)
-        const WORLD_STATIC_GRID = new Uint8Array(WORLD_GRID_COLS * WORLD_GRID_ROWS);
+        // Standard-Anker (2x2 Kacheln: x..x+1, y..y+1) im fruchtbaren Südwest-Tal
+        const DEFAULT_HOME_TILE = { x: 240, y: 940 };
+
+        // Leichtgewichtiges O(1)-Set für Sammelstellen & Dino-Kacheln (statt 1,44 Mio. Byte Array)
+        const STATIC_NODE_TILES = new Set();
 
         // 10 anklickbare Sammelstellen exakt auf den Lagern, Steinbrüchen und Bernsteinfeldern der Weltkarte
         const WORLD_NODES = [
@@ -1430,6 +1433,7 @@ export function initGameRuntime(hooks = {}) {
             bestiary: createInitialBestiary(),
             huntLogs: [],            // [{ id, timestamp, speciesId, dinoLevel, victory, rounds, ... }]
             worldMarches: [],        // [{ id, kind: 'gather'|'hunt', ... }]
+            worldGrid1200: true,
             homeTile: { ...DEFAULT_HOME_TILE },
             heroes: createInitialHeroes(),
             equipmentBag: createInitialEquipmentBag(),
@@ -1467,81 +1471,114 @@ export function initGameRuntime(hooks = {}) {
           return map;
         }
 
-        // Befüllt das statische 48x27 Grid mit Hindernissen (Vulkan, Höhlen, Klippen) & Sammelstellen
-        function initWorldStaticGrid() {
-          WORLD_STATIC_GRID.fill(TILE_FREE);
-          const mark = (gx, gy, val) => {
-            if (gx < 0 || gy < 0 || gx >= WORLD_GRID_COLS || gy >= WORLD_GRID_ROWS) return;
-            WORLD_STATIC_GRID[gy * WORLD_GRID_COLS + gx] = val;
-          };
-          const markRect = (x0, y0, x1, y1, val) => {
-            for (let y = y0; y <= y1; y++) {
-              for (let x = x0; x <= x1; x++) mark(x, y, val);
-            }
-          };
+        // O(1)-Terrain-Prüfung für das statische 1200×1200-Hindernisraster (identisch zum Server)
+        function getStaticWorldTileState(gx, gy) {
+          if (gx < 0 || gy < 0 || gx >= WORLD_GRID_COLS || gy >= WORLD_GRID_ROWS) return TILE_BLOCKED;
 
-          // 1. Zentrale Vulkan-Caldera & Lavaring (Ellipse im Zentrum)
-          for (let y = 0; y < WORLD_GRID_ROWS; y++) {
-            for (let x = 0; x < WORLD_GRID_COLS; x++) {
-              const dx = (x + 0.5 - 24.0) / 7.4;
-              const dy = (y + 0.5 - 13.5) / 5.7;
-              if (dx * dx + dy * dy <= 1.0) mark(x, y, TILE_BLOCKED);
-            }
-          }
+          // 1. Zentrale Vulkan-Caldera & Lavaring (Ellipse um 600, 600)
+          const dx = (gx + 0.5 - 600) / 145;
+          const dy = (gy + 0.5 - 600) / 145;
+          if (dx * dx + dy * dy <= 1.0) return TILE_BLOCKED;
 
-          // 2. 4 große NPC-Dino-Höhlen rund um die Caldera
-          markRect(21, 2, 26, 6, TILE_BLOCKED);   // Nord-Höhle
-          markRect(21, 20, 26, 24, TILE_BLOCKED); // Süd-Höhle
-          markRect(8, 11, 13, 15, TILE_BLOCKED);  // West-Höhle
-          markRect(34, 11, 39, 15, TILE_BLOCKED); // Ost-Höhle
+          // 2. 4 große Urzeit-Dino-Höhlen rund um die Caldera (Nord, Süd, West, Ost)
+          if (gx >= 530 && gx <= 670 && gy >= 110 && gy <= 230) return TILE_BLOCKED;
+          if (gx >= 530 && gx <= 670 && gy >= 970 && gy <= 1090) return TILE_BLOCKED;
+          if (gx >= 110 && gx <= 230 && gy >= 530 && gy <= 670) return TILE_BLOCKED;
+          if (gx >= 970 && gx <= 1090 && gy >= 530 && gy <= 670) return TILE_BLOCKED;
 
           // 3. Lava-Klippen & Schluchten an den 4 Kartenecken
-          markRect(0, 0, 5, 5, TILE_BLOCKED);
-          markRect(42, 0, 47, 5, TILE_BLOCKED);
-          markRect(0, 22, 5, 26, TILE_BLOCKED);
-          markRect(41, 22, 47, 26, TILE_BLOCKED);
+          if (gx <= 95 && gy <= 95) return TILE_BLOCKED;
+          if (gx >= 1104 && gy <= 95) return TILE_BLOCKED;
+          if (gx <= 95 && gy >= 1104) return TILE_BLOCKED;
+          if (gx >= 1104 && gy >= 1104) return TILE_BLOCKED;
 
           // 4. Drei fremde befestigte Stammes-Lager (NW, NO, SO)
-          markRect(9, 4, 11, 6, TILE_OCCUPIED);
-          markRect(36, 4, 38, 6, TILE_OCCUPIED);
-          markRect(36, 20, 38, 22, TILE_OCCUPIED);
+          if (gx >= 230 && gx <= 275 && gy >= 210 && gy <= 255) return TILE_OCCUPIED;
+          if (gx >= 925 && gx <= 970 && gy >= 210 && gy <= 255) return TILE_OCCUPIED;
+          if (gx >= 925 && gx <= 970 && gy >= 945 && gy <= 990) return TILE_OCCUPIED;
 
-          // 5. Alle 10 Sammelstellen & 10 Dino-Standorte auf dem Grid als belegt markieren
+          return TILE_FREE;
+        }
+
+        // Markiert die 2x2-Standorte der Sammelstellen & Dinos im kompakten O(1)-Set
+        function initWorldStaticGrid() {
+          STATIC_NODE_TILES.clear();
+          const markOccupied2x2 = (cx, cy) => {
+            for (let dy = -1; dy <= 0; dy++) {
+              for (let dx = -1; dx <= 0; dx++) {
+                const tx = cx + dx;
+                const ty = cy + dy;
+                if (tx >= 0 && ty >= 0 && tx < WORLD_GRID_COLS && ty < WORLD_GRID_ROWS) {
+                  STATIC_NODE_TILES.add(`${tx},${ty}`);
+                }
+              }
+            }
+          };
           for (const node of WORLD_NODES) {
-            const cx = Math.floor(((node.xPct / 100) * WORLD_MAP_WIDTH) / WORLD_TILE_SIZE);
-            const cy = Math.floor(((node.yPct / 100) * WORLD_MAP_HEIGHT) / WORLD_TILE_SIZE);
-            mark(cx, cy, TILE_OCCUPIED);
-            mark(cx - 1, cy, TILE_OCCUPIED);
+            const cx = Math.floor((node.xPct / 100) * WORLD_GRID_COLS);
+            const cy = Math.floor((node.yPct / 100) * WORLD_GRID_ROWS);
+            markOccupied2x2(cx, cy);
           }
           for (const d of WORLD_DINOS) {
-            const cx = Math.floor(((d.xPct / 100) * WORLD_MAP_WIDTH) / WORLD_TILE_SIZE);
-            const cy = Math.floor(((d.yPct / 100) * WORLD_MAP_HEIGHT) / WORLD_TILE_SIZE);
-            mark(cx, cy, TILE_OCCUPIED);
+            const cx = Math.floor((d.xPct / 100) * WORLD_GRID_COLS);
+            const cy = Math.floor((d.yPct / 100) * WORLD_GRID_ROWS);
+            markOccupied2x2(cx, cy);
           }
         }
         initWorldStaticGrid();
 
         function getHomePos() {
           const ht = (state && state.homeTile) || DEFAULT_HOME_TILE;
-          const centerPxX = (ht.x + 1) * WORLD_TILE_SIZE;
-          const centerPxY = (ht.y + 1) * WORLD_TILE_SIZE;
-          const xPct = (centerPxX / WORLD_MAP_WIDTH) * 100;
-          const yPct = (centerPxY / WORLD_MAP_HEIGHT) * 100;
+          const tileX = Math.max(0, Math.min(WORLD_GRID_COLS - 2, Math.floor(ht.x)));
+          const tileY = Math.max(0, Math.min(WORLD_GRID_ROWS - 2, Math.floor(ht.y)));
+          const wx = tileX + 1;
+          const wy = tileY + 1;
+          const centerPxX = wx * WORLD_TILE_SIZE;
+          const centerPxY = wy * WORLD_TILE_SIZE;
+          const xPct = (wx / WORLD_GRID_COLS) * 100;
+          const yPct = (wy / WORLD_GRID_ROWS) * 100;
           return {
-            tileX: ht.x,
-            tileY: ht.y,
+            tileX,
+            tileY,
+            wx,
+            wy,
             pxX: centerPxX,
             pxY: centerPxY,
             xPct,
             yPct,
-            coordX: Math.round(xPct * 10),
-            coordY: Math.round(yPct * 10)
+            coordX: tileX,
+            coordY: tileY
           };
         }
 
         function getWorldTileState(gx, gy) {
-          if (gx < 0 || gy < 0 || gx >= WORLD_GRID_COLS || gy >= WORLD_GRID_ROWS) return TILE_BLOCKED;
-          return WORLD_STATIC_GRID[gy * WORLD_GRID_COLS + gx];
+          const base = getStaticWorldTileState(gx, gy);
+          if (base !== TILE_FREE) return base;
+          return STATIC_NODE_TILES.has(`${gx},${gy}`) ? TILE_OCCUPIED : TILE_FREE;
+        }
+
+        function findNearestFree2x2Client(prefX, prefY) {
+          const bx = Math.max(0, Math.min(WORLD_GRID_COLS - 2, Math.floor(prefX)));
+          const by = Math.max(0, Math.min(WORLD_GRID_ROWS - 2, Math.floor(prefY)));
+          const is2x2Free = (ax, ay) => {
+            if (ax < 0 || ay < 0 || ax > WORLD_GRID_COLS - 2 || ay > WORLD_GRID_ROWS - 2) return false;
+            return (
+              getWorldTileState(ax, ay) === TILE_FREE &&
+              getWorldTileState(ax + 1, ay) === TILE_FREE &&
+              getWorldTileState(ax, ay + 1) === TILE_FREE &&
+              getWorldTileState(ax + 1, ay + 1) === TILE_FREE
+            );
+          };
+          if (is2x2Free(bx, by)) return { x: bx, y: by };
+          for (let r = 1; r <= 120; r++) {
+            for (let dy = -r; dy <= r; dy++) {
+              for (let dx = -r; dx <= r; dx++) {
+                if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+                if (is2x2Free(bx + dx, by + dy)) return { x: bx + dx, y: by + dy };
+              }
+            }
+          }
+          return { ...DEFAULT_HOME_TILE };
         }
 
         // Gemeinsamer Multiplayer-Weltzustand (aus Node.js WebSocket-Server + Cloud Firestore)
@@ -1625,18 +1662,30 @@ export function initGameRuntime(hooks = {}) {
         };
         let battleBannerTimer = null;
 
-        // Kamera-Zustand für die verschiebbare Weltkarte
+        // Kamera-Zustand für die zoom- und verschiebbare 1200×1200-Weltkarte
         const worldCam = {
-          x: 0,
-          y: 0,
+          cx: DEFAULT_HOME_TILE.x + 1,
+          cy: DEFAULT_HOME_TILE.y + 1,
+          zoom: WORLD_CAM_DEFAULT_ZOOM,
+          targetCx: DEFAULT_HOME_TILE.x + 1,
+          targetCy: DEFAULT_HOME_TILE.y + 1,
+          targetZoom: WORLD_CAM_DEFAULT_ZOOM,
           initialized: false,
           dragging: false,
           moved: false,
           pointerId: null,
           startX: 0,
           startY: 0,
-          originX: 0,
-          originY: 0
+          originCx: DEFAULT_HOME_TILE.x + 1,
+          originCy: DEFAULT_HOME_TILE.y + 1,
+          activePointers: new Map(),
+          pinchActive: false,
+          pinchStartDist: 0,
+          pinchStartZoom: WORLD_CAM_DEFAULT_ZOOM,
+          pinchWorldX: DEFAULT_HOME_TILE.x + 1,
+          pinchWorldY: DEFAULT_HOME_TILE.y + 1,
+          rafId: 0,
+          lastFrameTs: 0
         };
 
         // Zustand der 2x2 Ghost-Teleport-Vorschau
@@ -1648,9 +1697,8 @@ export function initGameRuntime(hooks = {}) {
           validation: null,
           dragging: false,
           pointerId: null,
-          offsetPxX: 0,
-          offsetPxY: 0,
-          obstaclesRendered: false
+          offsetTileX: 0,
+          offsetTileY: 0
         };
 
         function isOverheatMode() {
@@ -1683,13 +1731,24 @@ export function initGameRuntime(hooks = {}) {
               weather: { ...fresh.weather, ...(parsed.weather || {}) },
               troops: { ...fresh.troops, ...(parsed.troops || {}) },
               inventory: { ...fresh.inventory, ...(parsed.inventory || {}) },
-              homeTile:
-                parsed.homeTile && typeof parsed.homeTile.x === 'number' && typeof parsed.homeTile.y === 'number'
-                  ? {
-                      x: Math.max(0, Math.min(WORLD_GRID_COLS - 2, Math.floor(parsed.homeTile.x))),
-                      y: Math.max(0, Math.min(WORLD_GRID_ROWS - 2, Math.floor(parsed.homeTile.y)))
-                    }
-                  : { ...DEFAULT_HOME_TILE },
+              homeTile: (() => {
+                if (parsed.homeTile && typeof parsed.homeTile.x === 'number' && typeof parsed.homeTile.y === 'number') {
+                  const rx = Math.floor(parsed.homeTile.x);
+                  const ry = Math.floor(parsed.homeTile.y);
+                  // Einmalige Migration alter 48×27-Spielstände proportional auf das neue 1200×1200-Raster
+                  if (!parsed.worldGrid1200 && rx >= 0 && rx <= 47 && ry >= 0 && ry <= 26) {
+                    const mappedX = Math.round(((rx + 1) / 48) * WORLD_GRID_COLS) - 1;
+                    const mappedY = Math.round(((ry + 1) / 27) * WORLD_GRID_ROWS) - 1;
+                    return findNearestFree2x2Client(mappedX, mappedY);
+                  }
+                  return {
+                    x: Math.max(0, Math.min(WORLD_GRID_COLS - 2, rx)),
+                    y: Math.max(0, Math.min(WORLD_GRID_ROWS - 2, ry))
+                  };
+                }
+                return { ...DEFAULT_HOME_TILE };
+              })(),
+              worldGrid1200: true,
               buildings: { ...fresh.buildings },
               heroes: createInitialHeroes(),
               equipmentBag: Array.isArray(parsed.equipmentBag) ? parsed.equipmentBag : createInitialEquipmentBag(),
@@ -5863,77 +5922,440 @@ export function initGameRuntime(hooks = {}) {
         }
 
         /* =====================================================================
-           9B. WELTKARTE RENDERING, KAMERA, MINIMAP & MÄRSCHE
+           9B. WELTKARTE RENDERING (1200×1200 CANVAS, SMOOTH ZOOM, MINIMAP & MÄRSCHE)
            ===================================================================== */
-        function clampWorldCamera(x, y) {
+        const worldMapBgImage = new Image();
+        worldMapBgImage.referrerPolicy = 'no-referrer';
+        worldMapBgImage.src = '/assets/aistudio/image_aa58bba1.png';
+        worldMapBgImage.onload = () => {
+          if (activeTab === 'worldmap') {
+            applyWorldCamera(worldCam.cx, worldCam.cy, worldCam.zoom);
+          }
+        };
+
+        function getWorldViewportSize() {
           const vp = document.getElementById('worldMapViewport');
           const vw = vp ? vp.clientWidth || 380 : 380;
           const vh = vp ? vp.clientHeight || 600 : 600;
-          const minX = Math.min(0, vw - WORLD_MAP_WIDTH);
-          const minY = Math.min(0, vh - WORLD_MAP_HEIGHT);
+          return { vp, vw, vh };
+        }
+
+        function getWorldMinZoom(vw, vh) {
+          return Math.max(0.24, Math.min(vw, vh) / WORLD_GRID_COLS);
+        }
+
+        function clampWorldCameraState(cx, cy, zoom) {
+          const { vw, vh } = getWorldViewportSize();
+          const minZoom = getWorldMinZoom(vw, vh);
+          const z = Math.max(minZoom, Math.min(WORLD_CAM_MAX_ZOOM, Number(zoom) || WORLD_CAM_DEFAULT_ZOOM));
+          const halfW = vw / (2 * z);
+          const halfH = vh / (2 * z);
+          let nextCx = cx;
+          let nextCy = cy;
+          if (WORLD_GRID_COLS * z <= vw) {
+            nextCx = WORLD_GRID_COLS / 2;
+          } else {
+            nextCx = Math.max(halfW, Math.min(WORLD_GRID_COLS - halfW, cx));
+          }
+          if (WORLD_GRID_ROWS * z <= vh) {
+            nextCy = WORLD_GRID_ROWS / 2;
+          } else {
+            nextCy = Math.max(halfH, Math.min(WORLD_GRID_ROWS - halfH, cy));
+          }
+          return { cx: nextCx, cy: nextCy, zoom: z, minZoom, vw, vh };
+        }
+
+        function worldToScreen(wx, wy, vw, vh) {
           return {
-            x: Math.max(minX, Math.min(0, x)),
-            y: Math.max(minY, Math.min(0, y)),
-            vw,
-            vh
+            sx: vw / 2 + (wx - worldCam.cx) * worldCam.zoom,
+            sy: vh / 2 + (wy - worldCam.cy) * worldCam.zoom
           };
         }
 
-        function applyWorldCamera(x, y) {
-          const clamped = clampWorldCamera(x, y);
-          worldCam.x = clamped.x;
-          worldCam.y = clamped.y;
-          const surface = document.getElementById('worldMapSurface');
-          if (surface) {
-            surface.style.transform = `translate3d(${worldCam.x}px, ${worldCam.y}px, 0)`;
-          }
-          // Aktuelle Koordinaten im Viewport-Zentrum anzeigen
-          const centerX = Math.round(((-worldCam.x + clamped.vw / 2) / WORLD_MAP_WIDTH) * 1000);
-          const centerY = Math.round(((-worldCam.y + clamped.vh / 2) / WORLD_MAP_HEIGHT) * 1000);
-          const readout = document.getElementById('wmCoordReadout');
-          if (readout) {
-            readout.textContent = `[X: ${Math.max(0, Math.min(999, centerX))}, Y: ${Math.max(0, Math.min(999, centerY))}]`;
-          }
-          renderWorldMinimapViewport(clamped.vw, clamped.vh);
+        function screenToWorld(sx, sy, vw, vh) {
+          return {
+            wx: worldCam.cx + (sx - vw / 2) / worldCam.zoom,
+            wy: worldCam.cy + (sy - vh / 2) / worldCam.zoom
+          };
         }
 
-        function centerWorldMapOn(xPct, yPct) {
-          const vp = document.getElementById('worldMapViewport');
-          const vw = vp ? vp.clientWidth || 380 : 380;
-          const vh = vp ? vp.clientHeight || 600 : 600;
-          const targetX = vw / 2 - (xPct / 100) * WORLD_MAP_WIDTH;
-          const targetY = vh / 2 - (yPct / 100) * WORLD_MAP_HEIGHT;
-          applyWorldCamera(targetX, targetY);
+        function stopWorldCamAnimation() {
+          if (worldCam.rafId) {
+            cancelAnimationFrame(worldCam.rafId);
+            worldCam.rafId = 0;
+          }
+        }
+
+        function scheduleWorldCamAnimation() {
+          if (worldCam.rafId) return;
+          worldCam.lastFrameTs = performance.now();
+          const step = (ts) => {
+            worldCam.rafId = 0;
+            if (activeTab !== 'worldmap') return;
+            const dt = Math.min(0.05, Math.max(0.001, (ts - worldCam.lastFrameTs) / 1000));
+            worldCam.lastFrameTs = ts;
+            const alpha = 1 - Math.exp(-14 * dt);
+            const nextZoom = worldCam.zoom + (worldCam.targetZoom - worldCam.zoom) * alpha;
+            const nextCx = worldCam.cx + (worldCam.targetCx - worldCam.cx) * alpha;
+            const nextCy = worldCam.cy + (worldCam.targetCy - worldCam.cy) * alpha;
+            const done =
+              Math.abs(worldCam.targetZoom - nextZoom) < 0.004 &&
+              Math.abs(worldCam.targetCx - nextCx) < 0.03 &&
+              Math.abs(worldCam.targetCy - nextCy) < 0.03;
+            if (done) {
+              applyWorldCamera(worldCam.targetCx, worldCam.targetCy, worldCam.targetZoom);
+            } else {
+              applyWorldCamera(nextCx, nextCy, nextZoom);
+              worldCam.rafId = requestAnimationFrame(step);
+            }
+          };
+          worldCam.rafId = requestAnimationFrame(step);
+        }
+
+        function setWorldCameraTarget(cx, cy, zoom, animate = true) {
+          const clamped = clampWorldCameraState(cx, cy, zoom);
+          worldCam.targetCx = clamped.cx;
+          worldCam.targetCy = clamped.cy;
+          worldCam.targetZoom = clamped.zoom;
+          if (!animate) {
+            stopWorldCamAnimation();
+            applyWorldCamera(clamped.cx, clamped.cy, clamped.zoom);
+          } else {
+            scheduleWorldCamAnimation();
+          }
+        }
+
+        function zoomWorldMapAt(factor, focalSx, focalSy, animate = true) {
+          const { vw, vh } = getWorldViewportSize();
+          const fx = typeof focalSx === 'number' ? focalSx : vw / 2;
+          const fy = typeof focalSy === 'number' ? focalSy : vh / 2;
+          const baseZoom = animate ? worldCam.targetZoom : worldCam.zoom;
+          const baseCx = animate ? worldCam.targetCx : worldCam.cx;
+          const baseCy = animate ? worldCam.targetCy : worldCam.cy;
+          const worldX = baseCx + (fx - vw / 2) / baseZoom;
+          const worldY = baseCy + (fy - vh / 2) / baseZoom;
+          const minZoom = getWorldMinZoom(vw, vh);
+          const nextZoom = Math.max(minZoom, Math.min(WORLD_CAM_MAX_ZOOM, baseZoom * factor));
+          const nextCx = worldX - (fx - vw / 2) / nextZoom;
+          const nextCy = worldY - (fy - vh / 2) / nextZoom;
+          setWorldCameraTarget(nextCx, nextCy, nextZoom, animate);
+        }
+
+        function drawWorldMapCanvas(vw, vh) {
+          const canvas = document.getElementById('worldMapCanvas');
+          if (!canvas) return;
+          const dpr = Math.min(window.devicePixelRatio || 1, 2);
+          const targetW = Math.max(1, Math.round(vw * dpr));
+          const targetH = Math.max(1, Math.round(vh * dpr));
+          if (canvas.width !== targetW || canvas.height !== targetH) {
+            canvas.width = targetW;
+            canvas.height = targetH;
+          }
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return;
+
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          ctx.fillStyle = '#110e0d';
+          ctx.fillRect(0, 0, vw, vh);
+
+          const zoom = worldCam.zoom;
+          const mapLeft = vw / 2 - worldCam.cx * zoom;
+          const mapTop = vh / 2 - worldCam.cy * zoom;
+          const mapW = WORLD_GRID_COLS * zoom;
+          const mapH = WORLD_GRID_ROWS * zoom;
+
+          // 1. Vulkanischer Weltkarten-Hintergrund (1200×1200 Kontinent)
+          if (worldMapBgImage.complete && worldMapBgImage.naturalWidth > 0) {
+            ctx.imageSmoothingEnabled = true;
+            ctx.drawImage(worldMapBgImage, mapLeft, mapTop, mapW, mapH);
+          } else {
+            const grad = ctx.createRadialGradient(
+              mapLeft + mapW * 0.5,
+              mapTop + mapH * 0.5,
+              mapW * 0.04,
+              mapLeft + mapW * 0.5,
+              mapTop + mapH * 0.5,
+              mapW * 0.65
+            );
+            grad.addColorStop(0, '#431407');
+            grad.addColorStop(0.35, '#291c15');
+            grad.addColorStop(1, '#141110');
+            ctx.fillStyle = grad;
+            ctx.fillRect(mapLeft, mapTop, mapW, mapH);
+          }
+
+          // Sichtbarer Kachelbereich für O(sichtbare Kacheln)-Rendering
+          const visMinX = Math.max(0, Math.floor(worldCam.cx - vw / (2 * zoom)) - 1);
+          const visMaxX = Math.min(WORLD_GRID_COLS, Math.ceil(worldCam.cx + vw / (2 * zoom)) + 1);
+          const visMinY = Math.max(0, Math.floor(worldCam.cy - vh / (2 * zoom)) - 1);
+          const visMaxY = Math.min(WORLD_GRID_ROWS, Math.ceil(worldCam.cy + vh / (2 * zoom)) + 1);
+
+          // 2. Teleport-Hindernis-Overlay (nur sichtbare Kacheln oder Zonenformen bei Weitwinkel)
+          if (teleportGhost.active) {
+            if (zoom >= 6) {
+              const ownUid = mpWorld.session ? mpWorld.session.uid : null;
+              const startX = Math.max(0, visMinX);
+              const endX = Math.min(WORLD_GRID_COLS - 1, visMaxX);
+              const startY = Math.max(0, visMinY);
+              const endY = Math.min(WORLD_GRID_ROWS - 1, visMaxY);
+
+              for (let gy = startY; gy <= endY; gy++) {
+                const sy = mapTop + gy * zoom;
+                for (let gx = startX; gx <= endX; gx++) {
+                  const st = getWorldTileState(gx, gy);
+                  if (st === TILE_BLOCKED) {
+                    ctx.fillStyle = 'rgba(239, 68, 68, 0.25)';
+                    ctx.fillRect(mapLeft + gx * zoom, sy, zoom, zoom);
+                  } else if (st === TILE_OCCUPIED) {
+                    ctx.fillStyle = 'rgba(245, 158, 11, 0.26)';
+                    ctx.fillRect(mapLeft + gx * zoom, sy, zoom, zoom);
+                  }
+                }
+              }
+
+              // Belegte 2×2-Flächen anderer Spieler einzeichnen
+              ctx.fillStyle = 'rgba(56, 189, 248, 0.32)';
+              for (const s of mpWorld.settlements || []) {
+                if (ownUid && s.uid === ownUid) continue;
+                if (s.tileX + 2 < startX || s.tileX > endX || s.tileY + 2 < startY || s.tileY > endY) continue;
+                ctx.fillRect(mapLeft + s.tileX * zoom, mapTop + s.tileY * zoom, zoom * 2, zoom * 2);
+              }
+            } else {
+              // Übersichts-Zonen bei Herauszoomen im Teleport-Modus
+              ctx.fillStyle = 'rgba(239, 68, 68, 0.24)';
+              ctx.beginPath();
+              ctx.ellipse(mapLeft + 600 * zoom, mapTop + 600 * zoom, 145 * zoom, 145 * zoom, 0, 0, Math.PI * 2);
+              ctx.fill();
+              const blockedRects = [
+                [530, 110, 140, 120],
+                [530, 970, 140, 120],
+                [110, 530, 120, 140],
+                [970, 530, 120, 140],
+                [0, 0, 96, 96],
+                [1104, 0, 96, 96],
+                [0, 1104, 96, 96],
+                [1104, 1104, 96, 96]
+              ];
+              for (const [rx, ry, rw, rh] of blockedRects) {
+                ctx.fillRect(mapLeft + rx * zoom, mapTop + ry * zoom, rw * zoom, rh * zoom);
+              }
+              ctx.fillStyle = 'rgba(245, 158, 11, 0.26)';
+              const npcRects = [
+                [230, 210, 46, 46],
+                [925, 210, 46, 46],
+                [925, 945, 46, 46]
+              ];
+              for (const [rx, ry, rw, rh] of npcRects) {
+                ctx.fillRect(mapLeft + rx * zoom, mapTop + ry * zoom, rw * zoom, rh * zoom);
+              }
+            }
+          }
+
+          // 3. Adaptives Raster (50er Sektoren -> 10er Blöcke -> 1×1 Einzelkacheln je nach Zoom)
+          const drawGridLines = (step, strokeStyle, lineWidth) => {
+            ctx.beginPath();
+            const firstX = Math.max(0, Math.floor(visMinX / step) * step);
+            const lastX = Math.min(WORLD_GRID_COLS, Math.ceil(visMaxX / step) * step);
+            const firstY = Math.max(0, Math.floor(visMinY / step) * step);
+            const lastY = Math.min(WORLD_GRID_ROWS, Math.ceil(visMaxY / step) * step);
+            const yTop = Math.max(0, mapTop);
+            const yBot = Math.min(vh, mapTop + mapH);
+            const xLeft = Math.max(0, mapLeft);
+            const xRight = Math.min(vw, mapLeft + mapW);
+            for (let gx = firstX; gx <= lastX; gx += step) {
+              const x = Math.round(mapLeft + gx * zoom) + 0.5;
+              ctx.moveTo(x, yTop);
+              ctx.lineTo(x, yBot);
+            }
+            for (let gy = firstY; gy <= lastY; gy += step) {
+              const y = Math.round(mapTop + gy * zoom) + 0.5;
+              ctx.moveTo(xLeft, y);
+              ctx.lineTo(xRight, y);
+            }
+            ctx.strokeStyle = strokeStyle;
+            ctx.lineWidth = lineWidth;
+            ctx.stroke();
+          };
+
+          if (zoom >= 8 || (teleportGhost.active && zoom >= 6)) {
+            const tileAlpha = teleportGhost.active ? 0.22 : Math.min(0.18, (zoom - 7) * 0.015);
+            drawGridLines(1, `rgba(245, 239, 230, ${tileAlpha.toFixed(3)})`, 1);
+            drawGridLines(10, 'rgba(245, 158, 11, 0.24)', 1);
+          } else if (zoom >= 1.8) {
+            drawGridLines(10, 'rgba(245, 239, 230, 0.08)', 1);
+            drawGridLines(50, 'rgba(245, 158, 11, 0.16)', 1);
+          } else {
+            drawGridLines(50, 'rgba(245, 239, 230, 0.09)', 1);
+            drawGridLines(200, 'rgba(245, 158, 11, 0.18)', 1);
+          }
+
+          // 4. Dezente Sektor-Koordinaten im Nahzoom
+          if (zoom >= 14) {
+            ctx.fillStyle = 'rgba(253, 230, 138, 0.55)';
+            ctx.font = '600 10px ui-monospace, SFMono-Regular, Menlo, monospace';
+            const stepLbl = zoom >= 26 ? 5 : 10;
+            const firstX = Math.max(0, Math.floor(visMinX / stepLbl) * stepLbl);
+            const firstY = Math.max(0, Math.floor(visMinY / stepLbl) * stepLbl);
+            for (let gy = firstY; gy <= visMaxY; gy += stepLbl) {
+              for (let gx = firstX; gx <= visMaxX; gx += stepLbl) {
+                const sx = mapLeft + gx * zoom + 4;
+                const sy = mapTop + gy * zoom + 12;
+                if (sx > 8 && sx < vw - 52 && sy > 70 && sy < vh - 40) {
+                  ctx.fillText(`${gx},${gy}`, sx, sy);
+                }
+              }
+            }
+          }
+
+          // 5. Äußerer Rahmen der 1200×1200-Weltkarte
+          ctx.strokeStyle = 'rgba(245, 158, 11, 0.42)';
+          ctx.lineWidth = 1.5;
+          ctx.strokeRect(mapLeft + 0.5, mapTop + 0.5, mapW - 1, mapH - 1);
+        }
+
+        function updateProjectedWorldMarkers(vw, vh) {
+          const markersEl = document.getElementById('worldMapMarkers');
+          if (!markersEl) return;
+          const scale = Math.max(
+            0.72,
+            Math.min(1.08, 0.78 + Math.log2(Math.max(0.25, worldCam.zoom) / 0.65) * 0.065)
+          );
+          const margin = 96;
+          const nodes = markersEl.children;
+          for (let i = 0; i < nodes.length; i++) {
+            const el = nodes[i];
+            const wx = Number(el.dataset.wx);
+            const wy = Number(el.dataset.wy);
+            if (!Number.isFinite(wx) || !Number.isFinite(wy)) continue;
+            const { sx, sy } = worldToScreen(wx, wy, vw, vh);
+            if (sx < -margin || sx > vw + margin || sy < -margin || sy > vh + margin) {
+              if (el.style.display !== 'none') el.style.display = 'none';
+            } else {
+              if (el.style.display === 'none') el.style.display = '';
+              el.style.transform = `translate3d(${sx.toFixed(1)}px, ${sy.toFixed(1)}px, 0) translate(-50%, -50%) scale(${scale.toFixed(3)})`;
+            }
+          }
+        }
+
+        function renderWorldMarchSvg(vw, vh) {
+          const svgEl = document.getElementById('worldMarchSvg');
+          if (!svgEl) return;
+          svgEl.setAttribute('viewBox', `0 0 ${vw} ${vh}`);
+          const now = Date.now();
+          const home = getHomePos();
+          const ownUid = mpWorld.session ? mpWorld.session.uid : null;
+          const homePt = worldToScreen(home.wx, home.wy, vw, vh);
+          let svgHtml = '';
+
+          for (const march of state.worldMarches || []) {
+            const isHunt = march.kind === 'hunt';
+            const def = isHunt ? getWorldDinoDef(march.dinoId) : getWorldNodeDef(march.nodeId);
+            if (!def) continue;
+            const tPt = worldToScreen((def.xPct / 100) * WORLD_GRID_COLS, (def.yPct / 100) * WORLD_GRID_ROWS, vw, vh);
+            const total = Math.max(1000, march.phaseEndsAt - march.startedAt);
+            const prog = Math.min(1, Math.max(0, (now - march.startedAt) / total));
+
+            if (march.phase === 'marching_out') {
+              const mx = homePt.sx + (tPt.sx - homePt.sx) * prog;
+              const my = homePt.sy + (tPt.sy - homePt.sy) * prog;
+              const strokeCol = isHunt ? '#f87171' : '#fbbf24';
+              svgHtml += `<line class="wm-march-line ${isHunt ? 'hunt-out' : 'out'}" x1="${homePt.sx.toFixed(1)}" y1="${homePt.sy.toFixed(1)}" x2="${tPt.sx.toFixed(1)}" y2="${tPt.sy.toFixed(1)}" />`;
+              svgHtml += `<circle cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="8" fill="#171412" stroke="${strokeCol}" stroke-width="2.4" />`;
+              svgHtml += `<circle cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="3.4" fill="${strokeCol}" />`;
+            } else if (march.phase === 'gathering') {
+              svgHtml += `<line class="wm-march-line gather" x1="${homePt.sx.toFixed(1)}" y1="${homePt.sy.toFixed(1)}" x2="${tPt.sx.toFixed(1)}" y2="${tPt.sy.toFixed(1)}" />`;
+            } else if (march.phase === 'marching_back') {
+              const mx = tPt.sx + (homePt.sx - tPt.sx) * prog;
+              const my = tPt.sy + (homePt.sy - tPt.sy) * prog;
+              svgHtml += `<line class="wm-march-line ${isHunt ? 'hunt-back' : 'back'}" x1="${tPt.sx.toFixed(1)}" y1="${tPt.sy.toFixed(1)}" x2="${homePt.sx.toFixed(1)}" y2="${homePt.sy.toFixed(1)}" />`;
+              svgHtml += `<circle cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="8" fill="#171412" stroke="#4ade80" stroke-width="2.4" />`;
+              svgHtml += `<circle cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="3.4" fill="#4ade80" />`;
+            }
+          }
+
+          // Fremde Spielermärsche auf der gemeinsamen Weltkarte einzeichnen
+          for (const om of mpWorld.marches || []) {
+            if (ownUid && om.uid === ownUid) continue;
+            if (om.status !== 'active') continue;
+            const p1 = worldToScreen((om.fromX / 100) * WORLD_GRID_COLS, (om.fromY / 100) * WORLD_GRID_ROWS, vw, vh);
+            const p2 = worldToScreen((om.toX / 100) * WORLD_GRID_COLS, (om.toY / 100) * WORLD_GRID_ROWS, vw, vh);
+            const dur = Math.max(1000, (om.endsAt || now + 10000) - (om.startedAt || now));
+            const p = Math.min(1, Math.max(0, (now - (om.startedAt || now)) / dur));
+            const cx = p1.sx + (p2.sx - p1.sx) * p;
+            const cy = p1.sy + (p2.sy - p1.sy) * p;
+            svgHtml += `<line class="wm-march-line other-player" x1="${p1.sx.toFixed(1)}" y1="${p1.sy.toFixed(1)}" x2="${p2.sx.toFixed(1)}" y2="${p2.sy.toFixed(1)}" />`;
+            svgHtml += `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="6.5" fill="#0f172a" stroke="#38bdf8" stroke-width="2" />`;
+          }
+          svgEl.innerHTML = svgHtml;
+        }
+
+        function positionTeleportGhostElement(vw, vh) {
+          const preview = document.getElementById('wmGhostPreview');
+          if (!preview) return;
+          const sizePx = Math.max(38, 2 * worldCam.zoom);
+          const centerPt = worldToScreen(teleportGhost.anchorX + 1, teleportGhost.anchorY + 1, vw, vh);
+          preview.style.left = `${(centerPt.sx - sizePx / 2).toFixed(1)}px`;
+          preview.style.top = `${(centerPt.sy - sizePx / 2).toFixed(1)}px`;
+          preview.style.width = `${sizePx.toFixed(1)}px`;
+          preview.style.height = `${sizePx.toFixed(1)}px`;
+        }
+
+        function applyWorldCamera(cx, cy, zoom = worldCam.zoom) {
+          const clamped = clampWorldCameraState(cx, cy, zoom);
+          worldCam.cx = clamped.cx;
+          worldCam.cy = clamped.cy;
+          worldCam.zoom = clamped.zoom;
+
+          const readout = document.getElementById('wmCoordReadout');
+          if (readout) {
+            const tileX = Math.max(0, Math.min(WORLD_GRID_COLS - 1, Math.round(worldCam.cx)));
+            const tileY = Math.max(0, Math.min(WORLD_GRID_ROWS - 1, Math.round(worldCam.cy)));
+            readout.textContent = `[X: ${tileX}, Y: ${tileY}]`;
+          }
+
+          const zoomReadout = document.getElementById('wmZoomReadout');
+          if (zoomReadout) {
+            const ratio = worldCam.zoom / WORLD_CAM_DEFAULT_ZOOM;
+            zoomReadout.textContent = ratio >= 9.95 ? `${ratio.toFixed(0)}×` : `${Math.round(ratio * 100)}%`;
+          }
+
+          drawWorldMapCanvas(clamped.vw, clamped.vh);
+          updateProjectedWorldMarkers(clamped.vw, clamped.vh);
+          renderWorldMarchSvg(clamped.vw, clamped.vh);
+          renderWorldMinimapViewport(clamped.vw, clamped.vh);
+          if (teleportGhost.active) {
+            positionTeleportGhostElement(clamped.vw, clamped.vh);
+          }
+        }
+
+        function centerWorldMapOn(xPct, yPct, opts = {}) {
+          const wx = (Number(xPct) / 100) * WORLD_GRID_COLS;
+          const wy = (Number(yPct) / 100) * WORLD_GRID_ROWS;
+          const targetZoom =
+            typeof opts.zoom === 'number'
+              ? opts.zoom
+              : typeof opts.minZoom === 'number'
+              ? Math.max(worldCam.zoom, opts.minZoom)
+              : worldCam.zoom;
+          setWorldCameraTarget(wx, wy, targetZoom, opts.animate !== false);
         }
 
         function renderWorldMinimapViewport(vw, vh) {
           const rect = document.getElementById('wmMiniViewportRect');
           if (!rect) return;
-          const sx = 160 / WORLD_MAP_WIDTH;
-          const sy = 90 / WORLD_MAP_HEIGHT;
-          rect.setAttribute('x', String(Math.max(0, -worldCam.x * sx).toFixed(1)));
-          rect.setAttribute('y', String(Math.max(0, -worldCam.y * sy).toFixed(1)));
-          rect.setAttribute('width', String(Math.min(160, vw * sx).toFixed(1)));
-          rect.setAttribute('height', String(Math.min(90, vh * sy).toFixed(1)));
-        }
-
-        function renderWorldGridObstacles() {
-          if (teleportGhost.obstaclesRendered) return;
-          const svg = document.getElementById('wmGridObstaclesSvg');
-          if (!svg) return;
-          let rects = '';
-          for (let y = 0; y < WORLD_GRID_ROWS; y++) {
-            for (let x = 0; x < WORLD_GRID_COLS; x++) {
-              const st = getWorldTileState(x, y);
-              if (st === TILE_BLOCKED) {
-                rects += `<rect x="${x * WORLD_TILE_SIZE}" y="${y * WORLD_TILE_SIZE}" width="${WORLD_TILE_SIZE}" height="${WORLD_TILE_SIZE}" fill="rgba(239,68,68,0.22)" />`;
-              } else if (st === TILE_OCCUPIED) {
-                rects += `<rect x="${x * WORLD_TILE_SIZE}" y="${y * WORLD_TILE_SIZE}" width="${WORLD_TILE_SIZE}" height="${WORLD_TILE_SIZE}" fill="rgba(245,158,11,0.22)" />`;
-              }
-            }
-          }
-          svg.innerHTML = rects;
-          teleportGhost.obstaclesRendered = true;
+          const visW = vw / worldCam.zoom;
+          const visH = vh / worldCam.zoom;
+          const leftTile = worldCam.cx - visW / 2;
+          const topTile = worldCam.cy - visH / 2;
+          const scale = 120 / WORLD_GRID_COLS;
+          const rx = Math.max(0, Math.min(120, leftTile * scale));
+          const ry = Math.max(0, Math.min(120, topTile * scale));
+          const rw = Math.max(4, Math.min(120 - rx, visW * scale));
+          const rh = Math.max(4, Math.min(120 - ry, visH * scale));
+          rect.setAttribute('x', rx.toFixed(1));
+          rect.setAttribute('y', ry.toFixed(1));
+          rect.setAttribute('width', rw.toFixed(1));
+          rect.setAttribute('height', rh.toFixed(1));
         }
 
         function setGhostAnchor(rawX, rawY) {
@@ -5947,20 +6369,14 @@ export function initGameRuntime(hooks = {}) {
         }
 
         function enterTeleportGhostMode() {
-          const vp = document.getElementById('worldMapViewport');
           const home = getHomePos();
           teleportGhost.active = true;
-          renderWorldGridObstacles();
-          // Starte Ghost im aktuellen Viewport-Zentrum (oder direkt neben eigener Siedlung)
-          let startX = home.tileX + 2;
-          let startY = home.tileY;
-          if (vp && worldCam.initialized) {
-            const centerPxX = -worldCam.x + (vp.clientWidth || 380) / 2;
-            const centerPxY = -worldCam.y + (vp.clientHeight || 600) / 2;
-            startX = Math.floor(centerPxX / WORLD_TILE_SIZE) - 1;
-            startY = Math.floor(centerPxY / WORLD_TILE_SIZE) - 1;
-          }
+          const startX = worldCam.initialized ? Math.floor(worldCam.cx) - 1 : home.tileX + 2;
+          const startY = worldCam.initialized ? Math.floor(worldCam.cy) - 1 : home.tileY;
           setGhostAnchor(startX, startY);
+          // Zoome angenehm nah an das 1×1-Kachelraster heran, damit 2×2-Platzierung präzise ist
+          const comfortableZoom = Math.max(worldCam.zoom, 22);
+          setWorldCameraTarget(teleportGhost.anchorX + 1, teleportGhost.anchorY + 1, comfortableZoom, true);
           SoundFX.play('tap');
           renderWorldMap();
         }
@@ -6013,11 +6429,10 @@ export function initGameRuntime(hooks = {}) {
           showToast(`Siedlung nach [X: ${home.coordX}, Y: ${home.coordY}] teleportiert!`, 'ok');
           saveState();
           renderAll();
-          centerWorldMapOn(home.xPct, home.yPct);
+          centerWorldMapOn(home.xPct, home.yPct, { animate: true });
         }
 
         function renderTeleportGhostUI() {
-          const gridOverlay = document.getElementById('wmGridOverlay');
           const ghostLayer = document.getElementById('wmGhostLayer');
           const tpBar = document.getElementById('wmTeleportBar');
           const tpBtn = document.getElementById('btnWmTeleportMode');
@@ -6028,25 +6443,24 @@ export function initGameRuntime(hooks = {}) {
           if (tpBtnLabel) tpBtnLabel.textContent = teleportGhost.active ? 'Aktiv' : `Teleport (${tpCount})`;
 
           if (!teleportGhost.active) {
-            if (gridOverlay) gridOverlay.classList.remove('active');
             if (ghostLayer) ghostLayer.innerHTML = '';
             if (tpBar) tpBar.classList.remove('visible');
             return;
           }
 
-          if (gridOverlay) gridOverlay.classList.add('active');
           if (tpBar) tpBar.classList.add('visible');
 
+          const { vw, vh } = getWorldViewportSize();
           const v = teleportGhost.validation || validateGhost2x2(teleportGhost.anchorX, teleportGhost.anchorY);
-          const leftPx = teleportGhost.anchorX * WORLD_TILE_SIZE;
-          const topPx = teleportGhost.anchorY * WORLD_TILE_SIZE;
-          const centerXPct = (((leftPx + WORLD_TILE_SIZE) / WORLD_MAP_WIDTH) * 100);
-          const centerYPct = (((topPx + WORLD_TILE_SIZE) / WORLD_MAP_HEIGHT) * 100);
-          const coordX = Math.round(centerXPct * 10);
-          const coordY = Math.round(centerYPct * 10);
+          const coordX = teleportGhost.anchorX;
+          const coordY = teleportGhost.anchorY;
           const freeCount = v.cells.filter((c) => c.free).length;
           const strokeCol = v.valid ? '#86efac' : '#fca5a5';
           const fillCol = v.valid ? 'rgba(34, 197, 94, 0.35)' : 'rgba(239, 68, 68, 0.42)';
+          const sizePx = Math.max(38, 2 * worldCam.zoom);
+          const centerPt = worldToScreen(teleportGhost.anchorX + 1, teleportGhost.anchorY + 1, vw, vh);
+          const leftPx = centerPt.sx - sizePx / 2;
+          const topPx = centerPt.sy - sizePx / 2;
 
           const cellsHtml = v.cells
             .map((c) => `<div class="wm-ghost-cell ${c.free ? 'cell-free' : 'cell-blocked'}"></div>`)
@@ -6057,11 +6471,11 @@ export function initGameRuntime(hooks = {}) {
               <div
                 class="wm-ghost-2x2 ${v.valid ? 'is-valid' : 'is-invalid'} ${teleportGhost.dragging ? 'dragging' : ''}"
                 id="wmGhostPreview"
-                style="left:${leftPx}px; top:${topPx}px;"
+                style="left:${leftPx.toFixed(1)}px; top:${topPx.toFixed(1)}px; width:${sizePx.toFixed(1)}px; height:${sizePx.toFixed(1)}px;"
               >
                 ${cellsHtml}
                 <div class="wm-ghost-silhouette">
-                  <svg width="46" height="46" viewBox="0 0 56 56" fill="none" aria-hidden="true">
+                  <svg width="42" height="42" viewBox="0 0 56 56" fill="none" aria-hidden="true">
                     <rect x="6" y="10" width="44" height="36" rx="6" fill="${fillCol}" stroke="${strokeCol}" stroke-width="2" stroke-dasharray="4 2"/>
                     <path d="M15 36 L22 22 L29 36 Z" fill="${strokeCol}" opacity="0.85"/>
                     <path d="M29 36 L36 24 L42 36 Z" fill="${strokeCol}" opacity="0.7"/>
@@ -6086,7 +6500,7 @@ export function initGameRuntime(hooks = {}) {
               : `✕ Blockiert (${freeCount}/4 frei · ${v.reason})`;
           }
           if (coordEl) {
-            coordEl.textContent = `Grid [${teleportGhost.anchorX}, ${teleportGhost.anchorY}] · [X:${coordX}, Y:${coordY}]`;
+            coordEl.textContent = `Raster [${coordX}, ${coordY}] / 1200×1200`;
           }
           if (helpEl) {
             helpEl.textContent =
@@ -6107,16 +6521,9 @@ export function initGameRuntime(hooks = {}) {
 
         function renderWorldMap() {
           const now = Date.now();
-          const vp = document.getElementById('worldMapViewport');
+          const { vp, vw, vh } = getWorldViewportSize();
           if (!vp) return;
           const home = getHomePos();
-
-          if (!worldCam.initialized && vp.clientWidth > 0) {
-            worldCam.initialized = true;
-            centerWorldMapOn(home.xPct, home.yPct);
-          } else {
-            applyWorldCamera(worldCam.x, worldCam.y);
-          }
 
           // 0. Marschwarteschlangen-Anzeige im Weltkarten-HUD
           const qPill = document.getElementById('wmQueuePill');
@@ -6130,7 +6537,7 @@ export function initGameRuntime(hooks = {}) {
             `;
           }
 
-          // 1. Marker auf der Weltkarte (Eigene Siedlung + Fremde Spielerdörfer + Sammelstellen + wilde Dinos)
+          // 1. Marker mit Welt-Kachelkoordinaten (data-wx / data-wy) für schnelles GPU-Projektions-Update
           const markersEl = document.getElementById('worldMapMarkers');
           const bfLvl = state.buildings.bonfire.level;
           const ownUid = mpWorld.session ? mpWorld.session.uid : null;
@@ -6139,7 +6546,8 @@ export function initGameRuntime(hooks = {}) {
             <button
               class="wm-node own-settlement"
               data-wm-home="1"
-              style="left:${home.xPct}%; top:${home.yPct}%;"
+              data-wx="${home.wx}"
+              data-wy="${home.wy}"
               aria-label="${ownTribeLabel} Stufe ${bfLvl}"
             >
               <div class="wm-pin-ring">
@@ -6150,19 +6558,18 @@ export function initGameRuntime(hooks = {}) {
             </button>
           `;
 
-          // Andere echte Spielerdörfer auf der gemeinsamen Weltkarte
+          // Andere echte Spielerdörfer auf der gemeinsamen 1200×1200-Weltkarte
           for (const pl of mpWorld.settlements || []) {
             if (ownUid && pl.uid === ownUid) continue;
-            const pxX = (pl.tileX + 1) * WORLD_TILE_SIZE;
-            const pxY = (pl.tileY + 1) * WORLD_TILE_SIZE;
-            const xPct = (pxX / WORLD_MAP_WIDTH) * 100;
-            const yPct = (pxY / WORLD_MAP_HEIGHT) * 100;
+            const wx = Number(pl.tileX) + 1;
+            const wy = Number(pl.tileY) + 1;
             const safeName = escapeHtmlMp(pl.tribeName || 'Fremdstamm');
             markersHtml += `
               <button
                 class="wm-node other-settlement"
                 data-wm-player="${escapeHtmlMp(pl.uid)}"
-                style="left:${xPct.toFixed(2)}%; top:${yPct.toFixed(2)}%;"
+                data-wx="${wx}"
+                data-wy="${wy}"
                 aria-label="Spielerstamm ${safeName} Stufe ${pl.bonfireLevel}"
               >
                 <div class="wm-pin-ring">
@@ -6179,6 +6586,8 @@ export function initGameRuntime(hooks = {}) {
             const march = getActiveMarchForNode(def.id);
             const depleted = nState.remaining <= 0 && !march;
             const accent = RESOURCE_COLORS[def.resource] || '#f59e0b';
+            const wx = ((def.xPct / 100) * WORLD_GRID_COLS).toFixed(2);
+            const wy = ((def.yPct / 100) * WORLD_GRID_ROWS).toFixed(2);
             let progHtml = '';
             if (march) {
               const total = Math.max(1000, march.phaseEndsAt - march.startedAt);
@@ -6199,7 +6608,9 @@ export function initGameRuntime(hooks = {}) {
               <button
                 class="wm-node ${depleted ? 'depleted' : ''} ${march ? 'active-gather' : ''}"
                 data-wm-node="${def.id}"
-                style="left:${def.xPct}%; top:${def.yPct}%; --node-accent:${accent};"
+                data-wx="${wx}"
+                data-wy="${wy}"
+                style="--node-accent:${accent};"
                 aria-label="${def.name} Stufe ${def.level}"
               >
                 <div class="wm-pin-ring">
@@ -6218,6 +6629,8 @@ export function initGameRuntime(hooks = {}) {
             if (!sp) continue;
             const march = getActiveMarchForDino(dDef.id);
             const respawning = dState.respawnAt > now && !march;
+            const wx = ((dDef.xPct / 100) * WORLD_GRID_COLS).toFixed(2);
+            const wy = ((dDef.yPct / 100) * WORLD_GRID_ROWS).toFixed(2);
             let progHtml = '';
             if (march) {
               const total = Math.max(1000, march.phaseEndsAt - march.startedAt);
@@ -6237,7 +6650,9 @@ export function initGameRuntime(hooks = {}) {
               <button
                 class="wm-node is-dino ${respawning ? 'depleted' : ''} ${march ? 'active-hunt' : ''}"
                 data-wm-dino="${dDef.id}"
-                style="left:${dDef.xPct}%; top:${dDef.yPct}%; --node-accent:${sp.accent};"
+                data-wx="${wx}"
+                data-wy="${wy}"
+                style="--node-accent:${sp.accent};"
                 aria-label="${sp.name} Stufe ${dState.level}"
               >
                 <div class="wm-pin-ring">
@@ -6251,91 +6666,48 @@ export function initGameRuntime(hooks = {}) {
           }
           markersEl.innerHTML = markersHtml;
 
-          // 2. Animierte Marsch-Linien & laufende Trupps im SVG-Overlay (Sammel- & Jagdmärsche)
-          const homeX = home.pxX;
-          const homeY = home.pxY;
-          let svgHtml = '';
-
-          for (const march of state.worldMarches || []) {
-            const isHunt = march.kind === 'hunt';
-            const def = isHunt ? getWorldDinoDef(march.dinoId) : getWorldNodeDef(march.nodeId);
-            if (!def) continue;
-            const tx = (def.xPct / 100) * WORLD_MAP_WIDTH;
-            const ty = (def.yPct / 100) * WORLD_MAP_HEIGHT;
-            const total = Math.max(1000, march.phaseEndsAt - march.startedAt);
-            const prog = Math.min(1, Math.max(0, (now - march.startedAt) / total));
-
-            if (march.phase === 'marching_out') {
-              const mx = homeX + (tx - homeX) * prog;
-              const my = homeY + (ty - homeY) * prog;
-              const strokeCol = isHunt ? '#f87171' : '#fbbf24';
-              svgHtml += `<line class="wm-march-line ${isHunt ? 'hunt-out' : 'out'}" x1="${homeX.toFixed(1)}" y1="${homeY.toFixed(1)}" x2="${tx.toFixed(1)}" y2="${ty.toFixed(1)}" />`;
-              svgHtml += `<circle cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="8" fill="#171412" stroke="${strokeCol}" stroke-width="2.4" />`;
-              svgHtml += `<circle cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="3.4" fill="${strokeCol}" />`;
-            } else if (march.phase === 'gathering') {
-              svgHtml += `<line class="wm-march-line gather" x1="${homeX.toFixed(1)}" y1="${homeY.toFixed(1)}" x2="${tx.toFixed(1)}" y2="${ty.toFixed(1)}" />`;
-            } else if (march.phase === 'marching_back') {
-              const mx = tx + (homeX - tx) * prog;
-              const my = ty + (homeY - ty) * prog;
-              svgHtml += `<line class="wm-march-line ${isHunt ? 'hunt-back' : 'back'}" x1="${tx.toFixed(1)}" y1="${ty.toFixed(1)}" x2="${homeX.toFixed(1)}" y2="${homeY.toFixed(1)}" />`;
-              svgHtml += `<circle cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="8" fill="#171412" stroke="#4ade80" stroke-width="2.4" />`;
-              svgHtml += `<circle cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="3.4" fill="#4ade80" />`;
-            }
-          }
-          // Fremde Spielermärsche auf der gemeinsamen Weltkarte einzeichnen
-          for (const om of mpWorld.marches || []) {
-            if (ownUid && om.uid === ownUid) continue;
-            if (om.status !== 'active') continue;
-            const sx1 = (om.fromX / 100) * WORLD_MAP_WIDTH;
-            const sy1 = (om.fromY / 100) * WORLD_MAP_HEIGHT;
-            const sx2 = (om.toX / 100) * WORLD_MAP_WIDTH;
-            const sy2 = (om.toY / 100) * WORLD_MAP_HEIGHT;
-            const dur = Math.max(1000, (om.endsAt || now + 10000) - (om.startedAt || now));
-            const p = Math.min(1, Math.max(0, (now - (om.startedAt || now)) / dur));
-            const cx = sx1 + (sx2 - sx1) * p;
-            const cy = sy1 + (sy2 - sy1) * p;
-            svgHtml += `<line class="wm-march-line other-player" x1="${sx1.toFixed(1)}" y1="${sy1.toFixed(1)}" x2="${sx2.toFixed(1)}" y2="${sy2.toFixed(1)}" />`;
-            svgHtml += `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="6.5" fill="#0f172a" stroke="#38bdf8" stroke-width="2" />`;
-          }
-          document.getElementById('worldMarchSvg').innerHTML = svgHtml;
-
-          // 3. Interaktive Minimap aktualisieren
+          // 2. Interaktive quadratische 1:1 Minimap (1200×1200 -> 120×120)
           const miniSvg = document.getElementById('wmMinimapSvg');
-          const vw = vp.clientWidth || 380;
-          const vh = vp.clientHeight || 600;
+          const mScale = 120 / WORLD_GRID_COLS;
           let miniHtml = `
-            <rect width="160" height="90" fill="#181412" />
-            <circle cx="80" cy="45" r="16" fill="rgba(249,115,22,0.28)" />
-            <circle cx="80" cy="45" r="7" fill="#ea580c" />
+            <rect width="120" height="120" fill="#181412" />
+            <circle cx="60" cy="60" r="15" fill="rgba(249,115,22,0.28)" />
+            <circle cx="60" cy="60" r="6.5" fill="#ea580c" />
           `;
           for (const march of state.worldMarches || []) {
             const isHunt = march.kind === 'hunt';
             const def = isHunt ? getWorldDinoDef(march.dinoId) : getWorldNodeDef(march.nodeId);
             if (!def) continue;
             const col = march.phase === 'marching_back' ? '#4ade80' : isHunt ? '#f87171' : '#fbbf24';
-            miniHtml += `<line x1="${(home.xPct * 1.6).toFixed(1)}" y1="${(home.yPct * 0.9).toFixed(1)}" x2="${(def.xPct * 1.6).toFixed(1)}" y2="${(def.yPct * 0.9).toFixed(1)}" stroke="${col}" stroke-width="1.2" opacity="0.88" />`;
+            miniHtml += `<line x1="${(home.wx * mScale).toFixed(1)}" y1="${(home.wy * mScale).toFixed(1)}" x2="${(def.xPct * 1.2).toFixed(1)}" y2="${(def.yPct * 1.2).toFixed(1)}" stroke="${col}" stroke-width="1.2" opacity="0.88" />`;
           }
           for (const def of WORLD_NODES) {
             const nState = getWorldNodeState(def.id);
             const col = nState.remaining > 0 ? RESOURCE_COLORS[def.resource] : '#57534e';
-            miniHtml += `<circle cx="${(def.xPct * 1.6).toFixed(1)}" cy="${(def.yPct * 0.9).toFixed(1)}" r="2.1" fill="${col}" />`;
+            miniHtml += `<circle cx="${(def.xPct * 1.2).toFixed(1)}" cy="${(def.yPct * 1.2).toFixed(1)}" r="2" fill="${col}" />`;
           }
           for (const dDef of WORLD_DINOS) {
             const dState = getWorldDinoState(dDef.id);
             const col = dState.respawnAt > now ? '#57534e' : '#ef4444';
-            miniHtml += `<circle cx="${(dDef.xPct * 1.6).toFixed(1)}" cy="${(dDef.yPct * 0.9).toFixed(1)}" r="2.2" fill="${col}" />`;
+            miniHtml += `<circle cx="${(dDef.xPct * 1.2).toFixed(1)}" cy="${(dDef.yPct * 1.2).toFixed(1)}" r="2.1" fill="${col}" />`;
           }
           for (const pl of mpWorld.settlements || []) {
             if (ownUid && pl.uid === ownUid) continue;
-            const mxPct = (((pl.tileX + 1) * WORLD_TILE_SIZE) / WORLD_MAP_WIDTH) * 100;
-            const myPct = (((pl.tileY + 1) * WORLD_TILE_SIZE) / WORLD_MAP_HEIGHT) * 100;
-            miniHtml += `<circle cx="${(mxPct * 1.6).toFixed(1)}" cy="${(myPct * 0.9).toFixed(1)}" r="3.1" fill="#38bdf8" stroke="#082f49" stroke-width="0.9" />`;
+            const mx = (Number(pl.tileX) + 1) * mScale;
+            const my = (Number(pl.tileY) + 1) * mScale;
+            miniHtml += `<circle cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="2.8" fill="#38bdf8" stroke="#082f49" stroke-width="0.9" />`;
           }
-          miniHtml += `<circle cx="${(home.xPct * 1.6).toFixed(1)}" cy="${(home.yPct * 0.9).toFixed(1)}" r="3.6" fill="#4ade80" stroke="#052e16" stroke-width="1" />`;
-          const sx = 160 / WORLD_MAP_WIDTH;
-          const sy = 90 / WORLD_MAP_HEIGHT;
-          miniHtml += `<rect id="wmMiniViewportRect" x="${Math.max(0, -worldCam.x * sx).toFixed(1)}" y="${Math.max(0, -worldCam.y * sy).toFixed(1)}" width="${Math.min(160, vw * sx).toFixed(1)}" height="${Math.min(90, vh * sy).toFixed(1)}" fill="rgba(245,239,230,0.08)" stroke="#f5efe6" stroke-width="1.2" rx="2" />`;
+          miniHtml += `<circle cx="${(home.wx * mScale).toFixed(1)}" cy="${(home.wy * mScale).toFixed(1)}" r="3.4" fill="#4ade80" stroke="#052e16" stroke-width="1" />`;
+          miniHtml += `<rect id="wmMiniViewportRect" x="0" y="0" width="24" height="24" fill="rgba(245,239,230,0.1)" stroke="#f5efe6" stroke-width="1.2" rx="1.5" />`;
           miniSvg.innerHTML = miniHtml;
+
+          // 3. Kamera anwenden (zeichnet Canvas, projiziert Marker, Marsch-SVG & Minimap-Rechteck)
+          if (!worldCam.initialized && vp.clientWidth > 0) {
+            worldCam.initialized = true;
+            setWorldCameraTarget(home.wx, home.wy, WORLD_CAM_DEFAULT_ZOOM, false);
+          } else {
+            applyWorldCamera(worldCam.cx, worldCam.cy, worldCam.zoom);
+          }
 
           // 4. Ghost-Teleport-Modus oder Marsch-Warteschlange
           renderTeleportGhostUI();
@@ -8157,28 +8529,70 @@ export function initGameRuntime(hooks = {}) {
             openBuildingSheet(node.dataset.building);
           });
 
-          // Weltkarte: Ziehen (Pan), 2x2 Ghost-Ziehen & Tippen auf Sammelstellen / Grid
+          // Weltkarte: Ziehen (Pan), Mausrad-Zoom, 2-Finger-Pinch-Zoom, Doppelklick-Zoom & 2x2 Ghost-Ziehen
           const wmViewport = document.getElementById('worldMapViewport');
-          const clientToMapCoords = (clientX, clientY) => {
+          const clientToWorldTile = (clientX, clientY) => {
             const rect = wmViewport.getBoundingClientRect();
+            const sx = clientX - rect.left;
+            const sy = clientY - rect.top;
+            const pt = screenToWorld(sx, sy, rect.width || 380, rect.height || 600);
+            return { wx: pt.wx, wy: pt.wy, sx, sy, rect };
+          };
+
+          const getTwoPointerInfo = () => {
+            const pts = Array.from(worldCam.activePointers.values());
+            if (pts.length < 2) return null;
+            const a = pts[0];
+            const b = pts[1];
             return {
-              mx: clientX - rect.left - worldCam.x,
-              my: clientY - rect.top - worldCam.y
+              dist: Math.max(12, Math.hypot(b.x - a.x, b.y - a.y)),
+              midX: (a.x + b.x) / 2,
+              midY: (a.y + b.y) / 2
             };
           };
+
+          // Mausrad-Zoom um die Cursor-Position (analog zum 3D-Dorf)
+          wmViewport.addEventListener(
+            'wheel',
+            (e) => {
+              if (e.target.closest('.wm-march-bar') || e.target.closest('.wm-teleport-bar')) return;
+              e.preventDefault();
+              const rect = wmViewport.getBoundingClientRect();
+              const fx = e.clientX - rect.left;
+              const fy = e.clientY - rect.top;
+              const delta = e.deltaMode === 1 ? e.deltaY * 18 : e.deltaY;
+              const factor = Math.exp(-delta * 0.0018);
+              zoomWorldMapAt(factor, fx, fy, true);
+            },
+            { passive: false }
+          );
+
+          // Doppelklick auf freie Weltkarte zoomt geschmeidig hinein
+          wmViewport.addEventListener('dblclick', (e) => {
+            if (
+              e.target.closest('.wm-top-bar') ||
+              e.target.closest('.wm-march-bar') ||
+              e.target.closest('.wm-teleport-bar') ||
+              e.target.closest('.wm-node')
+            ) {
+              return;
+            }
+            const rect = wmViewport.getBoundingClientRect();
+            zoomWorldMapAt(2.1, e.clientX - rect.left, e.clientY - rect.top, true);
+          });
 
           wmViewport.addEventListener('pointerdown', (e) => {
             if (e.target.closest('.wm-top-bar') || e.target.closest('.wm-march-bar') || e.target.closest('.wm-teleport-bar')) return;
 
-            // Direktes Ziehen der 2x2-Ghost-Vorschau über das Grid
+            // Direktes Ziehen der 2x2-Ghost-Vorschau über das 1200×1200-Raster
             const ghostEl = e.target.closest('#wmGhostPreview');
             if (teleportGhost.active && ghostEl) {
               e.stopPropagation();
-              const pt = clientToMapCoords(e.clientX, e.clientY);
+              const pt = clientToWorldTile(e.clientX, e.clientY);
               teleportGhost.dragging = true;
               teleportGhost.pointerId = e.pointerId;
-              teleportGhost.offsetPxX = pt.mx - teleportGhost.anchorX * WORLD_TILE_SIZE;
-              teleportGhost.offsetPxY = pt.my - teleportGhost.anchorY * WORLD_TILE_SIZE;
+              teleportGhost.offsetTileX = pt.wx - teleportGhost.anchorX;
+              teleportGhost.offsetTileY = pt.wy - teleportGhost.anchorY;
               try {
                 wmViewport.setPointerCapture(e.pointerId);
               } catch (_) {}
@@ -8186,22 +8600,68 @@ export function initGameRuntime(hooks = {}) {
               return;
             }
 
+            stopWorldCamAnimation();
+            worldCam.activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+            if (worldCam.activePointers.size >= 2) {
+              const info = getTwoPointerInfo();
+              if (info) {
+                const rect = wmViewport.getBoundingClientRect();
+                const midSx = info.midX - rect.left;
+                const midSy = info.midY - rect.top;
+                const wPt = screenToWorld(midSx, midSy, rect.width || 380, rect.height || 600);
+                worldCam.pinchActive = true;
+                worldCam.dragging = false;
+                worldCam.moved = true;
+                worldCam.pinchStartDist = info.dist;
+                worldCam.pinchStartZoom = worldCam.zoom;
+                worldCam.pinchWorldX = wPt.wx;
+                worldCam.pinchWorldY = wPt.wy;
+                wmViewport.classList.add('dragging');
+              }
+              return;
+            }
+
+            worldCam.pinchActive = false;
             worldCam.dragging = true;
             worldCam.moved = false;
             worldCam.pointerId = e.pointerId;
             worldCam.startX = e.clientX;
             worldCam.startY = e.clientY;
-            worldCam.originX = worldCam.x;
-            worldCam.originY = worldCam.y;
+            worldCam.originCx = worldCam.cx;
+            worldCam.originCy = worldCam.cy;
           });
 
           wmViewport.addEventListener('pointermove', (e) => {
             if (teleportGhost.active && teleportGhost.dragging && e.pointerId === teleportGhost.pointerId) {
-              const pt = clientToMapCoords(e.clientX, e.clientY);
-              const nextAx = Math.round((pt.mx - teleportGhost.offsetPxX) / WORLD_TILE_SIZE);
-              const nextAy = Math.round((pt.my - teleportGhost.offsetPxY) / WORLD_TILE_SIZE);
+              const pt = clientToWorldTile(e.clientX, e.clientY);
+              const nextAx = Math.round(pt.wx - teleportGhost.offsetTileX);
+              const nextAy = Math.round(pt.wy - teleportGhost.offsetTileY);
               if (nextAx !== teleportGhost.anchorX || nextAy !== teleportGhost.anchorY) {
                 setGhostAnchor(nextAx, nextAy);
+              }
+              return;
+            }
+
+            if (worldCam.activePointers.has(e.pointerId)) {
+              worldCam.activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+            }
+
+            // 2-Finger-Pinch-Zoom + gleichzeitiges Verschieben um den Finger-Mittelpunkt
+            if (worldCam.pinchActive && worldCam.activePointers.size >= 2) {
+              const info = getTwoPointerInfo();
+              if (info) {
+                const rect = wmViewport.getBoundingClientRect();
+                const vw = rect.width || 380;
+                const vh = rect.height || 600;
+                const minZoom = getWorldMinZoom(vw, vh);
+                const ratio = info.dist / Math.max(12, worldCam.pinchStartDist);
+                const nextZoom = Math.max(minZoom, Math.min(WORLD_CAM_MAX_ZOOM, worldCam.pinchStartZoom * ratio));
+                const midSx = info.midX - rect.left;
+                const midSy = info.midY - rect.top;
+                const nextCx = worldCam.pinchWorldX - (midSx - vw / 2) / nextZoom;
+                const nextCy = worldCam.pinchWorldY - (midSy - vh / 2) / nextZoom;
+                setWorldCameraTarget(nextCx, nextCy, nextZoom, false);
               }
               return;
             }
@@ -8217,7 +8677,9 @@ export function initGameRuntime(hooks = {}) {
               } catch (_) {}
             }
             if (worldCam.moved) {
-              applyWorldCamera(worldCam.originX + dx, worldCam.originY + dy);
+              const nextCx = worldCam.originCx - dx / worldCam.zoom;
+              const nextCy = worldCam.originCy - dy / worldCam.zoom;
+              setWorldCameraTarget(nextCx, nextCy, worldCam.zoom, false);
             }
           });
 
@@ -8231,6 +8693,29 @@ export function initGameRuntime(hooks = {}) {
               return;
             }
 
+            worldCam.activePointers.delete(e.pointerId);
+
+            if (worldCam.pinchActive) {
+              if (worldCam.activePointers.size < 2) {
+                worldCam.pinchActive = false;
+                if (worldCam.activePointers.size === 1) {
+                  const [remId, remPt] = Array.from(worldCam.activePointers.entries())[0];
+                  worldCam.dragging = true;
+                  worldCam.pointerId = remId;
+                  worldCam.startX = remPt.x;
+                  worldCam.startY = remPt.y;
+                  worldCam.originCx = worldCam.cx;
+                  worldCam.originCy = worldCam.cy;
+                } else {
+                  wmViewport.classList.remove('dragging');
+                  setTimeout(() => {
+                    worldCam.moved = false;
+                  }, 0);
+                }
+              }
+              return;
+            }
+
             if (!worldCam.dragging || e.pointerId !== worldCam.pointerId) return;
             const wasMoved = worldCam.moved;
             worldCam.dragging = false;
@@ -8241,9 +8726,9 @@ export function initGameRuntime(hooks = {}) {
 
             // Tippen auf die Weltkarte im Teleport-Modus snappt die 2x2-Vorschau direkt dorthin
             if (!wasMoved && teleportGhost.active && !e.target.closest('.wm-top-bar') && !e.target.closest('.wm-teleport-bar')) {
-              const pt = clientToMapCoords(e.clientX, e.clientY);
-              const targetAx = Math.floor((pt.mx - WORLD_TILE_SIZE * 0.5) / WORLD_TILE_SIZE);
-              const targetAy = Math.floor((pt.my - WORLD_TILE_SIZE * 0.5) / WORLD_TILE_SIZE);
+              const pt = clientToWorldTile(e.clientX, e.clientY);
+              const targetAx = Math.floor(pt.wx - 0.5);
+              const targetAy = Math.floor(pt.wy - 0.5);
               SoundFX.play('tap');
               setGhostAnchor(targetAx, targetAy);
             }
@@ -8294,8 +8779,39 @@ export function initGameRuntime(hooks = {}) {
           document.getElementById('btnWmCenterHome').addEventListener('click', () => {
             SoundFX.play('tap');
             const home = getHomePos();
-            centerWorldMapOn(home.xPct, home.yPct);
+            centerWorldMapOn(home.xPct, home.yPct, { minZoom: WORLD_CAM_DEFAULT_ZOOM, animate: true });
           });
+
+          const btnWmZoomIn = document.getElementById('btnWmZoomIn');
+          if (btnWmZoomIn) {
+            btnWmZoomIn.addEventListener('click', () => {
+              SoundFX.play('tap');
+              zoomWorldMapAt(1.65, undefined, undefined, true);
+            });
+          }
+
+          const btnWmZoomOut = document.getElementById('btnWmZoomOut');
+          if (btnWmZoomOut) {
+            btnWmZoomOut.addEventListener('click', () => {
+              SoundFX.play('tap');
+              zoomWorldMapAt(1 / 1.65, undefined, undefined, true);
+            });
+          }
+
+          const btnWmZoomFit = document.getElementById('btnWmZoomFit');
+          if (btnWmZoomFit) {
+            btnWmZoomFit.addEventListener('click', () => {
+              SoundFX.play('tap');
+              const { vw, vh } = getWorldViewportSize();
+              const fitZoom = getWorldMinZoom(vw, vh);
+              if (Math.abs(worldCam.zoom - fitZoom) < 0.08) {
+                const home = getHomePos();
+                setWorldCameraTarget(home.wx, home.wy, WORLD_CAM_DEFAULT_ZOOM, true);
+              } else {
+                setWorldCameraTarget(WORLD_GRID_COLS / 2, WORLD_GRID_ROWS / 2, fitZoom, true);
+              }
+            });
+          }
 
           document.getElementById('btnWmTeleportMode').addEventListener('click', () => {
             if (teleportGhost.active) {
@@ -8318,7 +8834,7 @@ export function initGameRuntime(hooks = {}) {
             const rx = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
             const ry = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
             SoundFX.play('tap');
-            centerWorldMapOn(rx * 100, ry * 100);
+            centerWorldMapOn(rx * 100, ry * 100, { animate: true });
           });
 
           document.getElementById('wmMarchBar').addEventListener('click', (e) => {
@@ -8907,7 +9423,7 @@ export function initGameRuntime(hooks = {}) {
 
           window.addEventListener('resize', () => {
             resizeCanvas();
-            if (activeTab === 'worldmap') applyWorldCamera(worldCam.x, worldCam.y);
+            if (activeTab === 'worldmap') applyWorldCamera(worldCam.cx, worldCam.cy, worldCam.zoom);
           });
           window.addEventListener('beforeunload', saveState);
         }
@@ -9097,8 +9613,8 @@ export function initGameRuntime(hooks = {}) {
         fur: Math.floor(Number(state?.resources?.fur || 0))
       },
       homeTile: {
-        x: typeof state?.homeTile?.x === "number" ? state.homeTile.x : 23,
-        y: typeof state?.homeTile?.y === "number" ? state.homeTile.y : 13
+        x: typeof state?.homeTile?.x === "number" ? state.homeTile.x : DEFAULT_HOME_TILE.x,
+        y: typeof state?.homeTile?.y === "number" ? state.homeTile.y : DEFAULT_HOME_TILE.y
       }
     });
   };
@@ -9108,12 +9624,12 @@ export function initGameRuntime(hooks = {}) {
   const broadcastNeighborCaravan = (target, label) => {
     try {
       if (!window.DinoMultiplayer || !target) return;
-      const homeX = typeof state?.homeTile?.x === "number" ? state.homeTile.x : 23;
-      const homeY = typeof state?.homeTile?.y === "number" ? state.homeTile.y : 13;
-      const fromX = (((homeX + 1) * WORLD_TILE_SIZE) / WORLD_MAP_WIDTH) * 100;
-      const fromY = (((homeY + 1) * WORLD_TILE_SIZE) / WORLD_MAP_HEIGHT) * 100;
-      const toX = (((Number(target.tileX) + 1) * WORLD_TILE_SIZE) / WORLD_MAP_WIDTH) * 100;
-      const toY = (((Number(target.tileY) + 1) * WORLD_TILE_SIZE) / WORLD_MAP_HEIGHT) * 100;
+      const homeX = typeof state?.homeTile?.x === "number" ? state.homeTile.x : DEFAULT_HOME_TILE.x;
+      const homeY = typeof state?.homeTile?.y === "number" ? state.homeTile.y : DEFAULT_HOME_TILE.y;
+      const fromX = ((homeX + 1) / WORLD_GRID_COLS) * 100;
+      const fromY = ((homeY + 1) / WORLD_GRID_ROWS) * 100;
+      const toX = ((Number(target.tileX) + 1) / WORLD_GRID_COLS) * 100;
+      const toY = ((Number(target.tileY) + 1) / WORLD_GRID_ROWS) * 100;
       const marchId = `ally_${Date.now()}_${Math.floor(Math.random() * 9999)}`;
       void window.DinoMultiplayer.broadcastMarch({
         marchId,
@@ -9139,12 +9655,10 @@ export function initGameRuntime(hooks = {}) {
     jumpToWorldTile(tileX, tileY) {
       try {
         if (typeof switchTab === "function") switchTab("worldmap");
-        const pxX = (Number(tileX) + 1) * WORLD_TILE_SIZE;
-        const pxY = (Number(tileY) + 1) * WORLD_TILE_SIZE;
-        const xPct = (pxX / WORLD_MAP_WIDTH) * 100;
-        const yPct = (pxY / WORLD_MAP_HEIGHT) * 100;
+        const xPct = ((Number(tileX) + 1) / WORLD_GRID_COLS) * 100;
+        const yPct = ((Number(tileY) + 1) / WORLD_GRID_ROWS) * 100;
         if (typeof centerWorldMapOn === "function") {
-          setTimeout(() => centerWorldMapOn(xPct, yPct), 60);
+          setTimeout(() => centerWorldMapOn(xPct, yPct, { minZoom: 6, animate: true }), 60);
         }
       } catch {
         // ignore
@@ -9158,13 +9672,11 @@ export function initGameRuntime(hooks = {}) {
         }
         if (typeof switchTab === "function") switchTab("worldmap");
         if (typeof renderWorldMap === "function") renderWorldMap();
-        const pxX = (Number(target.tileX) + 1) * WORLD_TILE_SIZE;
-        const pxY = (Number(target.tileY) + 1) * WORLD_TILE_SIZE;
-        const xPct = (pxX / WORLD_MAP_WIDTH) * 100;
-        const yPct = (pxY / WORLD_MAP_HEIGHT) * 100;
+        const xPct = ((Number(target.tileX) + 1) / WORLD_GRID_COLS) * 100;
+        const yPct = ((Number(target.tileY) + 1) / WORLD_GRID_ROWS) * 100;
         setTimeout(() => {
           if (typeof centerWorldMapOn === "function") {
-            centerWorldMapOn(xPct, yPct);
+            centerWorldMapOn(xPct, yPct, { minZoom: 6, animate: true });
           }
           const marker = document.querySelector(
             `.wm-node.other-settlement[data-wm-player="${CSS.escape(String(target.uid || ""))}"]`

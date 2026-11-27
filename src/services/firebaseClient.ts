@@ -165,8 +165,8 @@ export function clampInt(val: number, min: number, max: number): number {
 }
 
 export function computeChunkKey(tileX: number, tileY: number): string {
-  const cx = Math.floor(clampInt(tileX, 0, 46) / 12);
-  const cy = Math.floor(clampInt(tileY, 0, 25) / 9);
+  const cx = Math.floor(clampInt(tileX, 0, 1198) / 50);
+  const cy = Math.floor(clampInt(tileY, 0, 1198) / 50);
   return `${cx}_${cy}`;
 }
 
@@ -272,8 +272,8 @@ export async function syncPublicProfileAndSettlement(payload: {
   const safeName = sanitizeTribeName(payload.tribeName);
   const bonfireLevel = clampInt(payload.bonfireLevel, 1, 25);
   const power = clampInt(payload.power, 0, 100000000);
-  const tileX = clampInt(payload.tileX, 0, 46);
-  const tileY = clampInt(payload.tileY, 0, 25);
+  const tileX = clampInt(payload.tileX, 0, 1198);
+  const tileY = clampInt(payload.tileY, 0, 1198);
   const chunkKey = computeChunkKey(tileX, tileY);
 
   const profilePath = `users/${payload.uid}/public/profile`;
@@ -566,9 +566,9 @@ export function subscribeFirestoreWorld(handlers: {
             tribeName: sanitizeTribeName(String(d.tribeName || 'Stamm')),
             bonfireLevel: clampInt(Number(d.bonfireLevel || 1), 1, 25),
             power: clampInt(Number(d.power || 0), 0, 100000000),
-            tileX: clampInt(Number(d.tileX || 23), 0, 46),
-            tileY: clampInt(Number(d.tileY || 13), 0, 25),
-            chunkKey: String(d.chunkKey || '1_1'),
+            tileX: clampInt(Number(d.tileX ?? 240), 0, 1198),
+            tileY: clampInt(Number(d.tileY ?? 940), 0, 1198),
+            chunkKey: String(d.chunkKey || '4_18'),
             updatedAt:
               typeof d.updatedAt?.toMillis === 'function' ? d.updatedAt.toMillis() : Date.now(),
           });

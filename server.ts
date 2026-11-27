@@ -306,7 +306,7 @@ async function startServer() {
     res.json(buildWorldSnapshot());
   });
 
-  // 9. Spielerdorf auf der gemeinsamen 48x27-Weltkarte registrieren oder atomar teleportieren
+  // 9. Spielerdorf auf der gemeinsamen 1200x1200-Weltkarte registrieren oder atomar teleportieren
   app.post('/api/v1/world/settlement', async (req, res) => {
     const identity = await verifyBearerHeader(req.headers.authorization);
     if (!identity) {
@@ -321,8 +321,8 @@ async function startServer() {
     const tribeName = sanitizeText(body.tribeName || 'Urzeit-Stamm', 28) || 'Urzeit-Stamm';
     const bonfireLevel = Math.max(1, Math.min(25, Math.floor(Number(body.bonfireLevel || 1))));
     const power = Math.max(0, Math.min(100_000_000, Math.floor(Number(body.power || 0))));
-    let tileX = Math.floor(Number(body.tileX ?? 10));
-    let tileY = Math.floor(Number(body.tileY ?? 20));
+    let tileX = Math.floor(Number(body.tileX ?? 240));
+    let tileY = Math.floor(Number(body.tileY ?? 940));
 
     const check = validateSettlementPlacement2x2(
       staticWorldGrid,

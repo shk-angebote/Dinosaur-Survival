@@ -14,7 +14,7 @@ const DEFAULT_RESOURCES: ResourceStock = { meat: 0, wood: 0, stone: 0, fur: 0 };
 
 export default function App() {
   const [bonfireLevel, setBonfireLevel] = useState<number>(1);
-  const [homeTile, setHomeTile] = useState<{ x: number; y: number }>({ x: 23, y: 13 });
+  const [homeTile, setHomeTile] = useState<{ x: number; y: number }>({ x: 240, y: 940 });
   const [resources, setResources] = useState<ResourceStock>(DEFAULT_RESOURCES);
   const runtimeRef = useRef<GameRuntimeHandle | null>(null);
 

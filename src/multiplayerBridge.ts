@@ -1086,7 +1086,7 @@ class DinoMultiplayerBridge {
         power: finalPower,
         tileX: finalTileX,
         tileY: finalTileY,
-        chunkKey: `${Math.floor(finalTileX / 12)}_${Math.floor(finalTileY / 9)}`,
+        chunkKey: `${Math.floor(finalTileX / 50)}_${Math.floor(finalTileY / 50)}`,
         updatedAt: Date.now(),
       };
       this.settlementsMap.set(fbUid, localDto);
@@ -1173,7 +1173,7 @@ class DinoMultiplayerBridge {
         power: finalPower,
         tileX: finalTileX,
         tileY: finalTileY,
-        chunkKey: `${Math.floor(finalTileX / 12)}_${Math.floor(finalTileY / 9)}`,
+        chunkKey: `${Math.floor(finalTileX / 50)}_${Math.floor(finalTileY / 50)}`,
         updatedAt: Date.now(),
       });
       this.emitWorld();

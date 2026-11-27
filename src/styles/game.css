@@ -990,25 +990,15 @@
         cursor: grabbing;
       }
 
-      .worldmap-surface {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 1440px;
-        height: 810px;
-        transform-origin: 0 0;
-        will-change: transform;
-      }
-
-      .worldmap-img {
+      .worldmap-canvas {
         position: absolute;
         inset: 0;
         width: 100%;
         height: 100%;
-        object-fit: cover;
+        display: block;
         pointer-events: none;
         user-select: none;
-        display: block;
+        z-index: 1;
       }
 
       .worldmap-vignette {
@@ -1064,7 +1054,9 @@
 
       .wm-node {
         position: absolute;
-        transform: translate(-50%, -50%);
+        top: 0;
+        left: 0;
+        will-change: transform;
         pointer-events: auto;
         min-width: 54px;
         min-height: 54px;
@@ -1074,11 +1066,11 @@
         justify-content: center;
         gap: 3px;
         cursor: pointer;
-        transition: transform 140ms var(--ease-out), filter 160ms var(--ease-out);
+        transition: filter 160ms var(--ease-out), opacity 160ms var(--ease-out);
       }
 
-      .wm-node:active {
-        transform: translate(-50%, -50%) scale(0.95);
+      .wm-node:active .wm-pin-ring {
+        transform: scale(0.92);
       }
 
       .wm-node.depleted {
@@ -1224,14 +1216,23 @@
         transform: scale(0.96);
       }
 
-      /* Interactive Minimap */
+      .wm-top-right-col {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 6px;
+        pointer-events: none;
+        flex-shrink: 0;
+      }
+
+      /* Interactive Square 1:1 Minimap (1200×1200) */
       .wm-minimap {
         pointer-events: auto;
         position: relative;
-        width: 88px;
-        height: 50px;
+        width: 84px;
+        height: 84px;
         border-radius: 10px;
-        background: rgba(14, 12, 11, 0.9);
+        background: rgba(14, 12, 11, 0.92);
         border: 1px solid rgba(245, 239, 230, 0.24);
         box-shadow: 0 6px 18px rgba(0, 0, 0, 0.65);
         overflow: hidden;
@@ -1243,6 +1244,63 @@
         width: 100%;
         height: 100%;
         display: block;
+      }
+
+      /* Compact World Map Zoom Controls */
+      .wm-zoom-controls {
+        pointer-events: auto;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 3px;
+        padding: 4px;
+        border-radius: 10px;
+        background: rgba(16, 14, 13, 0.88);
+        border: 1px solid var(--border-subtle);
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.55);
+        backdrop-filter: blur(8px);
+      }
+
+      .wm-zoom-btn {
+        width: 30px;
+        height: 28px;
+        border-radius: 7px;
+        background: rgba(245, 239, 230, 0.08);
+        border: 1px solid rgba(245, 239, 230, 0.16);
+        color: var(--text-primary);
+        font-size: 16px;
+        font-weight: 700;
+        line-height: 1;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: background 120ms ease, border-color 120ms ease, transform 100ms ease;
+      }
+
+      .wm-zoom-btn:hover {
+        background: rgba(245, 158, 11, 0.2);
+        border-color: rgba(245, 158, 11, 0.45);
+      }
+
+      .wm-zoom-btn:active {
+        transform: scale(0.93);
+      }
+
+      .wm-zoom-btn.wm-zoom-fit {
+        margin-top: 2px;
+        border-top-color: rgba(245, 239, 230, 0.22);
+        color: #fde68a;
+      }
+
+      .wm-zoom-label {
+        font-size: 9.5px;
+        font-weight: 700;
+        color: #e7e5e4;
+        letter-spacing: -0.02em;
+        padding: 1px 0;
+        min-width: 30px;
+        text-align: center;
       }
 
       /* Floating Active March Bar at Bottom of World Map */

@@ -36,8 +36,8 @@ service cloud.firestore {
         && data.tribeName is string && data.tribeName.size() >= 2 && data.tribeName.size() <= 28
         && data.bonfireLevel is int && data.bonfireLevel >= 1 && data.bonfireLevel <= 25
         && data.power is int && data.power >= 0 && data.power <= 100000000
-        && data.tileX is int && data.tileX >= 0 && data.tileX <= 46
-        && data.tileY is int && data.tileY >= 0 && data.tileY <= 25
+        && data.tileX is int && data.tileX >= 0 && data.tileX <= 1198
+        && data.tileY is int && data.tileY >= 0 && data.tileY <= 1198
         && data.updatedAt == request.time;
     }
 
@@ -58,8 +58,8 @@ service cloud.firestore {
         && data.tribeName is string && data.tribeName.size() >= 2 && data.tribeName.size() <= 28
         && data.bonfireLevel is int && data.bonfireLevel >= 1 && data.bonfireLevel <= 25
         && data.power is int && data.power >= 0 && data.power <= 100000000
-        && data.tileX is int && data.tileX >= 0 && data.tileX <= 46
-        && data.tileY is int && data.tileY >= 0 && data.tileY <= 25
+        && data.tileX is int && data.tileX >= 0 && data.tileX <= 1198
+        && data.tileY is int && data.tileY >= 0 && data.tileY <= 1198
         && data.chunkKey is string && data.chunkKey.size() >= 3 && data.chunkKey.size() <= 16 && data.chunkKey.matches('^[0-9]+_[0-9]+$')
         && data.updatedAt == request.time;
     }

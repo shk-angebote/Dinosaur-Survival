@@ -299,7 +299,7 @@
     },
     "/world_settlements/{userId}": {
       "schema": { "$ref": "#/entities/WorldSettlement" },
-      "description": "Alle Spielerdörfer auf dem gemeinsamen 48x27-Weltkartenraster."
+      "description": "Alle Spielerdörfer auf dem gemeinsamen 1200x1200-Weltkartenraster."
     },
     "/world_marches/{marchId}": {
       "schema": { "$ref": "#/entities/WorldMarch" },

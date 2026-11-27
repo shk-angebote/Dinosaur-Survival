@@ -112,50 +112,48 @@ export function validateBuildingUpgrade(req: BuildValidationRequest, serverNowMs
 }
 
 /**
- * Erzeugt das statische 48x27-Hindernisraster der Caldera-Weltkarte (identisch auf Server & Client).
+ * O(1)-Terrain-Prüfung für das statische 1200×1200-Hindernisraster der Caldera-Weltkarte
+ * (0 Byte Speicher, identisch auf Server & Client).
  */
-export function createStaticWorldGrid(): Uint8Array {
-  const grid = new Uint8Array(WORLD_GRID_COLS * WORLD_GRID_ROWS);
-  const mark = (gx: number, gy: number, val: number) => {
-    if (gx < 0 || gy < 0 || gx >= WORLD_GRID_COLS || gy >= WORLD_GRID_ROWS) return;
-    grid[gy * WORLD_GRID_COLS + gx] = val;
-  };
-  const markRect = (x0: number, y0: number, x1: number, y1: number, val: number) => {
-    for (let y = y0; y <= y1; y++) {
-      for (let x = x0; x <= x1; x++) mark(x, y, val);
-    }
-  };
-
-  // Zentrale Vulkan-Caldera
-  for (let y = 0; y < WORLD_GRID_ROWS; y++) {
-    for (let x = 0; x < WORLD_GRID_COLS; x++) {
-      const dx = (x + 0.5 - 24.0) / 7.4;
-      const dy = (y + 0.5 - 13.5) / 5.7;
-      if (dx * dx + dy * dy <= 1.0) mark(x, y, TILE_BLOCKED);
-    }
+export function getStaticWorldTileState(gx: number, gy: number): number {
+  if (gx < 0 || gy < 0 || gx >= WORLD_GRID_COLS || gy >= WORLD_GRID_ROWS) {
+    return TILE_BLOCKED;
   }
-  // 4 große NPC-Dino-Höhlen
-  markRect(21, 2, 26, 6, TILE_BLOCKED);
-  markRect(21, 20, 26, 24, TILE_BLOCKED);
-  markRect(8, 11, 13, 15, TILE_BLOCKED);
-  markRect(34, 11, 39, 15, TILE_BLOCKED);
+
+  // Zentrale Vulkan-Caldera (Ellipse um 600, 600)
+  const dx = (gx + 0.5 - 600) / 145;
+  const dy = (gy + 0.5 - 600) / 145;
+  if (dx * dx + dy * dy <= 1.0) return TILE_BLOCKED;
+
+  // 4 große Urzeit-Dino-Höhlen (Nord, Süd, West, Ost)
+  if (gx >= 530 && gx <= 670 && gy >= 110 && gy <= 230) return TILE_BLOCKED;
+  if (gx >= 530 && gx <= 670 && gy >= 970 && gy <= 1090) return TILE_BLOCKED;
+  if (gx >= 110 && gx <= 230 && gy >= 530 && gy <= 670) return TILE_BLOCKED;
+  if (gx >= 970 && gx <= 1090 && gy >= 530 && gy <= 670) return TILE_BLOCKED;
 
   // Lava-Klippen an den 4 Kartenecken
-  markRect(0, 0, 5, 5, TILE_BLOCKED);
-  markRect(42, 0, 47, 5, TILE_BLOCKED);
-  markRect(0, 22, 5, 26, TILE_BLOCKED);
-  markRect(41, 22, 47, 26, TILE_BLOCKED);
+  if (gx <= 95 && gy <= 95) return TILE_BLOCKED;
+  if (gx >= 1104 && gy <= 95) return TILE_BLOCKED;
+  if (gx <= 95 && gy >= 1104) return TILE_BLOCKED;
+  if (gx >= 1104 && gy >= 1104) return TILE_BLOCKED;
 
   // 3 befestigte NPC-Stammeslager
-  markRect(9, 4, 11, 6, TILE_OCCUPIED);
-  markRect(36, 4, 38, 6, TILE_OCCUPIED);
-  markRect(36, 20, 38, 22, TILE_OCCUPIED);
+  if (gx >= 230 && gx <= 275 && gy >= 210 && gy <= 255) return TILE_OCCUPIED;
+  if (gx >= 925 && gx <= 970 && gy >= 210 && gy <= 255) return TILE_OCCUPIED;
+  if (gx >= 925 && gx <= 970 && gy >= 945 && gy <= 990) return TILE_OCCUPIED;
 
-  return grid;
+  return TILE_FREE;
+}
+
+/**
+ * Leichtgewichtiger Kompatibilitäts-Stub (Terrain wird O(1) über getStaticWorldTileState ausgewertet).
+ */
+export function createStaticWorldGrid(): Uint8Array {
+  return new Uint8Array(0);
 }
 
 export function validateSettlementPlacement2x2(
-  staticGrid: Uint8Array,
+  _staticGrid: Uint8Array,
   settlements: Iterable<WorldSettlementDTO>,
   requesterUid: string,
   tileX: number,
@@ -164,12 +162,12 @@ export function validateSettlementPlacement2x2(
   const ax = Math.floor(tileX);
   const ay = Math.floor(tileY);
   if (ax < 0 || ay < 0 || ax > WORLD_GRID_COLS - 2 || ay > WORLD_GRID_ROWS - 2) {
-    return { valid: false, reason: 'Koordinaten liegen außerhalb der Weltkarte.' };
+    return { valid: false, reason: 'Koordinaten liegen außerhalb der 1200×1200 Weltkarte.' };
   }
 
   for (let dy = 0; dy < 2; dy++) {
     for (let dx = 0; dx < 2; dx++) {
-      const st = staticGrid[(ay + dy) * WORLD_GRID_COLS + (ax + dx)];
+      const st = getStaticWorldTileState(ax + dx, ay + dy);
       if (st !== TILE_FREE) {
         return {
           valid: false,
@@ -195,25 +193,27 @@ export function findFree2x2Spot(
   staticGrid: Uint8Array,
   settlements: Iterable<WorldSettlementDTO>,
   uid: string,
-  preferredX = 10,
-  preferredY = 20
+  preferredX = 240,
+  preferredY = 940
 ): { tileX: number; tileY: number } {
-  if (validateSettlementPlacement2x2(staticGrid, settlements, uid, preferredX, preferredY).valid) {
-    return { tileX: preferredX, tileY: preferredY };
+  const baseX = Math.max(0, Math.min(WORLD_GRID_COLS - 2, Math.floor(preferredX)));
+  const baseY = Math.max(0, Math.min(WORLD_GRID_ROWS - 2, Math.floor(preferredY)));
+  if (validateSettlementPlacement2x2(staticGrid, settlements, uid, baseX, baseY).valid) {
+    return { tileX: baseX, tileY: baseY };
   }
-  for (let r = 1; r < 22; r++) {
+  for (let r = 1; r <= 160; r++) {
     for (let dy = -r; dy <= r; dy++) {
       for (let dx = -r; dx <= r; dx++) {
         if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
-        const tx = preferredX + dx;
-        const ty = preferredY + dy;
+        const tx = baseX + dx;
+        const ty = baseY + dy;
         if (validateSettlementPlacement2x2(staticGrid, settlements, uid, tx, ty).valid) {
           return { tileX: tx, tileY: ty };
         }
       }
     }
   }
-  return { tileX: preferredX, tileY: preferredY };
+  return { tileX: 240, tileY: 940 };
 }
 
 export function resolveAuthoritativeDinoHunt(req: DinoHuntCombatRequest, serverTimeMs: number): DinoHuntCombatResponse {

@@ -122,7 +122,7 @@ function getSettlementStatusMeta(
   };
 }
 
-const NEARBY_RADIUS_TILES = 15;
+const NEARBY_RADIUS_TILES = 200;
 const BONFIRE_SUPPORT_WOOD_COST = 20;
 const BONFIRE_SUPPORT_COOLDOWN_MS = 60_000;
 const TRADE_AMOUNTS = [25, 50, 100] as const;
@@ -291,7 +291,7 @@ export const MultiplayerHubDrawer: React.FC<MultiplayerHubDrawerProps> = ({
     const own = settlements.find((s) => s.uid === session.uid);
     if (own) return { x: own.tileX, y: own.tileY };
     if (homeTile) return homeTile;
-    return { x: 23, y: 13 };
+    return { x: 240, y: 940 };
   }, [settlements, session.uid, homeTile]);
 
   const nearbyPlayers = useMemo(() => {

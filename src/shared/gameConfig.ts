@@ -10,10 +10,10 @@ export const MAX_LEVEL = 25;
 export const FREE_FINISH_SEC = 30;
 export const MARCH_QUEUE_UNLOCK_LEVELS = [1, 4, 9, 15, 21] as const;
 
-export const WORLD_GRID_COLS = 48;
-export const WORLD_GRID_ROWS = 27;
-export const WORLD_TILE_SIZE = 40;
-export const WORLD_CHUNK_SIZE = 16;
+export const WORLD_GRID_COLS = 1200;
+export const WORLD_GRID_ROWS = 1200;
+export const WORLD_TILE_SIZE = 30;
+export const WORLD_CHUNK_SIZE = 50;
 
 export const BASE_BUILD_SECONDS: readonly number[] = [
   0,
