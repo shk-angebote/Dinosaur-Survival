@@ -146,7 +146,7 @@ export function initGameRuntime(hooks = {}) {
             hasWorkers: false,
             timeMult: 0.95,
             baseCost: { wood: 38, fur: 20 },
-            popCap: (lvl) => (lvl <= 0 ? 3 : 3 + lvl * 3)
+            popCap: (lvl) => 5 + lvl * 3
           },
           slinger: {
             id: 'slinger',
@@ -225,10 +225,73 @@ export function initGameRuntime(hooks = {}) {
             baseCost: { wood: 44, stone: 24, fur: 20 },
             maxWorkers: (lvl) => (lvl <= 0 ? 0 : Math.min(4, Math.ceil(lvl * 0.5) + 1)),
             unlockReq: [{ buildingId: 'hunter', minLevel: 2 }]
+          },
+          infirmary: {
+            id: 'infirmary',
+            name: 'Krankenzelt',
+            shortName: 'Krankenzelt',
+            role: 'Heilung & Lazarett',
+            desc: 'Versorgt im Kampf verletzte Einheiten, damit sie nicht verloren gehen. Höhere Stufen erhöhen die Betten-Kapazität und Heiler beschleunigen die Genesung.',
+            pos: { x: 14.0, y: 84.0 },
+            hasWorkers: true,
+            workerLabel: 'Heiler',
+            workerDesc: 'Jeder Heiler beschleunigt die Heilung verletzter Einheiten um +15 %.',
+            timeMult: 1.0,
+            baseCost: { meat: 20, wood: 36, stone: 18, fur: 24 },
+            maxWorkers: (lvl) => (lvl <= 0 ? 0 : Math.min(5, Math.ceil(lvl * 0.5) + 1))
+          },
+          graveyard: {
+            id: 'graveyard',
+            name: 'Friedhof',
+            shortName: 'Friedhof',
+            role: 'Ruhestätte & Wiedererweckung',
+            desc: 'Bewahrt gefallene Einheiten aus schweren Gefechten auf. Mit einem Schamanen-Totem kannst du gefallene Krieger wieder ins Leben zurückrufen.',
+            pos: { x: 86.0, y: 84.0 },
+            hasWorkers: false,
+            timeMult: 1.05,
+            baseCost: { meat: 15, wood: 30, stone: 38, fur: 14 }
+          },
+          marketplace: {
+            id: 'marketplace',
+            name: 'Marktplatz',
+            shortName: 'Marktplatz',
+            role: 'Handel & Jagd-Ausdauer',
+            desc: 'Treffpunkt für Urzeit-Händler: Hole hier alle 12 Stunden kostenlos 300 Ausdauer für die Dinojagd auf der Weltkarte ab.',
+            pos: { x: 86.0, y: 28.0 },
+            hasWorkers: false,
+            timeMult: 1.05,
+            baseCost: { meat: 24, wood: 42, stone: 24, fur: 18 }
+          },
+          warehouse: {
+            id: 'warehouse',
+            name: 'Lagerhaus',
+            shortName: 'Lagerhaus',
+            role: 'Ressourcenschutz & Tresor',
+            desc: 'Sichert deine wichtigsten Vorräte (Fleisch, Holz, Stein & Fell) mit einer geschützten Safe-Kapazität vor künftigen Multiplayer-Plünderungen.',
+            pos: { x: 14.0, y: 26.0 },
+            hasWorkers: false,
+            timeMult: 1.05,
+            baseCost: { meat: 18, wood: 45, stone: 34, fur: 12 }
           }
         };
 
-        const BUILDING_ORDER = ['bonfire', 'lumber', 'quarry', 'hunter', 'hut', 'slinger', 'clubman', 'dinorider', 'hero_cave', 'workshop', 'scout'];
+        const BUILDING_ORDER = [
+          'bonfire',
+          'lumber',
+          'quarry',
+          'hunter',
+          'hut',
+          'slinger',
+          'clubman',
+          'dinorider',
+          'hero_cave',
+          'workshop',
+          'scout',
+          'infirmary',
+          'graveyard',
+          'marketplace',
+          'warehouse'
+        ];
 
         const TROOP_DEFS = {
           slinger: {
@@ -637,10 +700,24 @@ export function initGameRuntime(hooks = {}) {
             accent: '#38bdf8',
             desc: 'Versetzt deine 2×2-Siedlung per Ghost-Vorschau auf ein freies Quadrat-Rasterfeld der Weltkarte.',
             actionType: 'teleport'
+          },
+          {
+            id: 'shamanTotem',
+            name: 'Schamanen-Totem',
+            category: 'bones',
+            accent: '#2dd4bf',
+            desc: 'Mystisches Geister-Totem: Erweckt auf dem Friedhof gefallene Einheiten wieder zum Leben.',
+            actionType: 'goto_graveyard'
           }
         ];
 
         const FREE_BONE_COOLDOWN_MS = 600000; // Alle 10 Min. 1 Gratis-Knochen in der Heldenhöhle
+        const MARKET_STAMINA_COOLDOWN_MS = 12 * 60 * 60 * 1000; // Alle 12 Stunden gratis 300 Ausdauer am Marktplatz
+        const MARKET_STAMINA_REWARD = 300;
+        const DINO_HUNT_STAMINA_COST = 25;
+        const STAMINA_REGEN_CAP = 300;
+        const STAMINA_HARD_CAP = 900;
+        const STAMINA_REGEN_BASE_MS = 120000; // +1 Ausdauer alle 2 Min. passiv bis 300
 
         const RESEARCH_LIST = [
           {
@@ -999,7 +1076,8 @@ export function initGameRuntime(hooks = {}) {
               { label: 'Urzeit-Knochen', itemKey: 'bones', chancePct: 75, min: 1, max: 2 },
               { label: 'PvE-Malerei', itemKey: 'pvePaint', chancePct: 52, min: 2, max: 3 },
               { label: 'Ausrüstungskiste', itemKey: 'gearChest', chancePct: 28, min: 1, max: 1 },
-              { label: 'Goldener Knochen', itemKey: 'goldenBones', chancePct: 8, min: 1, max: 1 }
+              { label: 'Goldener Knochen', itemKey: 'goldenBones', chancePct: 8, min: 1, max: 1 },
+              { label: 'Schamanen-Totem', itemKey: 'shamanTotem', chancePct: 18, min: 1, max: 1 }
             ]
           },
           {
@@ -1020,7 +1098,8 @@ export function initGameRuntime(hooks = {}) {
               { label: 'Urzeit-Knochen', itemKey: 'bones', chancePct: 82, min: 2, max: 3 },
               { label: 'PvE-Malerei', itemKey: 'pvePaint', chancePct: 60, min: 2, max: 4 },
               { label: 'Ausrüstungskiste', itemKey: 'gearChest', chancePct: 35, min: 1, max: 1 },
-              { label: 'Goldener Knochen', itemKey: 'goldenBones', chancePct: 12, min: 1, max: 1 }
+              { label: 'Goldener Knochen', itemKey: 'goldenBones', chancePct: 12, min: 1, max: 1 },
+              { label: 'Schamanen-Totem', itemKey: 'shamanTotem', chancePct: 25, min: 1, max: 1 }
             ]
           },
           {
@@ -1041,7 +1120,8 @@ export function initGameRuntime(hooks = {}) {
               { label: 'Urzeit-Knochen', itemKey: 'bones', chancePct: 90, min: 2, max: 3 },
               { label: 'PvE-Malerei', itemKey: 'pvePaint', chancePct: 68, min: 3, max: 5 },
               { label: 'Ausrüstungskiste', itemKey: 'gearChest', chancePct: 42, min: 1, max: 2 },
-              { label: 'Goldener Knochen', itemKey: 'goldenBones', chancePct: 18, min: 1, max: 1 }
+              { label: 'Goldener Knochen', itemKey: 'goldenBones', chancePct: 18, min: 1, max: 1 },
+              { label: 'Schamanen-Totem', itemKey: 'shamanTotem', chancePct: 32, min: 1, max: 1 }
             ]
           },
           {
@@ -1062,7 +1142,8 @@ export function initGameRuntime(hooks = {}) {
               { label: 'Urzeit-Knochen', itemKey: 'bones', chancePct: 95, min: 2, max: 4 },
               { label: 'PvE-Malerei', itemKey: 'pvePaint', chancePct: 76, min: 3, max: 6 },
               { label: 'Ausrüstungskiste', itemKey: 'gearChest', chancePct: 50, min: 1, max: 2 },
-              { label: 'Goldener Knochen', itemKey: 'goldenBones', chancePct: 24, min: 1, max: 1 }
+              { label: 'Goldener Knochen', itemKey: 'goldenBones', chancePct: 24, min: 1, max: 1 },
+              { label: 'Schamanen-Totem', itemKey: 'shamanTotem', chancePct: 40, min: 1, max: 2 }
             ]
           },
           {
@@ -1083,7 +1164,8 @@ export function initGameRuntime(hooks = {}) {
               { label: 'Urzeit-Knochen', itemKey: 'bones', chancePct: 100, min: 3, max: 5 },
               { label: 'PvE-Malerei', itemKey: 'pvePaint', chancePct: 85, min: 4, max: 7 },
               { label: 'Ausrüstungskiste', itemKey: 'gearChest', chancePct: 60, min: 1, max: 2 },
-              { label: 'Goldener Knochen', itemKey: 'goldenBones', chancePct: 34, min: 1, max: 2 }
+              { label: 'Goldener Knochen', itemKey: 'goldenBones', chancePct: 34, min: 1, max: 2 },
+              { label: 'Schamanen-Totem', itemKey: 'shamanTotem', chancePct: 52, min: 1, max: 2 }
             ]
           },
           {
@@ -1104,7 +1186,8 @@ export function initGameRuntime(hooks = {}) {
               { label: 'PvE-Malerei', itemKey: 'pvePaint', chancePct: 100, min: 6, max: 10 },
               { label: 'Ausrüstungskiste', itemKey: 'gearChest', chancePct: 75, min: 2, max: 3 },
               { label: 'Goldener Knochen', itemKey: 'goldenBones', chancePct: 55, min: 1, max: 2 },
-              { label: 'PvP-Malerei', itemKey: 'pvpPaint', chancePct: 45, min: 3, max: 5 }
+              { label: 'PvP-Malerei', itemKey: 'pvpPaint', chancePct: 45, min: 3, max: 5 },
+              { label: 'Schamanen-Totem', itemKey: 'shamanTotem', chancePct: 72, min: 2, max: 3 }
             ]
           }
         ];
@@ -1379,7 +1462,8 @@ export function initGameRuntime(hooks = {}) {
             crateFur: 0,
             speedup5m: 2,
             speedup15m: 0,
-            teleportItem: 3
+            teleportItem: 3,
+            shamanTotem: 2
           };
         }
 
@@ -1391,10 +1475,10 @@ export function initGameRuntime(hooks = {}) {
             soundEnabled: true,
             lastTick: now,
             resources: {
-              meat: 95,
-              wood: 135,
-              stone: 55,
-              fur: 40
+              meat: 140,
+              wood: 200,
+              stone: 110,
+              fur: 70
             },
             ember: 92,
             fireMode: 'normal',      // 'normal' | 'overheat' (dauerhaft gespeichert)
@@ -1407,25 +1491,40 @@ export function initGameRuntime(hooks = {}) {
             },
             buildings: {
               bonfire: { level: 1, workers: 1 },
-              lumber: { level: 1, workers: 1 },
-              quarry: { level: 1, workers: 1 },
-              hunter: { level: 1, workers: 1 },
-              hut: { level: 1, workers: 0 },
-              slinger: { level: 1, workers: 0 },
-              clubman: { level: 1, workers: 0 },
-              dinorider: { level: 1, workers: 0 },
-              hero_cave: { level: 1, workers: 0 },
+              lumber: { level: 0, workers: 0 },
+              quarry: { level: 0, workers: 0 },
+              hunter: { level: 0, workers: 0 },
+              hut: { level: 0, workers: 0 },
+              slinger: { level: 0, workers: 0 },
+              clubman: { level: 0, workers: 0 },
+              dinorider: { level: 0, workers: 0 },
+              hero_cave: { level: 0, workers: 0 },
               workshop: { level: 0, workers: 0 },
-              scout: { level: 0, workers: 0 }
+              scout: { level: 0, workers: 0 },
+              infirmary: { level: 0, workers: 0 },
+              graveyard: { level: 0, workers: 0 },
+              marketplace: { level: 0, workers: 0 },
+              warehouse: { level: 0, workers: 0 }
             },
             troops: {
               slinger: 5,
               clubman: 5,
               dinorider: 2
             },
+            injuredTroops: {
+              slinger: 0,
+              clubman: 0,
+              dinorider: 0
+            },
+            fallenTroops: {
+              slinger: 0,
+              clubman: 0,
+              dinorider: 0
+            },
             activeBuild: null,       // { buildingId, targetLevel, startedAt, endsAt }
             activeResearch: null,    // { techId, startedAt, endsAt }
             activeTraining: null,    // { troopType, count, startedAt, endsAt }
+            activeHealing: null,     // { troops, totalCount, startedAt, endsAt }
             completedTechs: [],
             activeExpeditions: [],   // [{ id, targetId, scouts, startedAt, endsAt, completed, loot, injured }]
             worldNodes: createInitialWorldNodes(),
@@ -1439,6 +1538,9 @@ export function initGameRuntime(hooks = {}) {
             equipmentBag: createInitialEquipmentBag(),
             inventory: createInitialInventory(),
             heroCaveFreeAt: 0,
+            stamina: 120,
+            staminaRegenAt: now,
+            marketClaimAt: 0,
             weather: {
               phase: 'calm',         // 'calm' | 'warning' | 'storm'
               type: 'cold',          // 'cold' | 'ash'
@@ -1730,6 +1832,12 @@ export function initGameRuntime(hooks = {}) {
               pop: { ...fresh.pop, ...(parsed.pop || {}) },
               weather: { ...fresh.weather, ...(parsed.weather || {}) },
               troops: { ...fresh.troops, ...(parsed.troops || {}) },
+              injuredTroops: { ...fresh.injuredTroops, ...(parsed.injuredTroops || {}) },
+              fallenTroops: { ...fresh.fallenTroops, ...(parsed.fallenTroops || {}) },
+              activeHealing: parsed.activeHealing && typeof parsed.activeHealing === 'object' ? parsed.activeHealing : null,
+              stamina: Number.isFinite(Number(parsed.stamina)) ? Math.max(0, Math.min(STAMINA_HARD_CAP, Math.floor(Number(parsed.stamina)))) : fresh.stamina,
+              staminaRegenAt: Number(parsed.staminaRegenAt || Date.now()),
+              marketClaimAt: Number(parsed.marketClaimAt || 0),
               inventory: { ...fresh.inventory, ...(parsed.inventory || {}) },
               homeTile: (() => {
                 if (parsed.homeTile && typeof parsed.homeTile.x === 'number' && typeof parsed.homeTile.y === 'number') {
@@ -2604,7 +2712,14 @@ export function initGameRuntime(hooks = {}) {
           }
           if (itemDef.actionType === 'goto_cave') {
             switchTab('village');
-            openBuildingSheet('hero_cave', 'summon');
+            if (window.Village3D) window.Village3D.centerOn('hero_cave');
+            openBuildingSheet('hero_cave', state.buildings.hero_cave.level > 0 ? 'summon' : 'building');
+            return;
+          }
+          if (itemDef.actionType === 'goto_graveyard') {
+            switchTab('village');
+            if (window.Village3D) window.Village3D.centerOn('graveyard');
+            openBuildingSheet('graveyard', state.buildings.graveyard.level > 0 ? 'revive' : 'building');
             return;
           }
           if (itemDef.actionType === 'goto_heroes') {
@@ -2645,9 +2760,12 @@ export function initGameRuntime(hooks = {}) {
             } else if (state.activeTraining) {
               state.activeTraining.endsAt -= ms;
               targetLabel = TROOP_DEFS[state.activeTraining.troopType].name;
+            } else if (state.activeHealing) {
+              state.activeHealing.endsAt -= ms;
+              targetLabel = 'Krankenzelt-Heilung';
             } else {
               SoundFX.play('error');
-              showToast('Kein aktiver Bau, Forschung oder Training zum Beschleunigen.', 'warn');
+              showToast('Kein aktiver Bau, Forschung, Training oder Heilung zum Beschleunigen.', 'warn');
               return;
             }
             state.inventory[itemId] -= 1;
@@ -2695,6 +2813,218 @@ export function initGameRuntime(hooks = {}) {
           state.troops[troopType] = (state.troops[troopType] || 0) + count;
           state.activeTraining = null;
           return { name: TROOP_DEFS[troopType].name, count };
+        }
+
+        /* --- KRANKENZELT, FRIEDHOF, MARKTPLATZ & LAGERHAUS LOGIK --- */
+        function getInfirmaryCapacity(lvl) {
+          const level = typeof lvl === 'number' ? lvl : (state.buildings.infirmary ? state.buildings.infirmary.level : 0);
+          if (level <= 0) return 0;
+          return 12 + (level - 1) * 8;
+        }
+
+        function getTotalInjuredTroops() {
+          const inj = state.injuredTroops || {};
+          return (inj.slinger || 0) + (inj.clubman || 0) + (inj.dinorider || 0);
+        }
+
+        function getTotalFallenTroops() {
+          const fal = state.fallenTroops || {};
+          return (fal.slinger || 0) + (fal.clubman || 0) + (fal.dinorider || 0);
+        }
+
+        function getInfirmaryFreeBeds() {
+          const healingCount = state.activeHealing ? state.activeHealing.totalCount || 0 : 0;
+          return Math.max(0, getInfirmaryCapacity() - getTotalInjuredTroops() - healingCount);
+        }
+
+        function getHealingCostAndDuration() {
+          const inj = state.injuredTroops || { slinger: 0, clubman: 0, dinorider: 0 };
+          const total = getTotalInjuredTroops();
+          const bState = state.buildings.infirmary || { level: 0, workers: 0 };
+          const speedMult = 1 + Math.max(0, bState.level - 1) * 0.1 + (bState.workers || 0) * 0.15;
+          const cost = {
+            meat: Math.max(0, total * 4),
+            wood: Math.max(0, total * 2)
+          };
+          const durationSec = total <= 0 ? 0 : Math.max(8, Math.round((total * 10) / speedMult));
+          return { total, troops: { slinger: inj.slinger || 0, clubman: inj.clubman || 0, dinorider: inj.dinorider || 0 }, cost, durationSec };
+        }
+
+        function startTroopHealing() {
+          const infLvl = state.buildings.infirmary ? state.buildings.infirmary.level : 0;
+          if (infLvl <= 0) {
+            SoundFX.play('error');
+            showToast('Errichte zuerst das Krankenzelt!', 'err');
+            return;
+          }
+          if (state.activeHealing) {
+            SoundFX.play('error');
+            showToast('Im Krankenzelt läuft bereits eine Heilung.', 'warn');
+            return;
+          }
+          const plan = getHealingCostAndDuration();
+          if (plan.total <= 0) {
+            SoundFX.play('error');
+            showToast('Derzeit gibt es keine verletzten Einheiten.', 'info');
+            return;
+          }
+          if (!canAfford(plan.cost)) {
+            SoundFX.play('error');
+            showToast('Nicht genügend Ressourcen für die Heilung.', 'err');
+            return;
+          }
+          payCost(plan.cost);
+          state.injuredTroops = { slinger: 0, clubman: 0, dinorider: 0 };
+          const now = Date.now();
+          state.activeHealing = {
+            troops: plan.troops,
+            totalCount: plan.total,
+            startedAt: now,
+            endsAt: now + plan.durationSec * 1000
+          };
+          SoundFX.play('build');
+          showToast(`Heilung für ${plan.total} verletzte Einheiten gestartet (${fmtDuration(plan.durationSec)})!`, 'ok');
+          saveState();
+          renderAll();
+          if (openSheet) renderSheet();
+        }
+
+        function finishActiveHealing() {
+          if (!state.activeHealing) return null;
+          const { troops, totalCount } = state.activeHealing;
+          if (!state.troops) state.troops = { slinger: 0, clubman: 0, dinorider: 0 };
+          for (const key of Object.keys(TROOP_DEFS)) {
+            state.troops[key] = (state.troops[key] || 0) + (troops[key] || 0);
+          }
+          state.activeHealing = null;
+          return { totalCount: totalCount || 0 };
+        }
+
+        function tryFreeFinishHealing() {
+          if (!state.activeHealing) return;
+          const rem = Math.ceil((state.activeHealing.endsAt - Date.now()) / 1000);
+          if (rem > FREE_FINISH_SEC) return;
+          const done = finishActiveHealing();
+          if (done) {
+            SoundFX.play('complete');
+            showToast(`${done.totalCount} Einheiten wurden sofort geheilt und sind wieder einsatzbereit!`, 'ok');
+            saveState();
+            renderAll();
+            if (openSheet) renderSheet();
+          }
+        }
+
+        function getGraveyardRevivePerTotem(lvl) {
+          const level = typeof lvl === 'number' ? lvl : (state.buildings.graveyard ? state.buildings.graveyard.level : 0);
+          if (level <= 0) return 0;
+          return 5 + level * 3;
+        }
+
+        function reviveFallenTroops() {
+          const gyLvl = state.buildings.graveyard ? state.buildings.graveyard.level : 0;
+          if (gyLvl <= 0) {
+            SoundFX.play('error');
+            showToast('Errichte zuerst den Friedhof!', 'err');
+            return;
+          }
+          const totalFallen = getTotalFallenTroops();
+          if (totalFallen <= 0) {
+            SoundFX.play('error');
+            showToast('Derzeit ruhen keine gefallenen Einheiten auf dem Friedhof.', 'info');
+            return;
+          }
+          const totems = (state.inventory && state.inventory.shamanTotem) || 0;
+          if (totems <= 0) {
+            SoundFX.play('error');
+            showToast('Kein Schamanen-Totem im Inventar. Erbeute Totems bei der Dinojagd!', 'err');
+            return;
+          }
+          let budget = getGraveyardRevivePerTotem(gyLvl);
+          let revivedTotal = 0;
+          const revivedParts = [];
+          if (!state.troops) state.troops = { slinger: 0, clubman: 0, dinorider: 0 };
+          // Stärkste Einheiten zuerst wiedererwecken
+          for (const key of ['dinorider', 'clubman', 'slinger']) {
+            if (budget <= 0) break;
+            const avail = (state.fallenTroops && state.fallenTroops[key]) || 0;
+            if (avail <= 0) continue;
+            const take = Math.min(avail, budget);
+            state.fallenTroops[key] = avail - take;
+            state.troops[key] = (state.troops[key] || 0) + take;
+            budget -= take;
+            revivedTotal += take;
+            revivedParts.push(`${take}× ${TROOP_DEFS[key].name}`);
+          }
+          if (revivedTotal <= 0) return;
+          state.inventory.shamanTotem = totems - 1;
+          SoundFX.play('complete');
+          showToast(`Schamanen-Totem erweckt ${revivedParts.join(', ')} wieder zum Leben!`, 'ok');
+          saveState();
+          renderAll();
+          if (openSheet) renderSheet();
+        }
+
+        function getStaminaRegenIntervalMs() {
+          const mLvl = state.buildings.marketplace ? state.buildings.marketplace.level : 0;
+          const speedBoost = 1 + Math.max(0, mLvl) * 0.05;
+          return Math.max(45000, Math.round(STAMINA_REGEN_BASE_MS / speedBoost));
+        }
+
+        function tickStaminaRegen(now) {
+          if (typeof state.stamina !== 'number' || !Number.isFinite(state.stamina)) {
+            state.stamina = 120;
+          }
+          if (!state.staminaRegenAt) state.staminaRegenAt = now;
+          const interval = getStaminaRegenIntervalMs();
+          if (state.stamina >= STAMINA_REGEN_CAP) {
+            state.staminaRegenAt = now;
+            return;
+          }
+          const elapsed = now - state.staminaRegenAt;
+          if (elapsed >= interval) {
+            const ticks = Math.floor(elapsed / interval);
+            state.stamina = Math.min(STAMINA_REGEN_CAP, state.stamina + ticks);
+            state.staminaRegenAt += ticks * interval;
+          }
+        }
+
+        function claimMarketStamina() {
+          const mLvl = state.buildings.marketplace ? state.buildings.marketplace.level : 0;
+          if (mLvl <= 0) {
+            SoundFX.play('error');
+            showToast('Errichte zuerst den Marktplatz!', 'err');
+            return;
+          }
+          const now = Date.now();
+          if ((state.marketClaimAt || 0) > now) {
+            SoundFX.play('error');
+            showToast('Die nächste kostenlose Ausdauer-Lieferung ist noch nicht bereit.', 'warn');
+            return;
+          }
+          const before = Math.floor(state.stamina || 0);
+          state.stamina = Math.min(STAMINA_HARD_CAP, before + MARKET_STAMINA_REWARD);
+          const gained = state.stamina - before;
+          state.marketClaimAt = now + MARKET_STAMINA_COOLDOWN_MS;
+          SoundFX.play('complete');
+          showToast(`Marktplatz-Lieferung erhalten: +${gained} Ausdauer für die Dinojagd!`, 'ok');
+          saveState();
+          renderAll();
+          if (openSheet) renderSheet();
+        }
+
+        function getWarehouseSafeCaps(lvl) {
+          const level = typeof lvl === 'number' ? lvl : (state.buildings.warehouse ? state.buildings.warehouse.level : 0);
+          if (level <= 0) return { meat: 0, wood: 0, stone: 0, fur: 0 };
+          const scale =
+            level <= 10
+              ? Math.pow(1.42, level - 1)
+              : Math.pow(1.42, 9) * Math.pow(1.22, level - 10);
+          return {
+            meat: Math.round(500 * scale),
+            wood: Math.round(500 * scale),
+            stone: Math.round(350 * scale),
+            fur: Math.round(250 * scale)
+          };
         }
 
         // Berechnet aktuelle Produktions- & Verbrauchsraten pro Minute
@@ -3232,6 +3562,13 @@ export function initGameRuntime(hooks = {}) {
             showToast('Wähle mindestens 1 ausgebildeten Soldaten für die Dinojagd aus.', 'err');
             return;
           }
+          tickStaminaRegen(now);
+          if ((state.stamina || 0) < DINO_HUNT_STAMINA_COST) {
+            SoundFX.play('error');
+            showToast(`Zu wenig Ausdauer (${Math.floor(state.stamina || 0)}/${DINO_HUNT_STAMINA_COST}). Hole am Marktplatz alle 12 Std. kostenlos 300 Ausdauer ab!`, 'err');
+            return;
+          }
+          state.stamina = Math.max(0, Math.floor(state.stamina || 0) - DINO_HUNT_STAMINA_COST);
 
           const travelSec = getWorldMarchTravelSec(def);
           const powerInfo = computeHuntSquadPower(validHeroes, sendTroops, species);
@@ -3505,6 +3842,26 @@ export function initGameRuntime(hooks = {}) {
             dinorider: (march.troops && march.troops.dinorider) || 0
           };
           const troopsLost = { slinger: 0, clubman: 0, dinorider: 0 };
+          let injuredTotal = 0;
+          let fallenTotal = 0;
+
+          if (!state.injuredTroops) state.injuredTroops = { slinger: 0, clubman: 0, dinorider: 0 };
+          if (!state.fallenTroops) state.fallenTroops = { slinger: 0, clubman: 0, dinorider: 0 };
+
+          const routeCasualties = (key, lost) => {
+            if (lost <= 0) return;
+            const freeBeds = getInfirmaryFreeBeds();
+            const toInfirmary = Math.min(lost, freeBeds);
+            const toGraveyard = lost - toInfirmary;
+            if (toInfirmary > 0) {
+              state.injuredTroops[key] = (state.injuredTroops[key] || 0) + toInfirmary;
+              injuredTotal += toInfirmary;
+            }
+            if (toGraveyard > 0) {
+              state.fallenTroops[key] = (state.fallenTroops[key] || 0) + toGraveyard;
+              fallenTotal += toGraveyard;
+            }
+          };
 
           if (srv && srv.troopsLost) {
             for (const key of Object.keys(TROOP_DEFS)) {
@@ -3515,6 +3872,7 @@ export function initGameRuntime(hooks = {}) {
                 state.troops[key] = Math.max(0, (state.troops[key] || 0) - lost);
                 troopsLost[key] = lost;
                 lostTotal += lost;
+                routeCasualties(key, lost);
               }
             }
           } else {
@@ -3530,6 +3888,7 @@ export function initGameRuntime(hooks = {}) {
                   state.troops[key] = Math.max(0, (state.troops[key] || 0) - lost);
                   troopsLost[key] = lost;
                   lostTotal += lost;
+                  routeCasualties(key, lost);
                 }
               }
             }
@@ -3588,7 +3947,7 @@ export function initGameRuntime(hooks = {}) {
           state.huntLogs.unshift(battleLog);
           if (state.huntLogs.length > 20) state.huntLogs.length = 20;
 
-          return { victory, resources, items, xp, lostTotal, newlyDiscovered, battleId: battleLog.id };
+          return { victory, resources, items, xp, lostTotal, injuredTotal, fallenTotal, newlyDiscovered, battleId: battleLog.id };
         }
 
         function launchWorldMarch(nodeId) {
@@ -3773,11 +4132,18 @@ export function initGameRuntime(hooks = {}) {
                       const spName = species ? species.name : 'Saurier';
                       if (out.victory) {
                         const bestNote = out.newlyDiscovered ? ' · Neu im Bestiarium!' : '';
-                        const lossNote = out.lostTotal > 0 ? ` (${out.lostTotal} Verluste)` : '';
+                        const casParts = [];
+                        if (out.injuredTotal > 0) casParts.push(`${out.injuredTotal} verletzt`);
+                        if (out.fallenTotal > 0) casParts.push(`${out.fallenTotal} gefallen`);
+                        const lossNote = casParts.length ? ` (${casParts.join(', ')})` : out.lostTotal > 0 ? ` (${out.lostTotal} Verluste)` : '';
                         showToast(`Sieg über ${spName} St. ${march.dinoLevel}! Beute: ${parts.join(', ')}${lossNote}${bestNote}`, 'ok');
                       } else {
                         const bestNote = out.newlyDiscovered ? ' · Eintrag im Dino-Bestiarium freigeschaltet!' : '';
-                        showToast(`Jagd gegen ${spName} St. ${march.dinoLevel} fehlgeschlagen (${out.lostTotal} Verluste).${bestNote}`, 'warn');
+                        const casParts = [];
+                        if (out.injuredTotal > 0) casParts.push(`${out.injuredTotal} verletzt`);
+                        if (out.fallenTotal > 0) casParts.push(`${out.fallenTotal} gefallen`);
+                        const lossText = casParts.length ? casParts.join(', ') : `${out.lostTotal} Verluste`;
+                        showToast(`Jagd gegen ${spName} St. ${march.dinoLevel} fehlgeschlagen (${lossText}).${bestNote}`, 'warn');
                       }
                     }
                   }
@@ -3896,6 +4262,10 @@ export function initGameRuntime(hooks = {}) {
           if (state.activeTraining && now >= state.activeTraining.endsAt) {
             finishActiveTraining();
           }
+          if (state.activeHealing && now >= state.activeHealing.endsAt) {
+            finishActiveHealing();
+          }
+          tickStaminaRegen(now);
           for (const exp of state.activeExpeditions) {
             if (!exp.completed && now >= exp.endsAt) {
               rollExpeditionOutcome(exp);
@@ -4022,6 +4392,19 @@ export function initGameRuntime(hooks = {}) {
               if (openSheet && openSheet.type === 'building') renderSheet();
             }
           }
+
+          // Aktive Krankenzelt-Heilung fertig?
+          if (state.activeHealing && now >= state.activeHealing.endsAt) {
+            const hl = finishActiveHealing();
+            if (hl) {
+              SoundFX.play('complete');
+              showToast(`Krankenzelt: ${hl.totalCount} Einheiten vollständig genesen!`, 'ok');
+              if (openSheet && openSheet.type === 'building') renderSheet();
+            }
+          }
+
+          // Passive Jagd-Ausdauer regenerieren
+          tickStaminaRegen(now);
 
           // Expeditionen abgeschlossen?
           let expFinishedNow = false;
@@ -4485,6 +4868,9 @@ export function initGameRuntime(hooks = {}) {
           if (itemId === 'teleportItem') {
             return `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0Z"/><circle cx="12" cy="10" r="3"/></svg>`;
           }
+          if (itemId === 'shamanTotem') {
+            return `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20"/><path d="M7 6h10l-1.5 4h-7L7 6Z"/><path d="M6 12h12"/><path d="M8 16h8l-1 4H9l-1-4Z"/><circle cx="10" cy="8" r="0.8" fill="${color}"/><circle cx="14" cy="8" r="0.8" fill="${color}"/></svg>`;
+          }
           if (itemId.startsWith('speedup')) {
             return `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`;
           }
@@ -4602,9 +4988,12 @@ export function initGameRuntime(hooks = {}) {
             ashVig.classList.toggle('active', !isCold);
           }
 
-          // Alle 11 Gebäude-Zustände an die animierte 3D-Dorfszene synchronisieren
+          // Alle 15 Gebäude-Zustände an die animierte 3D-Dorfszene synchronisieren
           const inv = state.inventory || {};
           const freeBoneReady = now >= (state.heroCaveFreeAt || 0);
+          const marketClaimReady = now >= (state.marketClaimAt || 0);
+          const injuredCountTotal = getTotalInjuredTroops();
+          const fallenCountTotal = getTotalFallenTroops();
           const buildingSnapshots = [];
 
           for (const id of BUILDING_ORDER) {
@@ -4613,6 +5002,7 @@ export function initGameRuntime(hooks = {}) {
             const isBuilding = Boolean(state.activeBuild && state.activeBuild.buildingId === id);
             const isResearchingHere = id === 'workshop' && Boolean(state.activeResearch);
             const isTrainingHere = Boolean(def.troopType && state.activeTraining && state.activeTraining.troopType === def.troopType);
+            const isHealingHere = id === 'infirmary' && Boolean(state.activeHealing);
             const evalReq = evaluateBuildingRequirements(id);
             const nextCost = evalReq.isMax ? null : getBuildingCost(id, evalReq.targetLevel);
             const canUpgradeNow = !state.activeBuild && !evalReq.isMax && evalReq.allMet && canAfford(nextCost);
@@ -4640,6 +5030,12 @@ export function initGameRuntime(hooks = {}) {
               progressPct = Math.min(100, Math.max(0, ((total - rem) / total) * 100));
               metaText = `Ausb. ${fmtClock(rem)}`;
               metaClass = 'is-building';
+            } else if (isHealingHere) {
+              const total = Math.max(1, (state.activeHealing.endsAt - state.activeHealing.startedAt) / 1000);
+              const rem = Math.max(0, (state.activeHealing.endsAt - now) / 1000);
+              progressPct = Math.min(100, Math.max(0, ((total - rem) / total) * 100));
+              metaText = `Heilt ${fmtClock(rem)}`;
+              metaClass = 'is-building';
             } else if (bState.level === 0) {
               metaText = isLockedUnbuilt ? 'Gesperrt' : 'Baubar';
               metaClass = isLockedUnbuilt ? 'is-locked' : 'can-up';
@@ -4653,6 +5049,26 @@ export function initGameRuntime(hooks = {}) {
                 metaText = `${bCnt} Kn · ${gCnt} Gold`;
                 metaClass = gCnt > 0 ? 'is-gold' : '';
               }
+            } else if (id === 'infirmary') {
+              const cap = getInfirmaryCapacity(bState.level);
+              metaText = injuredCountTotal > 0 ? `St. ${bState.level} · ${injuredCountTotal}/${cap} verl.` : `St. ${bState.level} · 0/${cap}`;
+              metaClass = injuredCountTotal > 0 ? 'is-gold' : canUpgradeNow ? 'can-up' : '';
+            } else if (id === 'graveyard') {
+              metaText = fallenCountTotal > 0 ? `St. ${bState.level} · ${fallenCountTotal} Gef.` : `St. ${bState.level} · Ruhig`;
+              metaClass = fallenCountTotal > 0 ? 'is-gold' : canUpgradeNow ? 'can-up' : '';
+            } else if (id === 'marketplace') {
+              if (marketClaimReady) {
+                metaText = '+300 Ausdauer!';
+                metaClass = 'can-up';
+              } else {
+                const remSec = Math.max(0, Math.ceil((state.marketClaimAt - now) / 1000));
+                metaText = `St. ${bState.level} · ${fmtClock(remSec)}`;
+                if (canUpgradeNow) metaClass = 'can-up';
+              }
+            } else if (id === 'warehouse') {
+              const caps = getWarehouseSafeCaps(bState.level);
+              metaText = `St. ${bState.level} · Safe ${fmtNum(caps.wood)}`;
+              if (canUpgradeNow) metaClass = 'can-up';
             } else if (def.troopType) {
               const cnt = (state.troops && state.troops[def.troopType]) || 0;
               metaText = `St. ${bState.level} · ${def.role} (${cnt})`;
@@ -4676,13 +5092,17 @@ export function initGameRuntime(hooks = {}) {
               isBuilding,
               isResearching: isResearchingHere,
               isTraining: isTrainingHere,
+              isHealing: isHealingHere,
               isLocked: isLockedUnbuilt,
               canUpgrade: canUpgradeNow,
               metaText,
               metaClass,
               progressPct,
               workers: bState.workers || 0,
-              freeBoneReady: def.isHeroCave ? freeBoneReady : false
+              freeBoneReady: def.isHeroCave ? freeBoneReady : false,
+              hasMarketClaim: id === 'marketplace' && bState.level > 0 ? marketClaimReady : false,
+              fallenCount: id === 'graveyard' ? fallenCountTotal : 0,
+              injuredCount: id === 'infirmary' ? injuredCountTotal : 0
             });
           }
 
@@ -5350,7 +5770,7 @@ export function initGameRuntime(hooks = {}) {
                 ${qty > 1 ? `<button class="inv-use-btn secondary" data-inv-use-all="${item.id}">Alle (${qty})</button>` : ''}
               `;
             } else if (item.actionType === 'speedup') {
-              const hasActiveTimer = Boolean(state.activeBuild || state.activeResearch || state.activeTraining);
+              const hasActiveTimer = Boolean(state.activeBuild || state.activeResearch || state.activeTraining || state.activeHealing);
               btnHtml = `
                 <button class="inv-use-btn" data-inv-use="${item.id}" ${qty > 0 && hasActiveTimer ? '' : 'disabled'}>
                   ${hasActiveTimer ? 'Einsetzen' : 'Kein Timer'}
@@ -5362,6 +5782,8 @@ export function initGameRuntime(hooks = {}) {
               btnHtml = `<button class="inv-use-btn" data-inv-use="${item.id}">Fähigkeiten</button>`;
             } else if (item.actionType === 'goto_cave') {
               btnHtml = `<button class="inv-use-btn" data-inv-use="${item.id}">Heldenhöhle</button>`;
+            } else if (item.actionType === 'goto_graveyard') {
+              btnHtml = `<button class="inv-use-btn" data-inv-use="${item.id}">Friedhof</button>`;
             } else if (item.actionType === 'goto_heroes') {
               btnHtml = `<button class="inv-use-btn secondary" data-inv-use="${item.id}">Zu Helden</button>`;
             }
@@ -5427,7 +5849,16 @@ export function initGameRuntime(hooks = {}) {
           const inv = state.inventory || {};
           const bones = inv.bones || 0;
           const golden = inv.goldenBones || 0;
-          const caveLvl = Math.max(1, state.buildings.hero_cave.level);
+          const rawLvl = state.buildings.hero_cave.level;
+          if (rawLvl <= 0) {
+            return `
+              <div class="gate-notice" style="margin-bottom:0;">
+                <p class="gate-notice-title">Heldenhöhle noch nicht errichtet</p>
+                <p class="gate-notice-desc">Wechsle oben auf „Gebäude &amp; Ausbau“, um die Heldenhöhle zuerst zu errichten.</p>
+              </div>
+            `;
+          }
+          const caveLvl = Math.max(1, rawLvl);
           const now = Date.now();
           const freeRem = Math.max(0, Math.ceil(((state.heroCaveFreeAt || 0) - now) / 1000));
           const freeReady = freeRem <= 0;
@@ -5572,6 +6003,269 @@ export function initGameRuntime(hooks = {}) {
           }
 
           return html;
+        }
+
+        function buildInfirmaryHTML() {
+          const bState = state.buildings.infirmary;
+          const lvl = bState ? bState.level : 0;
+          if (lvl <= 0) {
+            return `
+              <div class="gate-notice" style="margin-bottom:0;">
+                <p class="gate-notice-title">Krankenzelt noch nicht errichtet</p>
+                <p class="gate-notice-desc">Wechsle oben auf „Gebäude &amp; Ausbau“, um das Krankenzelt zu errichten und verletzte Einheiten vor dem Tod zu bewahren.</p>
+              </div>
+            `;
+          }
+          const now = Date.now();
+          const cap = getInfirmaryCapacity(lvl);
+          const injured = state.injuredTroops || { slinger: 0, clubman: 0, dinorider: 0 };
+          const plan = getHealingCostAndDuration();
+          const healingCnt = state.activeHealing ? state.activeHealing.totalCount || 0 : 0;
+          const usedBeds = plan.total + healingCnt;
+          const speedBonusPct = Math.round((lvl - 1) * 10 + (bState.workers || 0) * 15);
+
+          let html = `
+            <p class="info-line">Verletzte Einheiten aus Dinojagden und Gefechten werden automatisch im Krankenzelt aufgenommen, solange freie Betten vorhanden sind. Einheiten über dem Limit landen auf dem Friedhof.</p>
+            <div class="stat-grid">
+              <div class="stat-box">
+                <div class="stat-label">Belegte Betten</div>
+                <div class="stat-value mono" style="color:${usedBeds >= cap ? '#f87171' : usedBeds > 0 ? '#fbbf24' : '#4ade80'};">${usedBeds} / ${cap}</div>
+              </div>
+              <div class="stat-box">
+                <div class="stat-label">Heiltempo-Bonus</div>
+                <div class="stat-value mono" style="color:#4ade80;">+${speedBonusPct} % (${bState.workers || 0} Heiler)</div>
+              </div>
+            </div>
+          `;
+
+          if (state.activeHealing) {
+            const total = Math.max(1, (state.activeHealing.endsAt - state.activeHealing.startedAt) / 1000);
+            const rem = Math.max(0, (state.activeHealing.endsAt - now) / 1000);
+            const pct = Math.min(100, Math.max(0, ((total - rem) / total) * 100));
+            html += `
+              <div class="stat-box">
+                <div class="queue-title"><span>Heilung von ${state.activeHealing.totalCount} Einheiten läuft...</span><span class="mono">${fmtClock(rem)}</span></div>
+                <div class="prog-bar"><div class="prog-fill done" style="width:${pct.toFixed(1)}%"></div></div>
+                ${
+                  rem <= FREE_FINISH_SEC
+                    ? `<button class="btn-primary" style="margin-top:10px; background:var(--state-ok); color:#052e16;" data-free-heal="1">Gratis sofort heilen</button>`
+                    : ''
+                }
+              </div>
+            `;
+          }
+
+          html += `
+            <div>
+              <p class="sheet-section-title">Verletzte Einheiten im Lazarett (${plan.total})</p>
+              <div class="hunt-troop-list">
+                ${Object.values(TROOP_DEFS)
+                  .map((td) => {
+                    const cnt = injured[td.id] || 0;
+                    return `
+                      <div class="hunt-troop-row">
+                        <div>
+                          <div style="font-size:12px; font-weight:700; color:var(--text-primary);">${td.name}</div>
+                          <div style="font-size:10.5px; color:var(--text-muted);">${td.role}</div>
+                        </div>
+                        <span class="mono" style="font-size:12.5px; font-weight:700; color:${cnt > 0 ? '#fbbf24' : 'var(--text-muted)'};">${cnt} verletzt</span>
+                      </div>
+                    `;
+                  })
+                  .join('')}
+              </div>
+            </div>
+          `;
+
+          if (!state.activeHealing) {
+            if (plan.total > 0) {
+              html += `
+                <div>
+                  <p class="sheet-section-title">Heilkosten &amp; Dauer (${fmtDuration(plan.durationSec)})</p>
+                  <div class="cost-grid">
+                    ${Object.entries(plan.cost)
+                      .map(([res, amt]) => {
+                        const have = Math.floor(state.resources[res] || 0);
+                        return `
+                          <div class="cost-item ${have >= amt ? 'enough' : 'short'}">
+                            <span>${RESOURCE_LABELS[res]}</span>
+                            <span class="cost-nums">${fmtNum(have)} / ${fmtNum(amt)}</span>
+                          </div>
+                        `;
+                      })
+                      .join('')}
+                  </div>
+                </div>
+                <button class="btn-primary" data-start-heal="1" ${canAfford(plan.cost) ? '' : 'disabled'}>
+                  ${canAfford(plan.cost) ? `Alle ${plan.total} Einheiten heilen (${fmtDuration(plan.durationSec)})` : 'Ressourcen fehlen'}
+                </button>
+              `;
+            } else {
+              html += `<div class="req-row met"><div class="req-main"><span class="req-mark">✓</span><span>Alle Einheiten sind wohlauf — keine Verletzten im Krankenzelt.</span></div></div>`;
+            }
+          }
+
+          return html;
+        }
+
+        function buildGraveyardHTML() {
+          const bState = state.buildings.graveyard;
+          const lvl = bState ? bState.level : 0;
+          if (lvl <= 0) {
+            return `
+              <div class="gate-notice" style="margin-bottom:0;">
+                <p class="gate-notice-title">Friedhof noch nicht errichtet</p>
+                <p class="gate-notice-desc">Wechsle oben auf „Gebäude &amp; Ausbau“, um den Friedhof zu errichten und gefallene Krieger mit einem Schamanen-Totem wiederzuerwecken.</p>
+              </div>
+            `;
+          }
+          const fallen = state.fallenTroops || { slinger: 0, clubman: 0, dinorider: 0 };
+          const totalFallen = getTotalFallenTroops();
+          const totems = (state.inventory && state.inventory.shamanTotem) || 0;
+          const reviveCap = getGraveyardRevivePerTotem(lvl);
+          const canRevive = totalFallen > 0 && totems > 0;
+
+          return `
+            <p class="info-line">Gefallene Einheiten, die nicht mehr im Krankenzelt aufgenommen werden konnten, finden hier ihre Ruhe. Opfere ein <strong>Schamanen-Totem</strong>, um bis zu <strong>${reviveCap} gefallene Krieger</strong> sofort wiederzuerwecken.</p>
+            <div class="stat-grid">
+              <div class="stat-box">
+                <div class="stat-label">Gefallene Krieger</div>
+                <div class="stat-value mono" style="color:${totalFallen > 0 ? '#f87171' : '#4ade80'};">${totalFallen} Einheiten</div>
+              </div>
+              <div class="stat-box">
+                <div class="stat-label">Schamanen-Totems</div>
+                <div class="stat-value mono" style="color:#2dd4bf;">${totems} verfügbar</div>
+              </div>
+            </div>
+            <div>
+              <p class="sheet-section-title">Gefallene Einheiten auf dem Friedhof</p>
+              <div class="hunt-troop-list">
+                ${Object.values(TROOP_DEFS)
+                  .map((td) => {
+                    const cnt = fallen[td.id] || 0;
+                    return `
+                      <div class="hunt-troop-row">
+                        <div>
+                          <div style="font-size:12px; font-weight:700; color:var(--text-primary);">${td.name}</div>
+                          <div style="font-size:10.5px; color:var(--text-muted);">${td.role}</div>
+                        </div>
+                        <span class="mono" style="font-size:12.5px; font-weight:700; color:${cnt > 0 ? '#f87171' : 'var(--text-muted)'};">${cnt} gefallen</span>
+                      </div>
+                    `;
+                  })
+                  .join('')}
+              </div>
+            </div>
+            <div class="summon-banner" style="--banner-accent:rgba(45, 212, 191, 0.5);">
+              <div class="summon-head">
+                <span class="summon-title" style="color:#5eead4;">
+                  ${getInventoryIconSVG('shamanTotem', '#2dd4bf')}
+                  <span>Ritual der Wiedererweckung</span>
+                </span>
+                <span class="summon-stock" style="color:#2dd4bf;">1 Totem → bis ${reviveCap} Einh.</span>
+              </div>
+              <div class="summon-odds">
+                Stärkste Einheiten (Dinoreiter → Keulenschwinger → Steinschleuderer) werden zuerst erweckt. Schamanen-Totems findest du als Beute bei der Dinojagd.
+              </div>
+              <button class="btn-primary" style="margin-top:8px;" data-revive-fallen="1" ${canRevive ? '' : 'disabled'}>
+                ${totalFallen <= 0 ? 'Keine gefallenen Einheiten' : totems <= 0 ? 'Kein Schamanen-Totem vorhanden' : `Mit 1× Schamanen-Totem wiedererwecken (bis ${Math.min(totalFallen, reviveCap)})`}
+              </button>
+            </div>
+          `;
+        }
+
+        function buildMarketplaceHTML() {
+          const bState = state.buildings.marketplace;
+          const lvl = bState ? bState.level : 0;
+          if (lvl <= 0) {
+            return `
+              <div class="gate-notice" style="margin-bottom:0;">
+                <p class="gate-notice-title">Marktplatz noch nicht errichtet</p>
+                <p class="gate-notice-desc">Wechsle oben auf „Gebäude &amp; Ausbau“, um den Marktplatz zu errichten und alle 12 Stunden kostenlos 300 Ausdauer abzuholen.</p>
+              </div>
+            `;
+          }
+          const now = Date.now();
+          tickStaminaRegen(now);
+          const remSec = Math.max(0, Math.ceil(((state.marketClaimAt || 0) - now) / 1000));
+          const claimReady = remSec <= 0;
+          const curStamina = Math.floor(state.stamina || 0);
+          const regenSec = Math.round(getStaminaRegenIntervalMs() / 1000);
+
+          return `
+            <p class="info-line">Die Stammes-Händler versorgen deine Jäger alle <strong>12 Stunden</strong> mit <strong>${MARKET_STAMINA_REWARD} kostenloser Ausdauer</strong> für Weltkarten-Dinojagden (${DINO_HUNT_STAMINA_COST} Ausdauer pro Jagd).</p>
+            <div class="stat-grid">
+              <div class="stat-box">
+                <div class="stat-label">Aktuelle Jagd-Ausdauer</div>
+                <div class="stat-value mono" style="color:#fbbf24;">${curStamina} / ${STAMINA_REGEN_CAP} <span style="font-size:10px; color:var(--text-muted);">(Max ${STAMINA_HARD_CAP})</span></div>
+              </div>
+              <div class="stat-box">
+                <div class="stat-label">Passive Regeneration</div>
+                <div class="stat-value mono" style="color:#4ade80;">+1 alle ${fmtDuration(regenSec)}</div>
+              </div>
+            </div>
+            <div class="summon-banner" style="--banner-accent:rgba(245, 158, 11, 0.55);">
+              <div class="summon-head">
+                <span class="summon-title" style="color:#fde68a;">
+                  <span>⚡ Gratis-Ausdauer-Lieferung</span>
+                </span>
+                <span class="summon-stock" style="color:${claimReady ? '#4ade80' : '#fbbf24'};">${claimReady ? 'Bereit!' : fmtClock(remSec)}</span>
+              </div>
+              <div class="summon-odds">
+                Gewährt alle 12 Stunden kostenlos <strong>+${MARKET_STAMINA_REWARD} Ausdauer</strong> (entspricht ${Math.floor(MARKET_STAMINA_REWARD / DINO_HUNT_STAMINA_COST)} Dinojagden auf der Weltkarte).
+              </div>
+              <button class="btn-primary" style="margin-top:8px;" data-claim-market-stamina="1" ${claimReady ? '' : 'disabled'}>
+                ${claimReady ? `Kostenlos +${MARKET_STAMINA_REWARD} Ausdauer abholen` : `Nächste Lieferung in ${fmtClock(remSec)}`}
+              </button>
+            </div>
+          `;
+        }
+
+        function buildWarehouseHTML() {
+          const bState = state.buildings.warehouse;
+          const lvl = bState ? bState.level : 0;
+          if (lvl <= 0) {
+            return `
+              <div class="gate-notice" style="margin-bottom:0;">
+                <p class="gate-notice-title">Lagerhaus noch nicht errichtet</p>
+                <p class="gate-notice-desc">Wechsle oben auf „Gebäude &amp; Ausbau“, um das Lagerhaus zu errichten und deine Vorräte vor Plünderungen zu schützen.</p>
+              </div>
+            `;
+          }
+          const caps = getWarehouseSafeCaps(lvl);
+          const nextCaps = lvl < MAX_LEVEL ? getWarehouseSafeCaps(lvl + 1) : null;
+          const resKeys = ['meat', 'wood', 'stone', 'fur'];
+
+          return `
+            <p class="info-line">Das verstärkte Basalt-Lagerhaus (Stufe ${lvl}) schützt deine Vorräte mit einer festen <strong>Safe-Kapazität</strong>. Geschützte Mengen können bei künftigen Multiplayer-Angriffen <strong>nicht geplündert</strong> werden.</p>
+            <div class="hunt-troop-list">
+              ${resKeys
+                .map((rk) => {
+                  const stock = Math.floor(state.resources[rk] || 0);
+                  const safeCap = caps[rk];
+                  const protectedAmt = Math.min(stock, safeCap);
+                  const exposedAmt = Math.max(0, stock - safeCap);
+                  const pct = safeCap > 0 ? Math.min(100, (protectedAmt / safeCap) * 100) : 0;
+                  const nextNote = nextCaps ? ` → St. ${lvl + 1}: ${fmtNum(nextCaps[rk])}` : '';
+                  return `
+                    <div class="stat-box" style="display:flex; flex-direction:column; gap:5px;">
+                      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                        <span style="font-size:12px; font-weight:700; color:${RESOURCE_COLORS[rk]};">${RESOURCE_LABELS[rk]}</span>
+                        <span class="mono" style="font-size:11px; color:${exposedAmt > 0 ? '#fbbf24' : '#4ade80'}; font-weight:700;">
+                          ${exposedAmt > 0 ? `${fmtNum(exposedAmt)} plünderbar` : '100 % geschützt'}
+                        </span>
+                      </div>
+                      <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--text-secondary);">
+                        <span>Geschützt: <strong class="mono" style="color:var(--text-primary);">${fmtNum(protectedAmt)} / ${fmtNum(safeCap)}</strong></span>
+                        <span class="mono" style="color:var(--text-muted);">Vorrat: ${fmtNum(stock)}${nextNote}</span>
+                      </div>
+                      <div class="prog-bar"><div class="prog-fill done" style="width:${pct.toFixed(1)}%"></div></div>
+                    </div>
+                  `;
+                })
+                .join('')}
+            </div>
+          `;
         }
 
         function buildResearchTreeHTML() {
@@ -6802,6 +7496,14 @@ export function initGameRuntime(hooks = {}) {
               defaultSub = state.buildings.workshop.level > 0 ? 'tree' : 'building';
             } else if (buildingId === 'hero_cave') {
               defaultSub = state.buildings.hero_cave.level > 0 ? 'summon' : 'building';
+            } else if (buildingId === 'infirmary') {
+              defaultSub = state.buildings.infirmary.level > 0 ? 'heal' : 'building';
+            } else if (buildingId === 'graveyard') {
+              defaultSub = state.buildings.graveyard.level > 0 ? 'revive' : 'building';
+            } else if (buildingId === 'marketplace') {
+              defaultSub = state.buildings.marketplace.level > 0 ? 'market' : 'building';
+            } else if (buildingId === 'warehouse') {
+              defaultSub = state.buildings.warehouse.level > 0 ? 'vault' : 'building';
             } else if (def && def.troopType) {
               defaultSub = state.buildings[buildingId].level > 0 ? 'train' : 'building';
             }
@@ -7040,8 +7742,11 @@ export function initGameRuntime(hooks = {}) {
               ? { label: 'Knappes Gefecht', color: '#fbbf24' }
               : { label: 'Sehr riskant', color: '#f87171' };
 
+          tickStaminaRegen(now);
+          const curStamina = Math.floor(state.stamina || 0);
+          const hasStamina = curStamina >= DINO_HUNT_STAMINA_COST;
           const hasQueueSlot = activeMarches < maxMarches;
-          const canLaunch = hasQueueSlot && totalSelectedSoldiers > 0;
+          const canLaunch = hasQueueSlot && totalSelectedSoldiers > 0 && hasStamina;
           const bonusNotes = [];
           if (squadInfo.pveBonusPct > 0) bonusNotes.push(`PvE-Skills +${squadInfo.pveBonusPct}%`);
           if (squadInfo.counterBonusPct > 0) bonusNotes.push(`Klassen-Konter +${squadInfo.counterBonusPct}%`);
@@ -7056,6 +7761,10 @@ export function initGameRuntime(hooks = {}) {
               <span style="font-size:11.5px; font-weight:700; color:${verdict.color}; text-align:right;">${verdict.label}</span>
             </div>
             <div class="req-list">
+              <div class="req-row ${hasStamina ? 'met' : 'missing'}">
+                <div class="req-main"><span class="req-mark">${hasStamina ? '✓' : '✕'}</span><span>Jagd-Ausdauer (${curStamina} / ${DINO_HUNT_STAMINA_COST} benötigt)</span></div>
+                ${!hasStamina ? `<button class="jump-btn" data-jump-building="marketplace" data-jump-subtab="${state.buildings.marketplace.level > 0 ? 'market' : 'building'}">Marktplatz →</button>` : ''}
+              </div>
               <div class="req-row ${hasQueueSlot ? 'met' : 'missing'}">
                 <div class="req-main"><span class="req-mark">${hasQueueSlot ? '✓' : '✕'}</span><span>Marschwarteschlange frei (${activeMarches}/${maxMarches} · Marsch ${fmtDuration(travelSec)})</span></div>
               </div>
@@ -7066,7 +7775,7 @@ export function initGameRuntime(hooks = {}) {
             <div class="btn-row">
               <button class="btn-secondary" data-goto-bestiary="1">Bestiarium</button>
               <button class="btn-primary" data-hunt-launch="${def.id}" ${canLaunch ? '' : 'disabled'}>
-                ${!hasQueueSlot ? 'Warteschlangen voll' : totalSelectedSoldiers <= 0 ? 'Soldaten nötig' : `Jagdtrupp entsenden`}
+                ${!hasStamina ? 'Ausdauer fehlt' : !hasQueueSlot ? 'Warteschlangen voll' : totalSelectedSoldiers <= 0 ? 'Soldaten nötig' : `Jagdtrupp entsenden (-${DINO_HUNT_STAMINA_COST} Ausd.)`}
               </button>
             </div>
           `;
@@ -7271,6 +7980,68 @@ export function initGameRuntime(hooks = {}) {
             }
           }
 
+          // Für Krankenzelt: Heilung <-> Gebäude & Ausbau
+          if (buildingId === 'infirmary') {
+            const injCnt = getTotalInjuredTroops();
+            html += `
+              <div class="sheet-tabs" role="tablist">
+                <button class="sheet-tab-btn ${subTab === 'heal' ? 'active' : ''}" data-infirmary-tab="heal">Lazarett (${injCnt})</button>
+                <button class="sheet-tab-btn ${subTab === 'building' ? 'active' : ''}" data-infirmary-tab="building">Gebäude &amp; Ausbau</button>
+              </div>
+            `;
+            if (subTab === 'heal') {
+              html += buildInfirmaryHTML();
+              document.getElementById('sheetBody').innerHTML = html;
+              return;
+            }
+          }
+
+          // Für Friedhof: Wiedererweckung <-> Gebäude & Ausbau
+          if (buildingId === 'graveyard') {
+            const falCnt = getTotalFallenTroops();
+            html += `
+              <div class="sheet-tabs" role="tablist">
+                <button class="sheet-tab-btn ${subTab === 'revive' ? 'active' : ''}" data-graveyard-tab="revive">Friedhof (${falCnt})</button>
+                <button class="sheet-tab-btn ${subTab === 'building' ? 'active' : ''}" data-graveyard-tab="building">Gebäude &amp; Ausbau</button>
+              </div>
+            `;
+            if (subTab === 'revive') {
+              html += buildGraveyardHTML();
+              document.getElementById('sheetBody').innerHTML = html;
+              return;
+            }
+          }
+
+          // Für Marktplatz: Gratis-Ausdauer <-> Gebäude & Ausbau
+          if (buildingId === 'marketplace') {
+            html += `
+              <div class="sheet-tabs" role="tablist">
+                <button class="sheet-tab-btn ${subTab === 'market' ? 'active' : ''}" data-marketplace-tab="market">Ausdauer (+${MARKET_STAMINA_REWARD})</button>
+                <button class="sheet-tab-btn ${subTab === 'building' ? 'active' : ''}" data-marketplace-tab="building">Gebäude &amp; Ausbau</button>
+              </div>
+            `;
+            if (subTab === 'market') {
+              html += buildMarketplaceHTML();
+              document.getElementById('sheetBody').innerHTML = html;
+              return;
+            }
+          }
+
+          // Für Lagerhaus: Ressourcenschutz <-> Gebäude & Ausbau
+          if (buildingId === 'warehouse') {
+            html += `
+              <div class="sheet-tabs" role="tablist">
+                <button class="sheet-tab-btn ${subTab === 'vault' ? 'active' : ''}" data-warehouse-tab="vault">Safe-Kapazität</button>
+                <button class="sheet-tab-btn ${subTab === 'building' ? 'active' : ''}" data-warehouse-tab="building">Gebäude &amp; Ausbau</button>
+              </div>
+            `;
+            if (subTab === 'vault') {
+              html += buildWarehouseHTML();
+              document.getElementById('sheetBody').innerHTML = html;
+              return;
+            }
+          }
+
           html += `<p class="info-line">${def.desc}</p>`;
 
           // Leistungs-Übersicht
@@ -7365,6 +8136,28 @@ export function initGameRuntime(hooks = {}) {
               stat1Val = `+${(bState.level - 1) * 15} % Beute`;
               stat2Label = 'Gratis-Knochen Intervall';
               stat2Val = fmtDuration(cdSec);
+            } else if (buildingId === 'infirmary') {
+              stat1Label = 'Betten-Kapazität';
+              stat1Val = `${getTotalInjuredTroops()} / ${getInfirmaryCapacity(bState.level)} Betten`;
+              stat2Label = 'Heiltempo-Bonus';
+              stat2Val = `+${Math.round((bState.level - 1) * 10 + (bState.workers || 0) * 15)} % schneller`;
+            } else if (buildingId === 'graveyard') {
+              stat1Label = 'Gefallene Einheiten';
+              stat1Val = `${getTotalFallenTroops()} auf dem Friedhof`;
+              stat2Label = 'Wiedererweckung / Totem';
+              stat2Val = `Bis zu ${getGraveyardRevivePerTotem(bState.level)} Einheiten`;
+            } else if (buildingId === 'marketplace') {
+              const remSec = Math.max(0, Math.ceil(((state.marketClaimAt || 0) - now) / 1000));
+              stat1Label = 'Gratis-Ausdauer (12h)';
+              stat1Val = remSec <= 0 ? `+${MARKET_STAMINA_REWARD} abholbereit!` : `In ${fmtClock(remSec)}`;
+              stat2Label = 'Ausdauer-Regen-Bonus';
+              stat2Val = `+${bState.level * 5} % Tempo`;
+            } else if (buildingId === 'warehouse') {
+              const caps = getWarehouseSafeCaps(bState.level);
+              stat1Label = 'Safe-Schutz (Fleisch/Holz)';
+              stat1Val = `je ${fmtNum(caps.wood)} geschützt`;
+              stat2Label = 'Safe-Schutz (Stein/Fell)';
+              stat2Val = `${fmtNum(caps.stone)} / ${fmtNum(caps.fur)}`;
             } else if (def.troopType) {
               const tDef = TROOP_DEFS[def.troopType];
               const cnt = (state.troops && state.troops[def.troopType]) || 0;
@@ -9184,6 +9977,54 @@ export function initGameRuntime(hooks = {}) {
               SoundFX.play('tap');
               openSheet.subTab = barracksTabBtn.dataset.barracksTab;
               renderSheet();
+              return;
+            }
+            const infTabBtn = e.target.closest('[data-infirmary-tab]');
+            if (infTabBtn && openSheet && openSheet.type === 'building' && openSheet.id === 'infirmary') {
+              SoundFX.play('tap');
+              openSheet.subTab = infTabBtn.dataset.infirmaryTab;
+              renderSheet();
+              return;
+            }
+            const gyTabBtn = e.target.closest('[data-graveyard-tab]');
+            if (gyTabBtn && openSheet && openSheet.type === 'building' && openSheet.id === 'graveyard') {
+              SoundFX.play('tap');
+              openSheet.subTab = gyTabBtn.dataset.graveyardTab;
+              renderSheet();
+              return;
+            }
+            const mktTabBtn = e.target.closest('[data-marketplace-tab]');
+            if (mktTabBtn && openSheet && openSheet.type === 'building' && openSheet.id === 'marketplace') {
+              SoundFX.play('tap');
+              openSheet.subTab = mktTabBtn.dataset.marketplaceTab;
+              renderSheet();
+              return;
+            }
+            const whTabBtn = e.target.closest('[data-warehouse-tab]');
+            if (whTabBtn && openSheet && openSheet.type === 'building' && openSheet.id === 'warehouse') {
+              SoundFX.play('tap');
+              openSheet.subTab = whTabBtn.dataset.warehouseTab;
+              renderSheet();
+              return;
+            }
+            const startHealBtn = e.target.closest('[data-start-heal]');
+            if (startHealBtn) {
+              startTroopHealing();
+              return;
+            }
+            const freeHealBtn = e.target.closest('[data-free-heal]');
+            if (freeHealBtn) {
+              tryFreeFinishHealing();
+              return;
+            }
+            const reviveFallenBtn = e.target.closest('[data-revive-fallen]');
+            if (reviveFallenBtn) {
+              reviveFallenTroops();
+              return;
+            }
+            const claimMarketBtn = e.target.closest('[data-claim-market-stamina]');
+            if (claimMarketBtn) {
+              claimMarketStamina();
               return;
             }
             const freeBoneBtn = e.target.closest('[data-claim-free-bone]');

@@ -43,7 +43,11 @@ export const BUILDING_CONFIGS: Record<string, BuildingConfig> = {
   dinorider: { id: 'dinorider', name: 'Dinoreiter-Koppel', baseCost: { meat: 48, wood: 46, stone: 36, fur: 22 }, costScale: 1.56, buildTimeMult: 1.15 },
   hero_cave: { id: 'hero_cave', name: 'Heldenhöhle', baseCost: { meat: 40, wood: 50, stone: 48, fur: 20 }, costScale: 1.55, buildTimeMult: 1.15 },
   workshop: { id: 'workshop', name: 'Forschungszelt', baseCost: { meat: 35, wood: 45, stone: 42, fur: 20 }, costScale: 1.55, buildTimeMult: 1.1 },
-  scout: { id: 'scout', name: 'Späher-Posten', baseCost: { meat: 35, wood: 44, stone: 32, fur: 24 }, costScale: 1.52, buildTimeMult: 1.05 }
+  scout: { id: 'scout', name: 'Späher-Posten', baseCost: { meat: 35, wood: 44, stone: 32, fur: 24 }, costScale: 1.52, buildTimeMult: 1.05 },
+  infirmary: { id: 'infirmary', name: 'Krankenzelt', baseCost: { meat: 20, wood: 36, stone: 18, fur: 24 }, costScale: 1.52, buildTimeMult: 1.0 },
+  graveyard: { id: 'graveyard', name: 'Friedhof', baseCost: { meat: 15, wood: 30, stone: 38, fur: 14 }, costScale: 1.52, buildTimeMult: 1.05 },
+  marketplace: { id: 'marketplace', name: 'Marktplatz', baseCost: { meat: 24, wood: 42, stone: 24, fur: 18 }, costScale: 1.5, buildTimeMult: 1.05 },
+  warehouse: { id: 'warehouse', name: 'Lagerhaus', baseCost: { meat: 18, wood: 45, stone: 34, fur: 12 }, costScale: 1.54, buildTimeMult: 1.05 }
 };
 
 export interface DinoLootEntry {
@@ -122,7 +126,8 @@ export const DINO_SPECIES_CONFIG: readonly DinoSpeciesConfig[] = [
       { resKey: 'wood', min: 65, max: 110, chancePct: 75 },
       { itemKey: 'bones', min: 1, max: 2, chancePct: 60 },
       { itemKey: 'pvePaint', min: 2, max: 3, chancePct: 50 },
-      { itemKey: 'gearChest', min: 1, max: 1, chancePct: 28 }
+      { itemKey: 'gearChest', min: 1, max: 1, chancePct: 28 },
+      { itemKey: 'shamanTotem', min: 1, max: 1, chancePct: 18 }
     ]
   },
   {
@@ -141,7 +146,8 @@ export const DINO_SPECIES_CONFIG: readonly DinoSpeciesConfig[] = [
       { resKey: 'stone', min: 110, max: 185, chancePct: 90 },
       { itemKey: 'bones', min: 2, max: 3, chancePct: 65 },
       { itemKey: 'gearChest', min: 1, max: 2, chancePct: 36 },
-      { itemKey: 'goldenBones', min: 1, max: 1, chancePct: 14 }
+      { itemKey: 'goldenBones', min: 1, max: 1, chancePct: 14 },
+      { itemKey: 'shamanTotem', min: 1, max: 1, chancePct: 25 }
     ]
   },
   {
@@ -161,7 +167,8 @@ export const DINO_SPECIES_CONFIG: readonly DinoSpeciesConfig[] = [
       { resKey: 'fur', min: 95, max: 155, chancePct: 80 },
       { itemKey: 'bones', min: 2, max: 3, chancePct: 72 },
       { itemKey: 'gearChest', min: 1, max: 2, chancePct: 44 },
-      { itemKey: 'goldenBones', min: 1, max: 1, chancePct: 20 }
+      { itemKey: 'goldenBones', min: 1, max: 1, chancePct: 20 },
+      { itemKey: 'shamanTotem', min: 1, max: 1, chancePct: 32 }
     ]
   },
   {
@@ -180,7 +187,8 @@ export const DINO_SPECIES_CONFIG: readonly DinoSpeciesConfig[] = [
       { resKey: 'meat', min: 340, max: 520, chancePct: 95 },
       { itemKey: 'pvePaint', min: 3, max: 5, chancePct: 70 },
       { itemKey: 'gearChest', min: 2, max: 2, chancePct: 52 },
-      { itemKey: 'goldenBones', min: 1, max: 1, chancePct: 28 }
+      { itemKey: 'goldenBones', min: 1, max: 1, chancePct: 28 },
+      { itemKey: 'shamanTotem', min: 1, max: 2, chancePct: 40 }
     ]
   },
   {
@@ -199,7 +207,8 @@ export const DINO_SPECIES_CONFIG: readonly DinoSpeciesConfig[] = [
       { resKey: 'fur', min: 220, max: 340, chancePct: 95 },
       { itemKey: 'bones', min: 3, max: 5, chancePct: 85 },
       { itemKey: 'gearChest', min: 2, max: 3, chancePct: 65 },
-      { itemKey: 'goldenBones', min: 1, max: 2, chancePct: 40 }
+      { itemKey: 'goldenBones', min: 1, max: 2, chancePct: 40 },
+      { itemKey: 'shamanTotem', min: 1, max: 2, chancePct: 52 }
     ]
   },
   {
@@ -219,7 +228,8 @@ export const DINO_SPECIES_CONFIG: readonly DinoSpeciesConfig[] = [
       { itemKey: 'bones', min: 4, max: 6, chancePct: 95 },
       { itemKey: 'pvePaint', min: 5, max: 8, chancePct: 85 },
       { itemKey: 'gearChest', min: 3, max: 4, chancePct: 80 },
-      { itemKey: 'goldenBones', min: 1, max: 2, chancePct: 62 }
+      { itemKey: 'goldenBones', min: 1, max: 2, chancePct: 62 },
+      { itemKey: 'shamanTotem', min: 2, max: 3, chancePct: 72 }
     ]
   }
 ];

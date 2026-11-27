@@ -12,7 +12,11 @@ export type BuildingId =
   | 'dinorider'
   | 'hero_cave'
   | 'workshop'
-  | 'scout';
+  | 'scout'
+  | 'infirmary'
+  | 'graveyard'
+  | 'marketplace'
+  | 'warehouse';
 
 export interface BuildingSnapshot {
   id: BuildingId;
@@ -24,6 +28,7 @@ export interface BuildingSnapshot {
   isBuilding: boolean;
   isResearching: boolean;
   isTraining: boolean;
+  isHealing?: boolean;
   isLocked: boolean;
   canUpgrade: boolean;
   metaText: string;
@@ -31,6 +36,9 @@ export interface BuildingSnapshot {
   progressPct: number | null;
   workers: number;
   freeBoneReady?: boolean;
+  hasMarketClaim?: boolean;
+  fallenCount?: number;
+  injuredCount?: number;
 }
 
 export interface VillageSnapshot {
@@ -82,7 +90,11 @@ const BUILDING_LAYOUTS: Record<BuildingId, BuildingLayout> = {
   clubman: { x: 6.7, z: 3.9, radius: 2.4, hitHeight: 2.2, labelOffsetY: 0.2, labelOffsetZ: 2.15 },
   dinorider: { x: -4.7, z: 8.6, radius: 2.75, hitHeight: 2.4, labelOffsetY: 0.2, labelOffsetZ: 2.45 },
   scout: { x: 4.8, z: 8.4, radius: 2.05, hitHeight: 3.8, labelOffsetY: 0.2, labelOffsetZ: 1.95 },
-  workshop: { x: 0.0, z: 10.6, radius: 2.15, hitHeight: 3.1, labelOffsetY: 0.2, labelOffsetZ: 1.95 }
+  workshop: { x: 0.0, z: 10.6, radius: 2.15, hitHeight: 3.1, labelOffsetY: 0.2, labelOffsetZ: 1.95 },
+  warehouse: { x: -9.6, z: -5.6, radius: 2.35, hitHeight: 2.7, labelOffsetY: 0.2, labelOffsetZ: 2.15 },
+  marketplace: { x: 9.8, z: -4.6, radius: 2.35, hitHeight: 2.7, labelOffsetY: 0.2, labelOffsetZ: 2.15 },
+  infirmary: { x: -9.4, z: 8.6, radius: 2.35, hitHeight: 2.5, labelOffsetY: 0.2, labelOffsetZ: 2.15 },
+  graveyard: { x: 9.5, z: 8.4, radius: 2.35, hitHeight: 2.7, labelOffsetY: 0.2, labelOffsetZ: 2.15 }
 };
 
 const BUILDING_IDS = Object.keys(BUILDING_LAYOUTS) as BuildingId[];
@@ -97,8 +109,8 @@ const _dummy = new THREE.Object3D();
 
 // Fixed isometric viewing direction (strictly locked — never orbits/rotates)
 const FIXED_CAM_DIR = new THREE.Vector3(0.0, 1.08, 0.94).normalize();
-const PAN_BOUNDS = { minX: -7.2, maxX: 7.2, minZ: -8.6, maxZ: 9.8 };
-const ZOOM_BOUNDS = { min: 15.5, max: 29.0 };
+const PAN_BOUNDS = { minX: -10.2, maxX: 10.2, minZ: -9.8, maxZ: 11.4 };
+const ZOOM_BOUNDS = { min: 15.0, max: 33.5 };
 
 interface BuildingRig {
   id: BuildingId;
@@ -448,6 +460,12 @@ interface SharedMaterials {
   dirtPad: THREE.MeshStandardMaterial;
   smoke: THREE.MeshStandardMaterial;
   runeGlow: THREE.MeshStandardMaterial;
+  paleHide: THREE.MeshStandardMaterial;
+  herbGlow: THREE.MeshStandardMaterial;
+  spiritGlow: THREE.MeshStandardMaterial;
+  awningGold: THREE.MeshStandardMaterial;
+  clayPot: THREE.MeshStandardMaterial;
+  mossStone: THREE.MeshStandardMaterial;
   hitMat: THREE.MeshBasicMaterial;
 }
 
@@ -527,6 +545,26 @@ function createSharedMaterials(maxAniso: number): SharedMaterials {
       roughness: 0.25,
       metalness: 0.35
     }),
+    paleHide: new THREE.MeshStandardMaterial({ color: 0xe6dbc6, roughness: 0.88, metalness: 0.0 }),
+    herbGlow: new THREE.MeshStandardMaterial({
+      color: 0x4ade80,
+      emissive: 0x22c55e,
+      emissiveIntensity: 1.6,
+      roughness: 0.28,
+      metalness: 0.1
+    }),
+    spiritGlow: new THREE.MeshStandardMaterial({
+      color: 0x5eead4,
+      emissive: 0x14b8a6,
+      emissiveIntensity: 1.9,
+      roughness: 0.2,
+      metalness: 0.2,
+      transparent: true,
+      opacity: 0.92
+    }),
+    awningGold: new THREE.MeshStandardMaterial({ color: 0xd98a2b, roughness: 0.82, metalness: 0.02, side: THREE.DoubleSide }),
+    clayPot: new THREE.MeshStandardMaterial({ color: 0xa65a3a, roughness: 0.76, metalness: 0.04 }),
+    mossStone: new THREE.MeshStandardMaterial({ map: rockTex, color: 0x4f5c50, roughness: 0.92, metalness: 0.04 }),
     hitMat: new THREE.MeshBasicMaterial({ visible: false })
   };
 }
@@ -1613,6 +1651,363 @@ function buildScout(mats: SharedMaterials): {
   };
 }
 
+function buildInfirmary(mats: SharedMaterials): {
+  group: THREE.Group;
+  update: (t: number, dt: number, snap: BuildingSnapshot | undefined, g: VillageSnapshot) => void;
+} {
+  const group = new THREE.Group();
+  addTerracePad(group, 4.2, 3.6, mats, true);
+
+  // Vaulted pale-hide medical pavilion roof (half-cylinder ridge)
+  const tentRoof = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.18, 1.24, 2.35, 10, 1, false, 0, Math.PI),
+    mats.paleHide
+  );
+  tentRoof.rotation.z = Math.PI / 2;
+  tentRoof.rotation.y = Math.PI / 2;
+  tentRoof.position.set(-0.2, 0.88, -0.25);
+  tentRoof.scale.set(1.0, 1.05, 1.12);
+  tentRoof.castShadow = true;
+  tentRoof.receiveShadow = true;
+  group.add(tentRoof);
+
+  // Side lower hide walls & timber support poles
+  for (const sx of [-1.28, 0.88]) {
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.85, 2.25), mats.hide);
+    wall.position.set(sx, 0.56, -0.25);
+    wall.castShadow = true;
+    group.add(wall);
+    for (const sz of [-1.3, 0.82]) {
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.068, 1.38, 6), mats.woodDark);
+      pole.position.set(sx, 0.82, sz);
+      pole.castShadow = true;
+      group.add(pole);
+    }
+  }
+
+  // Red-ochre healer's cross emblem above front arch
+  const crossV = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.56, 0.08), mats.clothRed);
+  crossV.position.set(-0.2, 1.68, 0.96);
+  group.add(crossV);
+  const crossH = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.18, 0.08), mats.clothRed);
+  crossH.position.set(-0.2, 1.68, 0.96);
+  group.add(crossH);
+
+  // Two woven recovery cots inside pavilion
+  for (const cx of [-0.68, 0.28]) {
+    const cotFrame = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.14, 1.18), mats.wood);
+    cotFrame.position.set(cx, 0.34, -0.15);
+    cotFrame.castShadow = true;
+    group.add(cotFrame);
+    const blanket = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.08, 0.78), mats.tunicA);
+    blanket.position.set(cx, 0.44, -0.25);
+    group.add(blanket);
+  }
+
+  // Herbal healing cauldron outside right side with glowing brew & rising steam
+  const cauldron = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.28, 0.44, 8), mats.basaltDark);
+  cauldron.position.set(1.42, 0.38, 0.45);
+  cauldron.castShadow = true;
+  group.add(cauldron);
+
+  const brew = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.06, 8), mats.herbGlow);
+  brew.position.set(1.42, 0.58, 0.45);
+  group.add(brew);
+
+  // Herbal drying rack behind cauldron
+  const rackL = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 1.18, 5), mats.woodDark);
+  rackL.position.set(1.18, 0.72, -0.78);
+  group.add(rackL);
+  const rackR = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 1.18, 5), mats.woodDark);
+  rackR.position.set(1.78, 0.72, -0.78);
+  group.add(rackR);
+  const rackBar = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.74, 5), mats.wood);
+  rackBar.rotation.z = Math.PI / 2;
+  rackBar.position.set(1.48, 1.24, -0.78);
+  group.add(rackBar);
+  for (let i = 0; i < 3; i++) {
+    const herb = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.34, 5), mats.dinoGreen);
+    herb.position.set(1.3 + i * 0.18, 1.02, -0.78);
+    herb.rotation.z = Math.PI;
+    group.add(herb);
+  }
+
+  const steamPuffs: THREE.Mesh[] = [];
+  for (let i = 0; i < 3; i++) {
+    const puff = new THREE.Mesh(new THREE.DodecahedronGeometry(0.14 + i * 0.03, 0), mats.smoke);
+    puff.position.set(1.42, 0.75 + i * 0.34, 0.45);
+    group.add(puff);
+    steamPuffs.push(puff);
+  }
+
+  return {
+    group,
+    update: (t, _dt, snap) => {
+      const healing = Boolean(snap?.isHealing || (snap?.injuredCount || 0) > 0);
+      const speed = healing ? 1.55 : 0.72;
+      for (let i = 0; i < steamPuffs.length; i++) {
+        const u = (t * 0.55 * speed + i * 0.33) % 1;
+        steamPuffs[i].position.y = 0.68 + u * 1.15;
+        steamPuffs[i].position.x = 1.42 + Math.sin(t * 2.1 + i * 1.9) * 0.1;
+        steamPuffs[i].scale.setScalar(0.55 + u * 0.75);
+      }
+      mats.herbGlow.emissiveIntensity = healing ? 2.1 + Math.sin(t * 4.5) * 0.45 : 1.15;
+    }
+  };
+}
+
+function buildGraveyard(mats: SharedMaterials): {
+  group: THREE.Group;
+  update: (t: number, dt: number, snap: BuildingSnapshot | undefined, g: VillageSnapshot) => void;
+} {
+  const group = new THREE.Group();
+  addTerracePad(group, 4.2, 3.7, mats, true);
+
+  // Basalt entrance pillars & prehistoric curved rib-bone archway
+  for (const px of [-0.95, 0.95]) {
+    const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.36, 1.32, 0.36), mats.basaltDark);
+    pillar.position.set(px, 0.78, 1.18);
+    pillar.castShadow = true;
+    group.add(pillar);
+  }
+  const boneArch = new THREE.Mesh(new THREE.TorusGeometry(0.96, 0.085, 6, 12, Math.PI), mats.bone);
+  boneArch.position.set(0, 1.36, 1.18);
+  boneArch.castShadow = true;
+  group.add(boneArch);
+
+  // Weathered memorial basalt headstones & stone cairns in crescent
+  const graveSpecs: [number, number, number, number][] = [
+    [-1.25, -0.35, 0.88, 0.12],
+    [-0.78, -1.12, 1.02, -0.08],
+    [0.82, -1.08, 0.96, 0.1],
+    [1.28, -0.28, 0.84, -0.14]
+  ];
+  for (const [gx, gz, gh, rotZ] of graveSpecs) {
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(0.42, gh, 0.18), mats.mossStone);
+    slab.position.set(gx, 0.16 + gh * 0.5, gz);
+    slab.rotation.y = Math.atan2(-gx, -gz);
+    slab.rotation.z = rotZ;
+    slab.castShadow = true;
+    slab.receiveShadow = true;
+    group.add(slab);
+
+    const mound = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.38, 0.16, 6), mats.dirtPad);
+    mound.position.set(gx * 0.86, 0.2, gz + 0.36);
+    group.add(mound);
+  }
+
+  // Central carved Schamanen-Totem altar
+  const altarBase = new THREE.Mesh(new THREE.CylinderGeometry(0.54, 0.68, 0.28, 8), mats.basalt);
+  altarBase.position.set(0, 0.26, -0.18);
+  altarBase.castShadow = true;
+  group.add(altarBase);
+
+  const totemPole = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.24, 1.85, 7), mats.woodDark);
+  totemPole.position.set(0, 1.28, -0.18);
+  totemPole.castShadow = true;
+  group.add(totemPole);
+
+  const totemWings = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.18, 0.14), mats.bone);
+  totemWings.position.set(0, 1.72, -0.18);
+  totemWings.castShadow = true;
+  group.add(totemWings);
+
+  const totemSkull = new THREE.Mesh(new THREE.DodecahedronGeometry(0.24, 0), mats.bone);
+  totemSkull.position.set(0, 2.26, -0.18);
+  totemSkull.castShadow = true;
+  group.add(totemSkull);
+
+  // Floating spirit-jade wisps orbiting the Shaman Totem
+  const wispOrbit = new THREE.Group();
+  wispOrbit.position.set(0, 1.62, -0.18);
+  group.add(wispOrbit);
+
+  const wisps: THREE.Mesh[] = [];
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2;
+    const wisp = new THREE.Mesh(new THREE.OctahedronGeometry(0.13, 0), mats.spiritGlow);
+    wisp.position.set(Math.cos(a) * 0.78, 0, Math.sin(a) * 0.78);
+    wispOrbit.add(wisp);
+    wisps.push(wisp);
+  }
+
+  return {
+    group,
+    update: (t, _dt, snap) => {
+      const hasFallen = (snap?.fallenCount || 0) > 0;
+      wispOrbit.rotation.y = t * (hasFallen ? 1.5 : 0.72);
+      for (let i = 0; i < wisps.length; i++) {
+        wisps[i].position.y = Math.sin(t * (hasFallen ? 3.2 : 1.7) + i * 2.1) * 0.22;
+        wisps[i].scale.setScalar(hasFallen ? 1.15 + Math.sin(t * 4.0 + i) * 0.18 : 0.82);
+      }
+      mats.spiritGlow.emissiveIntensity = hasFallen ? 2.4 + Math.sin(t * 3.8) * 0.5 : 1.3;
+    }
+  };
+}
+
+function buildMarketplace(mats: SharedMaterials): {
+  group: THREE.Group;
+  update: (t: number, dt: number, snap: BuildingSnapshot | undefined, g: VillageSnapshot) => void;
+} {
+  const group = new THREE.Group();
+  addTerracePad(group, 4.4, 3.7, mats, true);
+
+  // 4 Timber pavilion corner posts
+  for (const [px, pz] of [
+    [-1.45, -1.05],
+    [1.45, -1.05],
+    [1.45, 0.92],
+    [-1.45, 0.92]
+  ]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.08, 1.72, 6), mats.woodDark);
+    post.position.set(px, 0.98, pz);
+    post.castShadow = true;
+    group.add(post);
+  }
+
+  // Striped ochre & crimson pitched market awning panels
+  for (let i = 0; i < 5; i++) {
+    const stripeMat = i % 2 === 0 ? mats.awningGold : mats.clothRed;
+    const x = -1.24 + i * 0.62;
+    const panelF = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.07, 1.28), stripeMat);
+    panelF.position.set(x, 1.88, 0.5);
+    panelF.rotation.x = 0.26;
+    panelF.castShadow = true;
+    group.add(panelF);
+
+    const panelB = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.07, 1.28), stripeMat);
+    panelB.position.set(x, 1.88, -0.58);
+    panelB.rotation.x = -0.26;
+    panelB.castShadow = true;
+    group.add(panelB);
+  }
+
+  // Two stocked wooden barter tables & trade wares (amphorae, crates, fur rolls)
+  for (const tx of [-0.72, 0.72]) {
+    const counter = new THREE.Mesh(new THREE.BoxGeometry(1.16, 0.56, 0.64), mats.wood);
+    counter.position.set(tx, 0.44, 0.15);
+    counter.castShadow = true;
+    group.add(counter);
+  }
+  const pot1 = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.18, 0.34, 8), mats.clayPot);
+  pot1.position.set(-0.98, 0.88, 0.12);
+  pot1.castShadow = true;
+  group.add(pot1);
+  const pot2 = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.16, 0.28, 8), mats.clayPot);
+  pot2.position.set(-0.66, 0.85, 0.22);
+  group.add(pot2);
+
+  const furRoll = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.46, 7), mats.paleHide);
+  furRoll.rotation.z = Math.PI / 2;
+  furRoll.position.set(0.62, 0.84, 0.12);
+  group.add(furRoll);
+
+  const crate = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.36, 0.42), mats.woodDark);
+  crate.position.set(1.02, 0.88, 0.16);
+  group.add(crate);
+
+  // Tall fluttering trade banner pole
+  const flagPole = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.06, 2.75, 6), mats.woodDark);
+  flagPole.position.set(-1.68, 1.5, 0.96);
+  flagPole.castShadow = true;
+  group.add(flagPole);
+
+  const bannerPivot = new THREE.Group();
+  bannerPivot.position.set(-1.68, 2.58, 0.96);
+  const banner = new THREE.Mesh(new THREE.PlaneGeometry(0.68, 0.42, 2, 1), mats.awningGold);
+  banner.position.set(0.36, -0.05, 0);
+  bannerPivot.add(banner);
+  group.add(bannerPivot);
+
+  // Glowing stamina brazier lantern at front center
+  const lantern = new THREE.Mesh(new THREE.OctahedronGeometry(0.22, 0), mats.amberGlow);
+  lantern.position.set(0, 1.55, 0.95);
+  group.add(lantern);
+
+  return {
+    group,
+    update: (t, _dt, snap) => {
+      const ready = Boolean(snap?.hasMarketClaim);
+      bannerPivot.rotation.y = Math.sin(t * 2.8) * 0.28;
+      lantern.rotation.y = t * (ready ? 2.4 : 0.9);
+      const pulse = ready ? 1.18 + Math.sin(t * 5.2) * 0.18 : 0.85;
+      lantern.scale.setScalar(pulse);
+    }
+  };
+}
+
+function buildWarehouse(mats: SharedMaterials): {
+  group: THREE.Group;
+  update: (t: number, dt: number, snap: BuildingSnapshot | undefined, g: VillageSnapshot) => void;
+} {
+  const group = new THREE.Group();
+  addTerracePad(group, 4.4, 3.8, mats, true);
+
+  // Heavy reinforced basalt vault structure
+  const vaultBody = new THREE.Mesh(new THREE.BoxGeometry(2.55, 1.38, 2.05), mats.basalt);
+  vaultBody.position.set(0, 0.85, -0.2);
+  vaultBody.castShadow = true;
+  vaultBody.receiveShadow = true;
+  group.add(vaultBody);
+
+  // Corner basalt buttresses for fortified safe-storage silhouette
+  for (const [bx, bz] of [
+    [-1.32, -1.24],
+    [1.32, -1.24],
+    [-1.32, 0.84],
+    [1.32, 0.84]
+  ]) {
+    const buttress = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.28, 1.46, 5), mats.basaltDark);
+    buttress.position.set(bx, 0.88, bz);
+    buttress.castShadow = true;
+    group.add(buttress);
+  }
+
+  // Steep pitched timber & thatch roof
+  const roof = new THREE.Mesh(new THREE.ConeGeometry(2.05, 1.15, 4), mats.thatch);
+  roof.position.set(0, 2.08, -0.2);
+  roof.rotation.y = Math.PI / 4;
+  roof.scale.set(1.12, 1.0, 0.96);
+  roof.castShadow = true;
+  group.add(roof);
+
+  // Heavy bronze-banded double vault door
+  const doorFrame = new THREE.Mesh(new THREE.BoxGeometry(1.06, 1.02, 0.14), mats.woodDark);
+  doorFrame.position.set(0, 0.67, 0.84);
+  group.add(doorFrame);
+
+  for (const yOff of [0.46, 0.88]) {
+    const band = new THREE.Mesh(new THREE.BoxGeometry(0.98, 0.09, 0.18), mats.bronze);
+    band.position.set(0, yOff, 0.86);
+    group.add(band);
+  }
+  const lockEmblem = new THREE.Mesh(new THREE.OctahedronGeometry(0.16, 0), mats.bronze);
+  lockEmblem.position.set(0, 0.68, 0.96);
+  lockEmblem.scale.set(1.0, 1.15, 0.55);
+  group.add(lockEmblem);
+
+  // Exterior stacked supply crates & barrels
+  const crateA = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.44, 0.48), mats.wood);
+  crateA.position.set(-1.32, 0.38, 1.24);
+  crateA.castShadow = true;
+  group.add(crateA);
+  const barrelA = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.52, 8), mats.woodDark);
+  barrelA.position.set(1.26, 0.42, 1.2);
+  barrelA.castShadow = true;
+  group.add(barrelA);
+  const barrelBand = new THREE.Mesh(new THREE.CylinderGeometry(0.23, 0.23, 0.08, 8), mats.bronze);
+  barrelBand.position.set(1.26, 0.46, 1.2);
+  group.add(barrelBand);
+
+  return {
+    group,
+    update: (t) => {
+      // Subtle metallic glint oscillation on vault lock emblem
+      lockEmblem.rotation.z = Math.sin(t * 1.1) * 0.05;
+    }
+  };
+}
+
 function buildVolcanicEnvironment(
   scene: THREE.Scene,
   mats: SharedMaterials,
@@ -1646,15 +2041,15 @@ function buildVolcanicEnvironment(
   // Glowing volcanic lava fissures & magma pools ringing the outer rim (matches reference art)
   const lavaPools: THREE.Mesh[] = [];
   const fissureSpecs: [number, number, number, number, number][] = [
-    [-11.8, -11.5, 4.2, 0.9, 0.45],
-    [11.4, -10.8, 3.8, 0.85, -0.55],
-    [-12.2, 1.5, 3.4, 0.72, 1.15],
-    [12.4, 2.2, 3.2, 0.7, -1.2],
-    [-9.8, 13.8, 4.8, 1.05, 0.25],
-    [1.8, 14.6, 5.2, 1.15, -0.15],
-    [10.8, 13.4, 4.5, 0.98, -0.38],
-    [-5.8, -13.6, 4.4, 0.82, 0.18],
-    [6.4, -13.4, 4.2, 0.85, -0.22]
+    [-14.2, -13.2, 4.4, 0.92, 0.45],
+    [14.0, -12.6, 4.0, 0.85, -0.55],
+    [-14.6, 1.5, 3.6, 0.72, 1.15],
+    [14.8, 2.2, 3.4, 0.7, -1.2],
+    [-12.2, 15.2, 4.8, 1.05, 0.25],
+    [1.8, 15.8, 5.2, 1.15, -0.15],
+    [12.8, 14.8, 4.5, 0.98, -0.38],
+    [-6.2, -14.8, 4.4, 0.82, 0.18],
+    [6.6, -14.6, 4.2, 0.85, -0.22]
   ];
   for (const [fx, fz, fw, fd, rot] of fissureSpecs) {
     const fissure = new THREE.Mesh(new THREE.PlaneGeometry(fw, fd), mats.lava);
@@ -1681,8 +2076,8 @@ function buildVolcanicEnvironment(
 
   for (let i = 0; i < rockCount; i++) {
     const angle = (i / rockCount) * Math.PI * 2 + (rand() - 0.5) * 0.14;
-    const distX = 12.2 + rand() * 7.5;
-    const distZ = 13.8 + rand() * 6.5;
+    const distX = 14.6 + rand() * 7.5;
+    const distZ = 15.2 + rand() * 6.5;
     const rx = Math.cos(angle) * distX;
     const rz = Math.sin(angle) * distZ;
     const sx = 1.1 + rand() * 2.2;
@@ -1732,8 +2127,8 @@ function buildVolcanicEnvironment(
   trunkInst.castShadow = true;
   for (let i = 0; i < treeCount; i++) {
     const a = (i / treeCount) * Math.PI * 2 + 0.25;
-    const rx = Math.cos(a) * (11.2 + rand() * 5.2);
-    const rz = Math.sin(a) * (12.8 + rand() * 4.5);
+    const rx = Math.cos(a) * (13.6 + rand() * 5.2);
+    const rz = Math.sin(a) * (14.4 + rand() * 4.5);
     const sc = 0.8 + rand() * 0.8;
     _dummy.position.set(rx, 0.85 * sc, rz);
     _dummy.rotation.set((rand() - 0.5) * 0.25, rand() * Math.PI * 2, (rand() - 0.5) * 0.25);
@@ -1970,7 +2365,11 @@ class Village3DController implements Village3DAPI {
       dinorider: () => buildDinorider(mats),
       hero_cave: () => buildHeroCave(mats),
       workshop: () => buildWorkshop(mats),
-      scout: () => buildScout(mats)
+      scout: () => buildScout(mats),
+      infirmary: () => buildInfirmary(mats),
+      graveyard: () => buildGraveyard(mats),
+      marketplace: () => buildMarketplace(mats),
+      warehouse: () => buildWarehouse(mats)
     };
 
     for (const id of BUILDING_IDS) {
@@ -2440,8 +2839,16 @@ class Village3DController implements Village3DAPI {
       rig.root.scale.setScalar(s);
     }
 
-    // Animate strolling tribal villagers
-    for (const v of this.villagers) {
+    // Animate strolling tribal villagers (scales with constructed village buildings)
+    let builtCount = 0;
+    for (const b of snap.buildings) {
+      if (b.level > 0) builtCount++;
+    }
+    for (let i = 0; i < this.villagers.length; i++) {
+      const v = this.villagers[i];
+      const showVillager = i < 2 || i < builtCount;
+      v.group.visible = showVillager;
+      if (!showVillager) continue;
       v.progress += v.speed * dt * v.dir;
       if (v.progress >= 1) {
         v.progress = 1;
