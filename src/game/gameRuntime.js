@@ -9034,13 +9034,17 @@ export function initGameRuntime(hooks = {}) {
   // Starte das Spiel im gemounteten React-DOM
   init();
 
-  // Synchronisiere aktuelle Kerndaten (Signalfeuer-Stufe, Macht, Tab) regelmäßig mit React-Komponenten
+  // Synchronisiere aktuelle Kerndaten (Signalfeuer-Stufe, Macht, Tab, Heimat-Kachel) regelmäßig mit React-Komponenten
   const emitSnapshot = () => {
     notifyReact({
       bonfireLevel: state?.buildings?.bonfire?.level || 1,
       power: typeof computeVillagePowerMp === "function" ? computeVillagePowerMp() : 100,
       activeTab: typeof activeTab === "string" ? activeTab : "village",
-      started: Boolean(state?.started)
+      started: Boolean(state?.started),
+      homeTile: {
+        x: typeof state?.homeTile?.x === "number" ? state.homeTile.x : 23,
+        y: typeof state?.homeTile?.y === "number" ? state.homeTile.y : 13
+      }
     });
   };
   emitSnapshot();
@@ -9057,6 +9061,42 @@ export function initGameRuntime(hooks = {}) {
         if (typeof centerWorldMapOn === "function") {
           setTimeout(() => centerWorldMapOn(xPct, yPct), 60);
         }
+      } catch {
+        // ignore
+      }
+    },
+    visitSettlement(target) {
+      try {
+        if (!target) return;
+        if (typeof SoundFX !== "undefined" && typeof SoundFX.play === "function") {
+          SoundFX.play("tap");
+        }
+        if (typeof switchTab === "function") switchTab("worldmap");
+        if (typeof renderWorldMap === "function") renderWorldMap();
+        const pxX = (Number(target.tileX) + 1) * WORLD_TILE_SIZE;
+        const pxY = (Number(target.tileY) + 1) * WORLD_TILE_SIZE;
+        const xPct = (pxX / WORLD_MAP_WIDTH) * 100;
+        const yPct = (pxY / WORLD_MAP_HEIGHT) * 100;
+        setTimeout(() => {
+          if (typeof centerWorldMapOn === "function") {
+            centerWorldMapOn(xPct, yPct);
+          }
+          const marker = document.querySelector(
+            `.wm-node.other-settlement[data-wm-player="${CSS.escape(String(target.uid || ""))}"]`
+          );
+          if (marker) {
+            marker.classList.remove("is-visited-pulse");
+            void marker.offsetWidth;
+            marker.classList.add("is-visited-pulse");
+            setTimeout(() => marker.classList.remove("is-visited-pulse"), 2600);
+          }
+          if (typeof showToast === "function") {
+            showToast(
+              `Besuche ${target.tribeName} · Signalfeuer St. ${target.bonfireLevel} · Macht ${target.power} · Grid [${target.tileX}, ${target.tileY}]`,
+              "info"
+            );
+          }
+        }, 70);
       } catch {
         // ignore
       }

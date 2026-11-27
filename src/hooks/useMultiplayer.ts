@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import bridge, { type PlayerSession } from '../multiplayerBridge';
+import bridge, {
+  type ConnectionDiagnostics,
+  type DiagnosticLogEntry,
+  type PlayerSession,
+} from '../multiplayerBridge';
 import type {
   WorldChatMessageDTO,
   WorldMarchDTO,
@@ -12,6 +16,8 @@ export interface MultiplayerSnapshot {
   marches: WorldMarchDTO[];
   chat: WorldChatMessageDTO[];
   onlinePlayers: number;
+  diagnostics: ConnectionDiagnostics;
+  logs: DiagnosticLogEntry[];
 }
 
 function readSnapshot(): MultiplayerSnapshot {
@@ -23,6 +29,8 @@ function readSnapshot(): MultiplayerSnapshot {
     marches: world.marches,
     chat: world.chat,
     onlinePlayers: world.onlinePlayers,
+    diagnostics: bridge.getDiagnostics(),
+    logs: bridge.getLogs(),
   };
 }
 
@@ -51,11 +59,21 @@ export function useMultiplayer() {
     return bridge.setTribeName(name);
   }, []);
 
+  const runDiagnostics = useCallback(async () => {
+    return bridge.runConnectionDiagnostics();
+  }, []);
+
+  const clearLogs = useCallback(() => {
+    bridge.clearLogs();
+  }, []);
+
   return {
     ...snapshot,
     sendChat,
     signInWithGoogle,
     signOut,
     setTribeName,
+    runDiagnostics,
+    clearLogs,
   };
 }

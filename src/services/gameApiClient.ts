@@ -177,6 +177,14 @@ export async function postChatMessage(
   );
 }
 
+export interface SocketDebugEvent {
+  phase: 'connecting' | 'open' | 'close' | 'error';
+  url: string;
+  code?: number;
+  reason?: string;
+  attempt: number;
+}
+
 export class GameRealtimeSocket {
   private ws: WebSocket | null = null;
   private reconnectTimer: number | null = null;
@@ -184,13 +192,16 @@ export class GameRealtimeSocket {
   private attempt = 0;
   private onEvent: (ev: RealtimeEvent) => void;
   private onStatusChange: (connected: boolean) => void;
+  private onDebug?: (info: SocketDebugEvent) => void;
 
   constructor(
     onEvent: (ev: RealtimeEvent) => void,
-    onStatusChange: (connected: boolean) => void
+    onStatusChange: (connected: boolean) => void,
+    onDebug?: (info: SocketDebugEvent) => void
   ) {
     this.onEvent = onEvent;
     this.onStatusChange = onStatusChange;
+    this.onDebug = onDebug;
   }
 
   connect(): void {
@@ -212,14 +223,16 @@ export class GameRealtimeSocket {
 
   private openSocket(): void {
     if (this.closedByClient) return;
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws`;
     try {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/ws`;
+      this.onDebug?.({ phase: 'connecting', url: wsUrl, attempt: this.attempt });
       const socket = new WebSocket(wsUrl);
       this.ws = socket;
 
       socket.onopen = () => {
         this.attempt = 0;
+        this.onDebug?.({ phase: 'open', url: wsUrl, attempt: 0 });
         this.onStatusChange(true);
       };
 
@@ -234,8 +247,15 @@ export class GameRealtimeSocket {
         }
       };
 
-      socket.onclose = () => {
+      socket.onclose = (ev) => {
         this.ws = null;
+        this.onDebug?.({
+          phase: 'close',
+          url: wsUrl,
+          code: ev.code,
+          reason: ev.reason || undefined,
+          attempt: this.attempt,
+        });
         this.onStatusChange(false);
         if (!this.closedByClient) {
           this.scheduleReconnect();
@@ -243,9 +263,11 @@ export class GameRealtimeSocket {
       };
 
       socket.onerror = () => {
+        this.onDebug?.({ phase: 'error', url: wsUrl, attempt: this.attempt });
         this.onStatusChange(false);
       };
     } catch {
+      this.onDebug?.({ phase: 'error', url: wsUrl, attempt: this.attempt });
       this.onStatusChange(false);
       this.scheduleReconnect();
     }

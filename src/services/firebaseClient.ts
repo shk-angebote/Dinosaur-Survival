@@ -62,6 +62,12 @@ const app: FirebaseApp = initializeApp(firebaseConfig);
 export const db: Firestore = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth: Auth = getAuth(app);
 
+export const FIREBASE_DIAGNOSTIC_CONFIG = {
+  projectId: firebaseConfig.projectId || 'unbekannt',
+  authDomain: firebaseConfig.authDomain || 'unbekannt',
+  firestoreDatabaseId: firebaseConfig.firestoreDatabaseId || '(default)',
+} as const;
+
 export function handleFirestoreError(
   error: unknown,
   operationType: OperationType,
@@ -88,14 +94,57 @@ export function handleFirestoreError(
   throw new Error(JSON.stringify(errInfo));
 }
 
-async function testConnection(): Promise<void> {
+export interface FirestoreProbeResult {
+  reachable: boolean;
+  code: string;
+  message: string;
+  latencyMs: number;
+}
+
+export async function probeFirestoreConnection(): Promise<FirestoreProbeResult> {
+  const started = performance.now();
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
+    return {
+      reachable: true,
+      code: 'ok',
+      message: 'Firestore-Server erreichbar',
+      latencyMs: Math.round(performance.now() - started),
+    };
   } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
+    const latencyMs = Math.round(performance.now() - started);
+    const errObj = error as { code?: string; message?: string };
+    const code = String(errObj?.code || 'unknown');
+    const msg = error instanceof Error ? error.message : String(error);
+    if (msg.includes('the client is offline')) {
       console.error('Please check your Firebase configuration.');
+      return {
+        reachable: false,
+        code: code === 'unknown' ? 'unavailable/offline' : code,
+        message: msg,
+        latencyMs,
+      };
     }
+    // permission-denied auf test/connection beweist, dass der Firestore-Server aktiv geantwortet hat
+    if (code === 'permission-denied' || msg.toLowerCase().includes('missing or insufficient permissions')) {
+      return {
+        reachable: true,
+        code: 'permission-denied (server-ping ok)',
+        message: 'Firestore-Server erreichbar (Security Rules aktiv)',
+        latencyMs,
+      };
+    }
+    return {
+      reachable: false,
+      code,
+      message: msg,
+      latencyMs,
+    };
   }
+}
+
+async function testConnection(): Promise<void> {
+  await probeFirestoreConnection();
 }
 void testConnection();
 
@@ -342,6 +391,11 @@ export function subscribeFirestoreWorld(handlers: {
   onSettlements: (list: WorldSettlementDTO[]) => void;
   onMarches: (list: WorldMarchDTO[]) => void;
   onChat: (list: WorldChatMessageDTO[]) => void;
+  onListenerStatus?: (
+    channel: 'settlements' | 'marches' | 'chat',
+    status: 'ok' | 'error',
+    detail: string
+  ) => void;
 }): Unsubscribe {
   if (!auth.currentUser) {
     return () => {};
@@ -370,9 +424,21 @@ export function subscribeFirestoreWorld(handlers: {
               typeof d.updatedAt?.toMillis === 'function' ? d.updatedAt.toMillis() : Date.now(),
           });
         });
+        const src = snap.metadata.fromCache ? 'Cache' : 'Server';
+        handlers.onListenerStatus?.(
+          'settlements',
+          'ok',
+          `${items.length} Stämme (${src}${snap.metadata.hasPendingWrites ? ', ausstehend' : ''})`
+        );
         handlers.onSettlements(items);
       },
       (error) => {
+        const errObj = error as { code?: string; message?: string };
+        handlers.onListenerStatus?.(
+          'settlements',
+          'error',
+          `${errObj?.code || 'error'}: ${errObj?.message || String(error)}`
+        );
         handleFirestoreError(error, OperationType.LIST, settlementsPath);
       }
     )
@@ -409,9 +475,17 @@ export function subscribeFirestoreWorld(handlers: {
             status: d.status === 'completed' ? 'completed' : 'active',
           });
         });
+        const src = snap.metadata.fromCache ? 'Cache' : 'Server';
+        handlers.onListenerStatus?.('marches', 'ok', `${items.length} Märsche (${src})`);
         handlers.onMarches(items);
       },
       (error) => {
+        const errObj = error as { code?: string; message?: string };
+        handlers.onListenerStatus?.(
+          'marches',
+          'error',
+          `${errObj?.code || 'error'}: ${errObj?.message || String(error)}`
+        );
         handleFirestoreError(error, OperationType.LIST, marchesPath);
       }
     )
@@ -442,9 +516,17 @@ export function subscribeFirestoreWorld(handlers: {
           });
         });
         items.reverse();
+        const src = snap.metadata.fromCache ? 'Cache' : 'Server';
+        handlers.onListenerStatus?.('chat', 'ok', `${items.length} Nachrichten (${src})`);
         handlers.onChat(items);
       },
       (error) => {
+        const errObj = error as { code?: string; message?: string };
+        handlers.onListenerStatus?.(
+          'chat',
+          'error',
+          `${errObj?.code || 'error'}: ${errObj?.message || String(error)}`
+        );
         handleFirestoreError(error, OperationType.LIST, chatPath);
       }
     )

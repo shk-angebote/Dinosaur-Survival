@@ -12,8 +12,10 @@ import type {
 } from './shared/apiTypes';
 import {
   completeMarchInFirestore,
+  FIREBASE_DIAGNOSTIC_CONFIG,
   getFirebaseIdToken,
   loadCloudSave,
+  probeFirestoreConnection,
   publishChatToFirestore,
   publishMarchToFirestore,
   sanitizeId,
@@ -37,12 +39,49 @@ import {
   postServerPlayerSave,
   postSettlement,
   postValidateBuild,
+  type SocketDebugEvent,
 } from './services/gameApiClient';
 
 const GUEST_UID_KEY = 'glut_basalt_guest_uid_v1';
 const TRIBE_NAME_KEY = 'glut_basalt_tribe_name_v1';
 
 export type SyncState = 'connecting' | 'synced' | 'saving' | 'offline';
+export type ChannelHealth = 'idle' | 'connecting' | 'ok' | 'degraded' | 'error' | 'offline';
+export type DiagnosticLogLevel = 'info' | 'success' | 'warn' | 'error';
+export type DiagnosticLogSource = 'Auth' | 'Firestore' | 'WebSocket' | 'API' | 'Sync' | 'Netzwerk';
+
+export interface DiagnosticLogEntry {
+  id: string;
+  ts: number;
+  level: DiagnosticLogLevel;
+  source: DiagnosticLogSource;
+  message: string;
+  detail?: string;
+}
+
+export interface ConnectionDiagnostics {
+  browserOnline: boolean;
+  hostname: string;
+  firebaseProjectId: string;
+  firestoreDatabaseId: string;
+  authStatus: ChannelHealth;
+  authDetail: string;
+  firestoreStatus: ChannelHealth;
+  firestoreDetail: string;
+  firestoreListeners: {
+    settlements: ChannelHealth;
+    marches: ChannelHealth;
+    chat: ChannelHealth;
+  };
+  apiStatus: ChannelHealth;
+  apiDetail: string;
+  wsStatus: ChannelHealth;
+  wsDetail: string;
+  wsCloseCode: number | null;
+  wsAttempts: number;
+  lastError: string | null;
+  rootCauseHint: string | null;
+}
 
 export interface PlayerSession {
   uid: string;
@@ -131,6 +170,131 @@ class DinoMultiplayerBridge {
   private saveTimer: number | null = null;
   private initialized = false;
   private listeners = new Set<() => void>();
+
+  private logSeq = 0;
+  private logs: DiagnosticLogEntry[] = [];
+  private diagnostics: ConnectionDiagnostics = {
+    browserOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
+    hostname: typeof window !== 'undefined' ? window.location.hostname : 'unknown',
+    firebaseProjectId: FIREBASE_DIAGNOSTIC_CONFIG.projectId,
+    firestoreDatabaseId: FIREBASE_DIAGNOSTIC_CONFIG.firestoreDatabaseId,
+    authStatus: 'connecting',
+    authDetail: 'Warte auf Firebase Auth...',
+    firestoreStatus: 'idle',
+    firestoreDetail: 'Noch nicht verbunden',
+    firestoreListeners: {
+      settlements: 'idle',
+      marches: 'idle',
+      chat: 'idle',
+    },
+    apiStatus: 'connecting',
+    apiDetail: 'Prüfe /api/v1/world/state...',
+    wsStatus: 'idle',
+    wsDetail: 'Warte auf Backend-Check',
+    wsCloseCode: null,
+    wsAttempts: 0,
+    lastError: null,
+    rootCauseHint: null,
+  };
+
+  private formatErrorDetail(err: unknown): string {
+    if (err instanceof Error) {
+      const msg = err.message || String(err);
+      try {
+        const parsed = JSON.parse(msg) as {
+          error?: string;
+          operationType?: string;
+          path?: string;
+          authInfo?: { userId?: string | null; email?: string | null };
+        };
+        if (parsed && typeof parsed === 'object' && parsed.error) {
+          const op = parsed.operationType ? `${parsed.operationType.toUpperCase()} ` : '';
+          const path = parsed.path ? `${parsed.path} — ` : '';
+          const uid = parsed.authInfo?.userId ? ` (uid: ${parsed.authInfo.userId.slice(0, 8)}…)` : ' (kein Auth-User)';
+          return `${op}${path}${parsed.error}${uid}`;
+        }
+      } catch {
+        // plain error message
+      }
+      return msg;
+    }
+    return String(err);
+  }
+
+  private pushLog(
+    level: DiagnosticLogLevel,
+    source: DiagnosticLogSource,
+    message: string,
+    detail?: string
+  ): void {
+    this.logSeq += 1;
+    const entry: DiagnosticLogEntry = {
+      id: `log_${this.logSeq}`,
+      ts: Date.now(),
+      level,
+      source,
+      message,
+      detail: detail ? detail.slice(0, 420) : undefined,
+    };
+    this.logs = [...this.logs.slice(-79), entry];
+    if (level === 'error') {
+      this.diagnostics.lastError = `[${source}] ${message}${detail ? `: ${detail.slice(0, 180)}` : ''}`;
+    }
+    this.refreshRootCauseHint();
+    this.notifyListeners();
+  }
+
+  private refreshRootCauseHint(): void {
+    const d = this.diagnostics;
+    if (!d.browserOnline) {
+      d.rootCauseHint = 'Browser meldet keine Internetverbindung (navigator.onLine = false).';
+      return;
+    }
+    if (this.firebaseUser && !this.cloudSynced) {
+      if (d.firestoreStatus === 'error') {
+        d.rootCauseHint = `Authentifiziert als ${this.firebaseUser.email || this.firebaseUser.uid.slice(0, 8)}, aber Cloud Firestore schlägt fehl: ${d.firestoreDetail}`;
+      } else if (
+        d.firestoreListeners.settlements === 'error' ||
+        d.firestoreListeners.marches === 'error' ||
+        d.firestoreListeners.chat === 'error'
+      ) {
+        d.rootCauseHint = `Authentifiziert, aber ein Firestore-Echtzeit-Listener wurde blockiert (${d.lastError || 'Details im Log'}).`;
+      } else if (d.firestoreStatus === 'offline') {
+        d.rootCauseHint = 'Authentifiziert, aber der Firestore-Client ist offline (Adblocker, Firewall oder ungültige DB-ID blockiert firestore.googleapis.com).';
+      } else {
+        d.rootCauseHint = 'Authentifiziert, warte auf erste Server-Antwort von Cloud Firestore (Synchronisation noch ausstehend).';
+      }
+      return;
+    }
+    if (!this.firebaseUser && !this.wsConnected) {
+      d.rootCauseHint =
+        d.apiStatus === 'offline' || d.apiStatus === 'error'
+          ? `Kein Node.js-Spielserver auf "${d.hostname}" erreichbar (statisches Hosting) und nicht mit Google angemeldet.`
+          : 'WebSocket-Verbindung zum Spielserver unterbrochen und nicht mit Google angemeldet.';
+      return;
+    }
+    if (this.firebaseUser && this.cloudSynced && !this.wsConnected) {
+      d.rootCauseHint = `Live über Cloud Firestore verbunden (statisches Hosting ohne Node-WebSocket auf "${d.hostname}").`;
+      return;
+    }
+    d.rootCauseHint = null;
+  }
+
+  getDiagnostics(): ConnectionDiagnostics {
+    return {
+      ...this.diagnostics,
+      firestoreListeners: { ...this.diagnostics.firestoreListeners },
+    };
+  }
+
+  getLogs(): DiagnosticLogEntry[] {
+    return this.logs;
+  }
+
+  clearLogs(): void {
+    this.logs = [];
+    this.notifyListeners();
+  }
 
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
@@ -233,6 +397,24 @@ class DinoMultiplayerBridge {
       return;
     }
     this.initialized = true;
+    this.pushLog(
+      'info',
+      'Netzwerk',
+      `Multiplayer-Bridge gestartet (${this.diagnostics.hostname})`,
+      `Projekt: ${FIREBASE_DIAGNOSTIC_CONFIG.projectId} · DB: ${FIREBASE_DIAGNOSTIC_CONFIG.firestoreDatabaseId}`
+    );
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', () => {
+        this.diagnostics.browserOnline = true;
+        this.pushLog('success', 'Netzwerk', 'Browser-Netzwerk wieder online');
+        void this.runConnectionDiagnostics();
+      });
+      window.addEventListener('offline', () => {
+        this.diagnostics.browserOnline = false;
+        this.pushLog('warn', 'Netzwerk', 'Browser meldet Offline-Status (navigator.onLine = false)');
+      });
+    }
 
     // 1. Mit Node.js Spielserver verbinden (signierte Gast-Session + dauerhafter Weltzustand + WebSocket)
     this.socket = new GameRealtimeSocket(
@@ -243,6 +425,28 @@ class DinoMultiplayerBridge {
         this.emitSession();
         if (connected) {
           void this.pushCurrentSettlement(true);
+        }
+      },
+      (dbg: SocketDebugEvent) => {
+        this.diagnostics.wsAttempts = dbg.attempt;
+        if (dbg.phase === 'connecting') {
+          this.diagnostics.wsStatus = 'connecting';
+          this.diagnostics.wsDetail = `Verbinde mit ${dbg.url} (Versuch ${dbg.attempt + 1})`;
+          this.pushLog('info', 'WebSocket', 'Verbindungsaufbau gestartet', dbg.url);
+        } else if (dbg.phase === 'open') {
+          this.diagnostics.wsStatus = 'ok';
+          this.diagnostics.wsCloseCode = null;
+          this.diagnostics.wsDetail = `Verbunden (${dbg.url})`;
+          this.pushLog('success', 'WebSocket', 'Echtzeit-WebSocket verbunden', dbg.url);
+        } else if (dbg.phase === 'close') {
+          this.diagnostics.wsStatus = 'offline';
+          this.diagnostics.wsCloseCode = dbg.code ?? null;
+          this.diagnostics.wsDetail = `Geschlossen (Code ${dbg.code ?? '?'}${dbg.reason ? `: ${dbg.reason}` : ''})`;
+          this.pushLog('warn', 'WebSocket', `Verbindung geschlossen (Code ${dbg.code ?? '?'})`, dbg.reason || dbg.url);
+        } else if (dbg.phase === 'error') {
+          this.diagnostics.wsStatus = 'error';
+          this.diagnostics.wsDetail = `Socket-Fehler (${dbg.url})`;
+          this.pushLog('error', 'WebSocket', 'WebSocket-Verbindungsfehler', dbg.url);
         }
       }
     );
@@ -261,12 +465,23 @@ class DinoMultiplayerBridge {
   }
 
   private async bootstrapServerState(): Promise<void> {
+    this.diagnostics.apiStatus = 'connecting';
+    this.diagnostics.apiDetail = 'Frage /api/v1/world/state ab...';
+    this.notifyListeners();
     try {
       const [world, guestToken] = await Promise.all([
         fetchWorldState(),
         this.firebaseUser ? Promise.resolve(null) : this.ensureGuestToken(),
       ]);
       this.serverAvailable = true;
+      this.diagnostics.apiStatus = 'ok';
+      this.diagnostics.apiDetail = `API erreichbar (${world.settlements?.length || 0} Stämme)`;
+      this.pushLog(
+        'success',
+        'API',
+        'Node.js-Spielserver erreichbar',
+        `${world.settlements?.length || 0} Stämme · ${world.onlinePlayers || 1} online`
+      );
       // WebSocket nur verbinden, wenn ein aktiver Spielserver antwortet (verhindert Konsolenfehler auf statischem GitHub Pages)
       this.socket?.connect();
       this.serverOffsetMs = world.serverTimeMs - Date.now();
@@ -309,8 +524,19 @@ class DinoMultiplayerBridge {
       }
 
       await this.pushCurrentSettlement(true);
-    } catch {
+    } catch (err) {
       this.serverAvailable = false;
+      const errMsg = this.formatErrorDetail(err);
+      this.diagnostics.apiStatus = 'offline';
+      this.diagnostics.apiDetail = 'Kein Node-Backend erreichbar (statisches Hosting / 404)';
+      this.diagnostics.wsStatus = 'offline';
+      this.diagnostics.wsDetail = 'Übersprungen (kein Backend-Server)';
+      this.pushLog(
+        'warn',
+        'API',
+        'Backend /api/v1/world/state nicht erreichbar — wechsle auf Cloud-Firestore/Lokal',
+        errMsg
+      );
       if (!this.isCloudLive()) {
         this.syncState = 'offline';
         this.emitSession();
@@ -368,11 +594,33 @@ class DinoMultiplayerBridge {
 
     if (!user) {
       this.cloudSynced = false;
+      this.diagnostics.authStatus = 'idle';
+      this.diagnostics.authDetail = 'Gast-Modus (nicht mit Google angemeldet)';
+      this.diagnostics.firestoreStatus = 'idle';
+      this.diagnostics.firestoreDetail = 'Inaktiv (Google-Login erforderlich)';
+      this.diagnostics.firestoreListeners = { settlements: 'idle', marches: 'idle', chat: 'idle' };
+      this.pushLog('info', 'Auth', 'Kein Google-Konto angemeldet — Gast-Modus aktiv', `guestUid: ${this.guestUid}`);
       this.emitSession();
       await this.ensureGuestToken();
       await this.pushCurrentSettlement(true);
       return;
     }
+
+    this.diagnostics.authStatus = 'ok';
+    this.diagnostics.authDetail = `Google (${user.email || user.uid.slice(0, 10)})`;
+    this.diagnostics.firestoreStatus = 'connecting';
+    this.diagnostics.firestoreDetail = 'Verbinde Cloud Firestore...';
+    this.diagnostics.firestoreListeners = {
+      settlements: 'connecting',
+      marches: 'connecting',
+      chat: 'connecting',
+    };
+    this.pushLog(
+      'success',
+      'Auth',
+      `Authentifiziert: ${user.email || user.displayName || user.uid}`,
+      `uid=${user.uid} · verified=${String(user.emailVerified)}`
+    );
 
     if (user.displayName && this.tribeName.startsWith('Glutstamm ')) {
       const first = user.displayName.split(' ')[0] || 'Stamm';
@@ -384,9 +632,16 @@ class DinoMultiplayerBridge {
       }
     }
 
-    // 1. Bestehende Gast-Siedlung atomar auf dem Spielserver auf die Google-UID migrieren
+    // 1. Firebase ID-Token prüfen & ggf. Gast-Siedlung auf Node-Server migrieren
     const fbToken = await getFirebaseIdToken(true);
-    if (fbToken && this.guestBearerToken) {
+    if (!fbToken) {
+      this.diagnostics.authStatus = 'degraded';
+      this.pushLog('warn', 'Auth', 'getIdToken(true) lieferte kein Token zurück');
+    } else {
+      this.pushLog('info', 'Auth', 'Firebase ID-Token erfolgreich erneuert');
+    }
+
+    if (fbToken && this.guestBearerToken && (this.serverAvailable || this.wsConnected)) {
       try {
         const migrated = await postMigrateGuest(fbToken, this.guestBearerToken);
         if (migrated.removedGuestUid) {
@@ -395,13 +650,48 @@ class DinoMultiplayerBridge {
         if (migrated.settlement) {
           this.settlementsMap.set(migrated.settlement.uid, migrated.settlement);
         }
-      } catch {
-        // ignore if server unreachable
+        this.pushLog('info', 'Sync', 'Gast-Siedlung auf Google-UID migriert');
+      } catch (err) {
+        this.pushLog('warn', 'API', 'Gast-Migration auf Server übersprungen', this.formatErrorDetail(err));
       }
+    }
+
+    // 1b. Direkt-Ping an Firestore-Server (erkennt sofort "client is offline" oder Konfigurationsfehler)
+    const probe = await probeFirestoreConnection();
+    if (probe.reachable) {
+      this.pushLog(
+        'success',
+        'Firestore',
+        `Server-Ping OK (${probe.latencyMs} ms)`,
+        `${probe.code} — ${probe.message}`
+      );
+    } else {
+      this.diagnostics.firestoreStatus = 'offline';
+      this.diagnostics.firestoreDetail = `${probe.code}: ${probe.message}`;
+      this.pushLog(
+        'error',
+        'Firestore',
+        `Server-Ping fehlgeschlagen (${probe.latencyMs} ms)`,
+        `${probe.code}: ${probe.message}`
+      );
     }
 
     // 2. Echtzeit-Firestore-Listener für gemeinsame Weltkarte, Märsche & Welt-Chat aktivieren
     this.unsubFirestoreWorld = subscribeFirestoreWorld({
+      onListenerStatus: (channel, status, detail) => {
+        this.diagnostics.firestoreListeners[channel] = status === 'ok' ? 'ok' : 'error';
+        if (status === 'error') {
+          this.diagnostics.firestoreStatus = 'error';
+          this.diagnostics.firestoreDetail = `${channel}: ${detail}`;
+          this.pushLog('error', 'Firestore', `Listener "${channel}" fehlgeschlagen`, detail);
+        } else {
+          if (this.diagnostics.firestoreStatus !== 'error') {
+            this.diagnostics.firestoreStatus = 'ok';
+            this.diagnostics.firestoreDetail = `Live (${detail})`;
+          }
+          this.pushLog('info', 'Firestore', `Listener "${channel}" aktiv`, detail);
+        }
+      },
       onSettlements: (list) => {
         for (const s of list) {
           const prev = this.settlementsMap.get(s.uid);
@@ -443,10 +733,13 @@ class DinoMultiplayerBridge {
     try {
       this.syncState = 'saving';
       this.emitSession();
+      this.pushLog('info', 'Sync', 'Lade Cloud-Spielstand aus Firestore...', `users/${user.uid}/private/save`);
 
       const [cloudSave, serverSaveResp] = await Promise.all([
         loadCloudSave(user.uid),
-        fbToken ? fetchServerPlayerSave(fbToken).catch(() => null) : Promise.resolve(null),
+        fbToken && (this.serverAvailable || this.wsConnected)
+          ? fetchServerPlayerSave(fbToken).catch(() => null)
+          : Promise.resolve(null),
       ]);
 
       const localState = this.callbacks.getCurrentLocalState?.() || null;
@@ -464,6 +757,7 @@ class DinoMultiplayerBridge {
         this.cloudSynced = true;
         this.lastCloudSaveAt = cloudSave.updatedAt;
         this.callbacks.onCloudStateLoaded?.(cloudSave.state, this.tribeName);
+        this.pushLog('success', 'Sync', 'Neuerer Cloud-Spielstand aus Firestore geladen');
         if (fbToken) {
           await this.persistToServer(cloudSave.state, fbToken);
         }
@@ -474,22 +768,41 @@ class DinoMultiplayerBridge {
         await saveCloudState(user.uid, this.tribeName, serverSaveResp.save.state, 1);
         this.cloudSynced = true;
         this.lastCloudSaveAt = Date.now();
+        this.pushLog('success', 'Sync', 'Server-Spielstand geladen & in Firestore gespiegelt');
       } else if (localState) {
         await saveCloudState(user.uid, this.tribeName, localState, 1);
         this.cloudSynced = true;
         this.lastCloudSaveAt = Date.now();
+        this.pushLog('success', 'Sync', 'Lokaler Spielstand erfolgreich in Cloud Firestore gespeichert');
         if (fbToken) {
           await this.persistToServer(localState, fbToken);
         }
+      } else {
+        // Firestore-Lesezugriff erfolgreich, lokaler Runtime-Zustand noch im Aufbau
+        this.cloudSynced = probe.reachable;
+        this.pushLog(
+          'info',
+          'Sync',
+          cloudSave ? 'Cloud-Spielstand geprüft (aktuell)' : 'Kein bestehender Cloud-Spielstand — warte auf erste Speicherung'
+        );
       }
 
+      if (this.getDiagnostics().firestoreStatus !== 'error') {
+        this.diagnostics.firestoreStatus = 'ok';
+        this.diagnostics.firestoreDetail = 'Cloud Firestore synchronisiert';
+      }
       this.syncState = 'synced';
       await this.pushCurrentSettlement(true);
     } catch (err) {
+      const detail = this.formatErrorDetail(err);
       console.error('[Cloud Save Sync]', err);
+      this.diagnostics.firestoreStatus = detail.toLowerCase().includes('offline') ? 'offline' : 'error';
+      this.diagnostics.firestoreDetail = detail;
+      this.pushLog('error', 'Sync', 'Cloud-Save-Sync fehlgeschlagen', detail);
       this.syncState = this.wsConnected ? 'synced' : 'offline';
     }
 
+    this.refreshRootCauseHint();
     this.emitSession();
   }
 
@@ -515,20 +828,81 @@ class DinoMultiplayerBridge {
   }
 
   async signInWithGoogle(): Promise<{ ok: boolean; error?: string }> {
+    this.pushLog('info', 'Auth', 'Starte Google-Popup-Anmeldung...', `Host: ${this.diagnostics.hostname}`);
     try {
       await signInWithGooglePopup();
       return { ok: true };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      this.diagnostics.authStatus = 'error';
+      this.diagnostics.authDetail = msg.slice(0, 120);
+      this.pushLog('error', 'Auth', 'Google-Anmeldung fehlgeschlagen', msg);
       return { ok: false, error: msg };
     }
   }
 
   async signOut(): Promise<void> {
+    this.pushLog('info', 'Auth', 'Benutzer meldet sich ab...');
     await signOutFirebase();
     this.firebaseUser = null;
     this.cloudSynced = false;
     this.emitSession();
+  }
+
+  async runConnectionDiagnostics(): Promise<ConnectionDiagnostics> {
+    this.diagnostics.browserOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+    this.pushLog(
+      'info',
+      'Netzwerk',
+      `Diagnose gestartet (Browser: ${this.diagnostics.browserOnline ? 'online' : 'offline'})`,
+      `Host: ${this.diagnostics.hostname} · Projekt: ${this.diagnostics.firebaseProjectId}`
+    );
+
+    if (this.firebaseUser) {
+      const token = await getFirebaseIdToken(true);
+      if (token) {
+        this.diagnostics.authStatus = 'ok';
+        this.diagnostics.authDetail = `Google (${this.firebaseUser.email || this.firebaseUser.uid.slice(0, 10)})`;
+        this.pushLog('success', 'Auth', 'ID-Token-Prüfung erfolgreich', `uid=${this.firebaseUser.uid}`);
+      } else {
+        this.diagnostics.authStatus = 'error';
+        this.diagnostics.authDetail = 'ID-Token konnte nicht abgerufen werden';
+        this.pushLog('error', 'Auth', 'ID-Token-Prüfung fehlgeschlagen');
+      }
+    } else {
+      this.pushLog('warn', 'Auth', 'Kein authentifizierter Firebase-Benutzer aktiv (Gast-Modus)');
+    }
+
+    const probe = await probeFirestoreConnection();
+    if (probe.reachable) {
+      if (this.firebaseUser) {
+        this.diagnostics.firestoreStatus = 'ok';
+        this.diagnostics.firestoreDetail = `Erreichbar (${probe.latencyMs} ms)`;
+      }
+      this.pushLog(
+        'success',
+        'Firestore',
+        `Diagnose-Ping OK (${probe.latencyMs} ms)`,
+        `${probe.code} — ${probe.message}`
+      );
+    } else {
+      this.diagnostics.firestoreStatus = probe.message.includes('offline') ? 'offline' : 'error';
+      this.diagnostics.firestoreDetail = `${probe.code}: ${probe.message}`;
+      this.pushLog(
+        'error',
+        'Firestore',
+        `Diagnose-Ping fehlgeschlagen (${probe.latencyMs} ms)`,
+        `${probe.code}: ${probe.message}`
+      );
+    }
+
+    if (this.firebaseUser) {
+      await this.pushCurrentSettlement(true);
+    }
+    await this.bootstrapServerState();
+    this.refreshRootCauseHint();
+    this.emitSession();
+    return this.getDiagnostics();
   }
 
   setTribeName(name: string): string {
@@ -625,9 +999,20 @@ class DinoMultiplayerBridge {
         });
         this.cloudSynced = true;
         this.syncState = 'synced';
+        this.diagnostics.firestoreStatus = 'ok';
+        this.diagnostics.firestoreDetail = `Siedlung synchronisiert [${finalTileX},${finalTileY}]`;
+        this.pushLog(
+          'success',
+          'Firestore',
+          `Siedlung in world_settlements gespeichert [${finalTileX},${finalTileY}]`,
+          `Stamm: ${session.tribeName} · Feuer St.${finalBonfire}`
+        );
         this.emitSession();
-      } catch {
-        // ignore transient cloud errors
+      } catch (err) {
+        const detail = this.formatErrorDetail(err);
+        this.diagnostics.firestoreStatus = detail.toLowerCase().includes('offline') ? 'offline' : 'error';
+        this.diagnostics.firestoreDetail = detail;
+        this.pushLog('error', 'Firestore', 'Siedlungs-Sync fehlgeschlagen', detail);
       }
     }
 
@@ -844,10 +1229,12 @@ class DinoMultiplayerBridge {
         }
         sent = true;
       } catch (err) {
+        const detail = this.formatErrorDetail(err);
+        this.pushLog('error', 'Firestore', 'Welt-Chat-Nachricht fehlgeschlagen', detail);
         if (!sent) {
           return {
             ok: false,
-            error: err instanceof Error ? err.message : 'Cloud-Chat fehlgeschlagen.',
+            error: detail || 'Cloud-Chat fehlgeschlagen.',
           };
         }
       }
@@ -872,12 +1259,19 @@ class DinoMultiplayerBridge {
           await saveCloudState(this.firebaseUser.uid, this.tribeName, stateObj, 1);
           this.cloudSynced = true;
           this.lastCloudSaveAt = Date.now();
+          this.diagnostics.firestoreStatus = 'ok';
+          this.pushLog('success', 'Sync', 'Cloud-Spielstand gespeichert', `users/${this.firebaseUser.uid}/private/save`);
         }
         this.syncState = this.wsConnected || this.isCloudLive() ? 'synced' : 'offline';
       } catch (err) {
+        const detail = this.formatErrorDetail(err);
         console.error('[Persistenz-Sync Fehler]', err);
+        this.diagnostics.firestoreStatus = detail.toLowerCase().includes('offline') ? 'offline' : 'error';
+        this.diagnostics.firestoreDetail = detail;
+        this.pushLog('error', 'Sync', 'Cloud-Speicherung fehlgeschlagen', detail);
         this.syncState = this.wsConnected || this.isCloudLive() ? 'synced' : 'offline';
       }
+      this.refreshRootCauseHint();
       this.emitSession();
     };
 
