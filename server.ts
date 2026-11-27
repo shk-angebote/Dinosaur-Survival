@@ -13,11 +13,15 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type {
   BuildValidationRequest,
   DinoHuntCombatRequest,
+  NodeOccupyRequest,
   RealtimeEvent,
   ResourceKey,
   TeleportRequest,
   WorldChatMessageDTO,
+  WorldDynamicSpawnDTO,
   WorldMarchDTO,
+  WorldNodeContestResultDTO,
+  WorldNodeOccupantDTO,
   WorldSettlementDTO,
   WorldTradeDTO,
 } from './src/shared/apiTypes.ts';
@@ -117,6 +121,8 @@ async function startServer() {
       marches: Array.from(worldStore.activeMarches.values()),
       chat: worldStore.chatHistory.slice(-60),
       trades: worldStore.getRecentTrades(),
+      nodeOccupants: Array.from(worldStore.nodeOccupants.values()),
+      dynamicSpawns: Array.from(worldStore.dynamicSpawns.values()),
     };
   }
 
@@ -572,6 +578,214 @@ async function startServer() {
     worldStore.upsertTrade(updated);
     broadcast({ type: 'world:trade', payload: updated });
     res.json({ ok: true, trade: updated, serverTimeMs: nowMs });
+  });
+
+  // 13. Sammelstelle besetzen oder besetzte Sammelstelle per PvP angreifen & erobern
+  app.post('/api/v1/world/node/occupy', async (req, res) => {
+    const identity = await verifyBearerHeader(req.headers.authorization);
+    if (!identity) {
+      res.status(401).json({ ok: false, occupied: false, occupant: null, error: 'Sitzungstoken erforderlich.', serverTimeMs: Date.now() });
+      return;
+    }
+    const body = (req.body || {}) as Partial<NodeOccupyRequest>;
+    if (!isValidId(body.nodeId) || !isValidId(body.marchId)) {
+      res.status(400).json({ ok: false, occupied: false, occupant: null, error: 'Ungültige Sammelstellen- oder Marsch-ID.', serverTimeMs: Date.now() });
+      return;
+    }
+
+    const nowMs = Date.now();
+    worldStore.pruneExpiredMarches(nowMs);
+
+    const nodeId = body.nodeId;
+    const nodeName = sanitizeText(body.nodeName || nodeId, 64) || nodeId;
+    const tribeName = sanitizeText(body.tribeName || 'Urzeit-Stamm', 28) || 'Urzeit-Stamm';
+    const resource: ResourceKey =
+      body.resource === 'meat' || body.resource === 'stone' || body.resource === 'fur' ? body.resource : 'wood';
+    const squadPower = Math.max(10, Math.min(100_000_000, Math.floor(Number(body.squadPower || 50))));
+    const gatherSec = Math.max(8, Math.min(1800, Math.floor(Number(body.gatherSec || 45))));
+    const targetAmount = Math.max(1, Math.min(10000, Math.floor(Number(body.targetAmount || 50))));
+    const heroIds = Array.isArray(body.heroIds)
+      ? body.heroIds.filter((h): h is string => typeof h === 'string').slice(0, 3)
+      : [];
+    const heroNames = Array.isArray(body.heroNames)
+      ? body.heroNames.map((n) => sanitizeText(n, 28)).filter(Boolean).slice(0, 3)
+      : [];
+    const troops = {
+      slinger: Math.max(0, Math.floor(Number(body.troops?.slinger || 0))),
+      clubman: Math.max(0, Math.floor(Number(body.troops?.clubman || 0))),
+      dinorider: Math.max(0, Math.floor(Number(body.troops?.dinorider || 0))),
+    };
+
+    const existing = worldStore.nodeOccupants.get(nodeId);
+    const attackerOccupant: WorldNodeOccupantDTO = {
+      nodeId,
+      uid: identity.uid,
+      tribeName,
+      marchId: body.marchId,
+      squadPower,
+      heroIds,
+      heroNames,
+      troops,
+      startedAt: nowMs,
+      endsAt: nowMs + gatherSec * 1000,
+      targetAmount,
+      resource,
+    };
+
+    // Frei oder eigener Stamm → direkt besetzen
+    if (!existing || existing.uid === identity.uid || existing.endsAt <= nowMs) {
+      worldStore.nodeOccupants.set(nodeId, attackerOccupant);
+      broadcast({ type: 'world:node_occupant', payload: { nodeId, occupant: attackerOccupant } });
+      res.json({ ok: true, occupied: true, occupant: attackerOccupant, serverTimeMs: nowMs });
+      return;
+    }
+
+    // Besetzt durch anderen Spieler → Serverseitiger PvP-Kampf um die Sammelstelle!
+    const defenderPower = Math.max(10, existing.squadPower);
+    const attackerRoll = 0.88 + Math.random() * 0.24; // ±12% Glücksfaktor
+    const defenderRoll = 0.88 + Math.random() * 0.24;
+    const effAtk = squadPower * attackerRoll;
+    const effDef = defenderPower * defenderRoll;
+    const attackerWon = effAtk >= effDef;
+
+    const powerRatio = attackerWon
+      ? squadPower / Math.max(1, defenderPower)
+      : defenderPower / Math.max(1, squadPower);
+    const winnerLossRate = Math.max(0.05, Math.min(0.18, 0.17 - (powerRatio - 1) * 0.08));
+    const loserLossRate = Math.max(0.16, Math.min(0.36, 0.22 + (powerRatio - 1) * 0.1));
+
+    const attackerLossRate = attackerWon ? winnerLossRate : loserLossRate;
+    const defenderLossRate = attackerWon ? loserLossRate : winnerLossRate;
+
+    const defDurationMs = Math.max(1000, existing.endsAt - existing.startedAt);
+    const defProgress = Math.max(0, Math.min(0.95, (nowMs - existing.startedAt) / defDurationMs));
+    const defenderCollectedBeforeEviction = attackerWon
+      ? Math.max(0, Math.floor(existing.targetAmount * defProgress))
+      : 0;
+
+    const contest: WorldNodeContestResultDTO = {
+      contestId: `pvp_${nowMs}_${Math.floor(Math.random() * 9999)}`,
+      nodeId,
+      nodeName,
+      resource,
+      attackerUid: identity.uid,
+      attackerTribeName: tribeName,
+      attackerPower: squadPower,
+      defenderUid: existing.uid,
+      defenderTribeName: existing.tribeName,
+      defenderPower,
+      attackerWon,
+      attackerLossRate: Number(attackerLossRate.toFixed(3)),
+      defenderLossRate: Number(defenderLossRate.toFixed(3)),
+      defenderCollectedBeforeEviction,
+      timestamp: nowMs,
+    };
+
+    let finalOccupant: WorldNodeOccupantDTO;
+    if (attackerWon) {
+      const remainingAfterDef = Math.max(5, targetAmount - defenderCollectedBeforeEviction);
+      const survivedTroops = {
+        slinger: Math.max(0, troops.slinger - Math.floor(troops.slinger * attackerLossRate)),
+        clubman: Math.max(0, troops.clubman - Math.floor(troops.clubman * attackerLossRate)),
+        dinorider: Math.max(0, troops.dinorider - Math.floor(troops.dinorider * attackerLossRate)),
+      };
+      finalOccupant = {
+        ...attackerOccupant,
+        squadPower: Math.max(10, Math.round(squadPower * (1 - attackerLossRate * 0.45))),
+        troops: survivedTroops,
+        targetAmount: remainingAfterDef,
+      };
+      worldStore.nodeOccupants.set(nodeId, finalOccupant);
+    } else {
+      const defSurvivedTroops = {
+        slinger: Math.max(0, existing.troops.slinger - Math.floor(existing.troops.slinger * defenderLossRate)),
+        clubman: Math.max(0, existing.troops.clubman - Math.floor(existing.troops.clubman * defenderLossRate)),
+        dinorider: Math.max(0, existing.troops.dinorider - Math.floor(existing.troops.dinorider * defenderLossRate)),
+      };
+      finalOccupant = {
+        ...existing,
+        squadPower: Math.max(10, Math.round(existing.squadPower * (1 - defenderLossRate * 0.45))),
+        troops: defSurvivedTroops,
+      };
+      worldStore.nodeOccupants.set(nodeId, finalOccupant);
+    }
+
+    broadcast({ type: 'world:node_occupant', payload: { nodeId, occupant: finalOccupant } });
+    broadcast({ type: 'world:node_contest', payload: contest });
+    res.json({
+      ok: true,
+      occupied: attackerWon,
+      occupant: finalOccupant,
+      contest,
+      serverTimeMs: nowMs,
+    });
+  });
+
+  // 14. Sammelstelle nach Abschluss oder Rückzug wieder freigeben
+  app.post('/api/v1/world/node/release', async (req, res) => {
+    const identity = await verifyBearerHeader(req.headers.authorization);
+    if (!identity) {
+      res.status(401).json({ ok: false, error: 'Sitzungstoken erforderlich.' });
+      return;
+    }
+    const body = (req.body || {}) as { nodeId?: string; marchId?: string };
+    if (!isValidId(body.nodeId)) {
+      res.status(400).json({ ok: false, error: 'Ungültige Sammelstellen-ID.' });
+      return;
+    }
+    const existing = worldStore.nodeOccupants.get(body.nodeId);
+    if (existing && existing.uid === identity.uid && (!body.marchId || existing.marchId === body.marchId)) {
+      worldStore.nodeOccupants.delete(body.nodeId);
+      broadcast({ type: 'world:node_occupant', payload: { nodeId: body.nodeId, occupant: null } });
+    }
+    res.json({ ok: true, serverTimeMs: Date.now() });
+  });
+
+  // 15. Dynamischer Neu-Spawn für abgebaute Sammelstellen & besiegte Dinos auf der gesamten 1200×1200-Karte
+  app.post('/api/v1/world/spawn/relocate', async (req, res) => {
+    const identity = await verifyBearerHeader(req.headers.authorization);
+    if (!identity) {
+      res.status(401).json({ ok: false, error: 'Sitzungstoken erforderlich.' });
+      return;
+    }
+    const body = (req.body || {}) as Partial<WorldDynamicSpawnDTO>;
+    const kind = body.kind === 'dino' ? 'dino' : 'node';
+    if (!isValidId(body.id)) {
+      res.status(400).json({ ok: false, error: 'Ungültige Spawn-ID.' });
+      return;
+    }
+    const nowMs = Date.now();
+    const key = `${kind}:${body.id}`;
+    const prev = worldStore.dynamicSpawns.get(key);
+    const xPct = Math.max(5, Math.min(95, Number(body.xPct || 50)));
+    const yPct = Math.max(5, Math.min(95, Number(body.yPct || 50)));
+    const level = Math.max(1, Math.min(25, Math.floor(Number(body.level || 1))));
+    const dto: WorldDynamicSpawnDTO = {
+      key,
+      kind,
+      id: body.id,
+      xPct: Number(xPct.toFixed(2)),
+      yPct: Number(yPct.toFixed(2)),
+      resource:
+        body.resource === 'meat' || body.resource === 'wood' || body.resource === 'stone' || body.resource === 'fur'
+          ? body.resource
+          : undefined,
+      name: body.name ? sanitizeText(body.name, 48) : undefined,
+      level,
+      capacity: typeof body.capacity === 'number' ? Math.max(20, Math.min(2000, Math.floor(body.capacity))) : undefined,
+      remaining: typeof body.remaining === 'number' ? Math.max(0, Math.min(2000, Math.floor(body.remaining))) : undefined,
+      speciesId: body.speciesId ? sanitizeText(body.speciesId, 32) : undefined,
+      spawnVersion: Math.max((prev?.spawnVersion || 0) + 1, Math.floor(Number(body.spawnVersion || 1))),
+      updatedAt: nowMs,
+    };
+
+    if (kind === 'node') {
+      worldStore.nodeOccupants.delete(body.id);
+      broadcast({ type: 'world:node_occupant', payload: { nodeId: body.id, occupant: null } });
+    }
+    worldStore.upsertDynamicSpawn(dto);
+    broadcast({ type: 'world:spawn_update', payload: dto });
+    res.json({ ok: true, spawn: dto, serverTimeMs: nowMs });
   });
 
   // ==================== FRONTEND AUSLIEFERUNG (VITE DEV ODER PROD DIST) ====================

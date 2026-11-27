@@ -1164,6 +1164,113 @@
         background: linear-gradient(90deg, var(--accent-ember), var(--accent-amber));
       }
 
+      /* Kompaktere Darstellung für Sammelstellen & Dinos auf der dichteren 1200x1200-Weltkarte */
+      .wm-node.is-resource {
+        min-width: 34px;
+        min-height: 34px;
+        gap: 2px;
+      }
+
+      .wm-node.is-resource .wm-pin-ring {
+        width: 24px;
+        height: 24px;
+        border-width: 1.5px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.7), 0 0 8px rgba(249, 115, 22, 0.16);
+      }
+
+      .wm-node.is-resource .wm-pin-lvl {
+        top: -4px;
+        right: -4px;
+        min-width: 14px;
+        height: 14px;
+        padding: 0 3px;
+        border-radius: 4px;
+        font-size: 8px;
+      }
+
+      .wm-node.is-resource .wm-nameplate {
+        padding: 1px 5px;
+        border-radius: 4px;
+        font-size: 8.5px;
+      }
+
+      .wm-node.is-resource .wm-mini-prog {
+        width: 30px;
+        height: 3px;
+      }
+
+      .wm-node.occupied-enemy .wm-pin-ring {
+        border-color: #ef4444;
+        background: rgba(45, 12, 14, 0.92);
+        box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.34), 0 3px 12px rgba(0, 0, 0, 0.82);
+        animation: wmPvpPulse 1.8s ease-in-out infinite;
+      }
+
+      .wm-node.occupied-enemy .wm-nameplate {
+        border-color: rgba(248, 113, 113, 0.65);
+        background: rgba(42, 12, 14, 0.92);
+        color: #fecaca;
+      }
+
+      .wm-pvp-badge {
+        position: absolute;
+        bottom: -4px;
+        left: -4px;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: #dc2626;
+        border: 1px solid #fecaca;
+        color: #fff;
+        font-size: 8px;
+        font-weight: 800;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 1;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.75);
+      }
+
+      @keyframes wmPvpPulse {
+        0%, 100% {
+          box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.32), 0 3px 12px rgba(0, 0, 0, 0.82);
+        }
+        50% {
+          box-shadow: 0 0 0 6px rgba(239, 68, 68, 0.14), 0 3px 14px rgba(0, 0, 0, 0.88);
+        }
+      }
+
+      .worldmap-markers.wm-zoom-far .wm-node.is-resource:not(.active-gather):not(.occupied-enemy) .wm-nameplate,
+      .worldmap-markers.wm-zoom-far .wm-node.is-dino:not(.active-hunt) .wm-nameplate {
+        display: none;
+      }
+
+      .gather-pvp-banner {
+        padding: 10px 12px;
+        border-radius: 12px;
+        background: rgba(69, 15, 18, 0.72);
+        border: 1px solid rgba(248, 113, 113, 0.55);
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .gather-pvp-banner-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        font-size: 12px;
+        font-weight: 700;
+        color: #fecaca;
+      }
+
+      .gather-pvp-banner-sub {
+        font-size: 11px;
+        color: #fca5a5;
+        line-height: 1.4;
+      }
+
       /* Floating World Map Top Controls */
       .wm-top-bar {
         position: absolute;
@@ -1416,27 +1523,48 @@
         font-size: 10px;
       }
 
+      .wm-node.is-dino {
+        min-width: 36px;
+        min-height: 36px;
+        gap: 2px;
+      }
+
       .wm-node.is-dino .wm-pin-ring {
-        width: 42px;
-        height: 42px;
-        border: 2px solid var(--node-accent, #ef4444);
+        width: 26px;
+        height: 26px;
+        border: 1.7px solid var(--node-accent, #ef4444);
         background: rgba(28, 12, 12, 0.92);
-        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.78), 0 0 14px rgba(239, 68, 68, 0.28);
+        box-shadow: 0 3px 10px rgba(0, 0, 0, 0.76), 0 0 10px rgba(239, 68, 68, 0.24);
       }
 
       .wm-node.is-dino.active-hunt .wm-pin-ring {
-        box-shadow: 0 0 0 5px rgba(239, 68, 68, 0.34), 0 4px 16px rgba(0, 0, 0, 0.8);
+        box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.34), 0 3px 12px rgba(0, 0, 0, 0.8);
       }
 
       .wm-node.is-dino .wm-pin-lvl {
+        top: -4px;
+        right: -4px;
+        min-width: 14px;
+        height: 14px;
+        padding: 0 3px;
+        border-radius: 4px;
+        font-size: 8px;
         border-color: var(--node-accent, #ef4444);
         color: #fecaca;
         background: #231111;
       }
 
       .wm-node.is-dino .wm-nameplate {
+        padding: 1px 5px;
+        border-radius: 4px;
+        font-size: 8.5px;
         border-color: rgba(248, 113, 113, 0.42);
         color: #fee2e2;
+      }
+
+      .wm-node.is-dino .wm-mini-prog {
+        width: 30px;
+        height: 3px;
       }
 
       .wm-march-line.hunt-out {

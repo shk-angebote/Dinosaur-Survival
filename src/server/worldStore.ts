@@ -8,7 +8,9 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import type {
   WorldChatMessageDTO,
+  WorldDynamicSpawnDTO,
   WorldMarchDTO,
+  WorldNodeOccupantDTO,
   WorldSettlementDTO,
   WorldTradeDTO,
 } from '../shared/apiTypes.ts';
@@ -43,11 +45,14 @@ interface PersistedWorldSnapshot {
   chatHistory: WorldChatMessageDTO[];
   playerSaves: Record<string, PersistedPlayerSave>;
   trades?: WorldTradeDTO[];
+  dynamicSpawns?: WorldDynamicSpawnDTO[];
 }
 
 export class PersistentWorldStore {
   readonly settlements = new Map<string, WorldSettlementDTO>();
   readonly activeMarches = new Map<string, WorldMarchDTO>();
+  readonly nodeOccupants = new Map<string, WorldNodeOccupantDTO>();
+  readonly dynamicSpawns = new Map<string, WorldDynamicSpawnDTO>();
   readonly trades = new Map<string, WorldTradeDTO>();
   readonly chatHistory: WorldChatMessageDTO[] = [];
   readonly playerSaves = new Map<string, PersistedPlayerSave>();
@@ -105,6 +110,13 @@ export class PersistentWorldStore {
           }
         }
       }
+      if (Array.isArray(parsed.dynamicSpawns)) {
+        for (const sp of parsed.dynamicSpawns.slice(-200)) {
+          if (sp && typeof sp.key === 'string' && typeof sp.id === 'string' && typeof sp.xPct === 'number') {
+            this.dynamicSpawns.set(sp.key, sp);
+          }
+        }
+      }
     } catch (err) {
       console.error('[WorldStore] Laden fehlgeschlagen, starte mit leerem Weltstand:', err);
     }
@@ -144,6 +156,7 @@ export class PersistentWorldStore {
         chatHistory: this.chatHistory.slice(-100),
         playerSaves: savesObj,
         trades: recentTrades,
+        dynamicSpawns: Array.from(this.dynamicSpawns.values()),
       };
       fs.writeFileSync(TEMP_FILE, JSON.stringify(payload), 'utf8');
       fs.renameSync(TEMP_FILE, STATE_FILE);
@@ -171,6 +184,16 @@ export class PersistentWorldStore {
         this.activeMarches.delete(id);
       }
     }
+    for (const [nodeId, occ] of this.nodeOccupants.entries()) {
+      if (occ.endsAt + 10000 < nowMs) {
+        this.nodeOccupants.delete(nodeId);
+      }
+    }
+  }
+
+  upsertDynamicSpawn(dto: WorldDynamicSpawnDTO): void {
+    this.dynamicSpawns.set(dto.key, dto);
+    this.schedulePersist();
   }
 
   upsertTrade(dto: WorldTradeDTO): void {

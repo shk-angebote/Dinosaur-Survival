@@ -1678,10 +1678,67 @@ export function initGameRuntime(hooks = {}) {
           };
         }
 
+        const WORLD_NODE_TEMPLATES = {
+          wood: [
+            { name: 'Holzfäller-Lichtung', desc: 'Trockene Urzeit-Stämme und angeschwemmtes Brennholz.' },
+            { name: 'Vulkan-Holzschlag', desc: 'Dichtes Holzdepot mit kräftigem Bau- und Brennholz.' },
+            { name: 'Aschewald-Forst', desc: 'Hohe Urzeit-Kiefern mit reichem Harz und Bauholz.' },
+            { name: 'Nord-Kraterlager', desc: 'Hochgelegenes Aschewald-Lager mit großen Holzreserven.' }
+          ],
+          stone: [
+            { name: 'Basalt-Steinbruch', desc: 'Lava-erleuchteter Geröllbruch mit hochwertigen Basaltblöcken.' },
+            { name: 'Asche-Steinbruch', desc: 'Ergiebige Vulkanstein-Ader an den Hängen der Caldera.' },
+            { name: 'Granit-Geröllfeld', desc: 'Massives Felsfeld für starke Siedlungsmauern.' },
+            { name: 'Obsidian-Kristallader', desc: 'Seltene Kristall- und Obsidianformation für den späten Ausbau.' }
+          ],
+          meat: [
+            { name: 'Urzeit-Jagdgrund', desc: 'Rauchendes Jägerlager neben weidenden Pflanzenfressern.' },
+            { name: 'Mammut-Jagdlager', desc: 'Hochland-Lager nahe gewaltiger Herden mit reichen Fleischvorräten.' },
+            { name: 'Weide-Senke', desc: 'Fruchtbare Ebene mit zahlreichen Urzeit-Herden.' },
+            { name: 'Saurier-Tränke', desc: 'Lebendige Wasserstelle mit reichlich frischer Jagdbeute.' }
+          ],
+          fur: [
+            { name: 'Bernstein-Lager', desc: 'Glühende Bernsteinfelsen — reich an dichten Fellen und Häuten.' },
+            { name: 'Süd-Knochenfeld', desc: 'Uralte Lagerstätte mit robusten Winterfellen.' },
+            { name: 'Pelzjäger-Versteck', desc: 'Geschütztes Tal mit warmen Fellen gegen die Eiszeit.' },
+            { name: 'Frostgrat-Lager', desc: 'Windumtoste Felsen voller dichter Mammut- und Bärenfelle.' }
+          ]
+        };
+
+        function buildNodeMetadataForSpot(resource, level) {
+          const pool = WORLD_NODE_TEMPLATES[resource] || WORLD_NODE_TEMPLATES.wood;
+          const tpl = pool[Math.min(pool.length - 1, Math.floor(((level - 1) / 8) * pool.length))] || pool[0];
+          const baseCap = resource === 'fur' ? 55 : resource === 'stone' ? 75 : 80;
+          const capacity = Math.round(baseCap + level * 36 + Math.pow(level, 1.35) * 14);
+          const workersNeeded = level >= 6 ? 3 : level >= 3 ? 2 : 1;
+          const baseGatherSec = Math.round(40 + level * 22);
+          return {
+            name: tpl.name,
+            desc: tpl.desc,
+            resource,
+            level,
+            capacity,
+            workersNeeded,
+            baseGatherSec,
+            respawnSec: 120 + level * 35
+          };
+        }
+
         function createInitialWorldNodes() {
           const map = {};
           for (const node of WORLD_NODES) {
-            map[node.id] = { remaining: node.capacity, respawnAt: 0 };
+            map[node.id] = {
+              xPct: node.xPct,
+              yPct: node.yPct,
+              resource: node.resource,
+              name: node.name,
+              level: node.level,
+              capacity: node.capacity,
+              remaining: node.capacity,
+              respawnAt: 0,
+              spawnVersion: 0,
+              updatedAt: 0
+            };
           }
           return map;
         }
@@ -1689,7 +1746,15 @@ export function initGameRuntime(hooks = {}) {
         function createInitialWorldDinos() {
           const map = {};
           for (const d of WORLD_DINOS) {
-            map[d.id] = { speciesId: d.speciesId, level: d.defaultLevel, respawnAt: 0 };
+            map[d.id] = {
+              xPct: d.xPct,
+              yPct: d.yPct,
+              speciesId: d.speciesId,
+              level: d.defaultLevel,
+              respawnAt: 0,
+              spawnVersion: 0,
+              updatedAt: 0
+            };
           }
           return map;
         }
@@ -1731,8 +1796,89 @@ export function initGameRuntime(hooks = {}) {
           return TILE_FREE;
         }
 
+        // Prozedural dichtere Verteilung auf der 1200×1200-Weltkarte (insgesamt 48 Sammelstellen & 40 wilde Dinos)
+        function populateDenseWorldSpawns() {
+          let seed = 20261127;
+          const nextRand = () => {
+            seed = (seed * 1664525 + 1013904223) >>> 0;
+            return seed / 4294967296;
+          };
+          const placed = [];
+          for (const n of WORLD_NODES) {
+            placed.push({ gx: (n.xPct / 100) * WORLD_GRID_COLS, gy: (n.yPct / 100) * WORLD_GRID_ROWS });
+          }
+          for (const d of WORLD_DINOS) {
+            placed.push({ gx: (d.xPct / 100) * WORLD_GRID_COLS, gy: (d.yPct / 100) * WORLD_GRID_ROWS });
+          }
+
+          const pickSeededFreeSpot = (minSpacing) => {
+            for (let attempt = 0; attempt < 220; attempt++) {
+              const gx = 62 + Math.floor(nextRand() * (WORLD_GRID_COLS - 124));
+              const gy = 62 + Math.floor(nextRand() * (WORLD_GRID_ROWS - 124));
+              if (getStaticWorldTileState(gx, gy) !== TILE_FREE) continue;
+              if (Math.hypot(gx - DEFAULT_HOME_TILE.x, gy - DEFAULT_HOME_TILE.y) < 34) continue;
+              let tooClose = false;
+              for (const p of placed) {
+                if (Math.hypot(gx - p.gx, gy - p.gy) < minSpacing) {
+                  tooClose = true;
+                  break;
+                }
+              }
+              if (tooClose) continue;
+              placed.push({ gx, gy });
+              return {
+                gx,
+                gy,
+                xPct: Number(((gx / WORLD_GRID_COLS) * 100).toFixed(2)),
+                yPct: Number(((gy / WORLD_GRID_ROWS) * 100).toFixed(2))
+              };
+            }
+            return null;
+          };
+
+          const resOrder = ['wood', 'meat', 'stone', 'fur'];
+          for (let i = 11; i <= 48; i++) {
+            const spot = pickSeededFreeSpot(44);
+            if (!spot) break;
+            const distFromCenter = Math.hypot(spot.gx - 600, spot.gy - 600);
+            const normCenter = Math.max(0, Math.min(1, 1 - (distFromCenter - 155) / 480));
+            const level = Math.max(1, Math.min(8, Math.round(1 + normCenter * 6 + (nextRand() - 0.5) * 2)));
+            const res = resOrder[(i - 11) % resOrder.length];
+            const meta = buildNodeMetadataForSpot(res, level);
+            WORLD_NODES.push({
+              id: `node_${i}`,
+              ...meta,
+              xPct: spot.xPct,
+              yPct: spot.yPct
+            });
+          }
+
+          for (let i = 11; i <= 40; i++) {
+            const spot = pickSeededFreeSpot(42);
+            if (!spot) break;
+            const distFromCenter = Math.hypot(spot.gx - 600, spot.gy - 600);
+            const normCenter = Math.max(0, Math.min(1, 1 - (distFromCenter - 155) / 480));
+            const spIndex = Math.max(
+              0,
+              Math.min(DINO_SPECIES.length - 1, Math.floor(normCenter * DINO_SPECIES.length * 0.92 + nextRand() * 1.4))
+            );
+            const sp = DINO_SPECIES[spIndex];
+            const [minL, maxL] = sp.levelRange;
+            const defaultLevel = minL + Math.floor(nextRand() * (maxL - minL + 1));
+            WORLD_DINOS.push({
+              id: `dino_${i}`,
+              speciesId: sp.id,
+              defaultLevel,
+              xPct: spot.xPct,
+              yPct: spot.yPct,
+              respawnSec: 60 + defaultLevel * 6
+            });
+          }
+        }
+        populateDenseWorldSpawns();
+
         // Markiert die 2x2-Standorte der Sammelstellen & Dinos im kompakten O(1)-Set
-        function initWorldStaticGrid() {
+        function initWorldStaticGrid(currentState = null) {
           STATIC_NODE_TILES.clear();
           const markOccupied2x2 = (cx, cy) => {
             for (let dy = -1; dy <= 0; dy++) {
@@ -1746,13 +1892,19 @@ export function initGameRuntime(hooks = {}) {
             }
           };
           for (const node of WORLD_NODES) {
-            const cx = Math.floor((node.xPct / 100) * WORLD_GRID_COLS);
-            const cy = Math.floor((node.yPct / 100) * WORLD_GRID_ROWS);
+            const nSt = currentState && currentState.worldNodes ? currentState.worldNodes[node.id] : null;
+            const xPct = nSt && typeof nSt.xPct === 'number' ? nSt.xPct : node.xPct;
+            const yPct = nSt && typeof nSt.yPct === 'number' ? nSt.yPct : node.yPct;
+            const cx = Math.floor((xPct / 100) * WORLD_GRID_COLS);
+            const cy = Math.floor((yPct / 100) * WORLD_GRID_ROWS);
             markOccupied2x2(cx, cy);
           }
           for (const d of WORLD_DINOS) {
-            const cx = Math.floor((d.xPct / 100) * WORLD_GRID_COLS);
-            const cy = Math.floor((d.yPct / 100) * WORLD_GRID_ROWS);
+            const dSt = currentState && currentState.worldDinos ? currentState.worldDinos[d.id] : null;
+            const xPct = dSt && typeof dSt.xPct === 'number' ? dSt.xPct : d.xPct;
+            const yPct = dSt && typeof dSt.yPct === 'number' ? dSt.yPct : d.yPct;
+            const cx = Math.floor((xPct / 100) * WORLD_GRID_COLS);
+            const cy = Math.floor((yPct / 100) * WORLD_GRID_ROWS);
             markOccupied2x2(cx, cy);
           }
         }
@@ -1817,6 +1969,8 @@ export function initGameRuntime(hooks = {}) {
           session: null,
           settlements: [],
           marches: [],
+          nodeOccupants: [],
+          dynamicSpawns: [],
           chat: [],
           onlinePlayers: 1,
           chatOpen: false,
@@ -1881,6 +2035,11 @@ export function initGameRuntime(hooks = {}) {
         let bestiaryFilter = 'all'; // 'all' | 'discovered' | 'hunted'
         let huntDraft = {
           dinoId: null,
+          heroIds: [],
+          troops: { slinger: 0, clubman: 0, dinorider: 0 }
+        };
+        let gatherDraft = {
+          nodeId: null,
           heroIds: [],
           troops: { slinger: 0, clubman: 0, dinorider: 0 }
         };
@@ -2028,21 +2187,36 @@ export function initGameRuntime(hooks = {}) {
             }
             if (parsed.worldNodes && typeof parsed.worldNodes === 'object') {
               for (const node of WORLD_NODES) {
-                if (parsed.worldNodes[node.id]) {
+                const saved = parsed.worldNodes[node.id];
+                if (saved) {
+                  const cap = Math.max(10, Number(saved.capacity || node.capacity));
                   merged.worldNodes[node.id] = {
-                    remaining: Math.max(0, Math.min(node.capacity, Number(parsed.worldNodes[node.id].remaining ?? node.capacity))),
-                    respawnAt: Number(parsed.worldNodes[node.id].respawnAt || 0)
+                    xPct: typeof saved.xPct === 'number' ? saved.xPct : node.xPct,
+                    yPct: typeof saved.yPct === 'number' ? saved.yPct : node.yPct,
+                    resource: saved.resource && RESOURCE_LABELS[saved.resource] ? saved.resource : node.resource,
+                    name: typeof saved.name === 'string' && saved.name ? saved.name : node.name,
+                    level: Math.max(1, Math.min(10, Number(saved.level || node.level))),
+                    capacity: cap,
+                    remaining: Math.max(0, Math.min(cap, Number(saved.remaining ?? cap))),
+                    respawnAt: Number(saved.respawnAt || 0),
+                    spawnVersion: Number(saved.spawnVersion || 0),
+                    updatedAt: Number(saved.updatedAt || 0)
                   };
                 }
               }
             }
             if (parsed.worldDinos && typeof parsed.worldDinos === 'object') {
               for (const d of WORLD_DINOS) {
-                if (parsed.worldDinos[d.id]) {
+                const saved = parsed.worldDinos[d.id];
+                if (saved) {
                   merged.worldDinos[d.id] = {
-                    speciesId: d.speciesId,
-                    level: Math.max(1, Math.min(MAX_LEVEL, Number(parsed.worldDinos[d.id].level || d.defaultLevel))),
-                    respawnAt: Number(parsed.worldDinos[d.id].respawnAt || 0)
+                    xPct: typeof saved.xPct === 'number' ? saved.xPct : d.xPct,
+                    yPct: typeof saved.yPct === 'number' ? saved.yPct : d.yPct,
+                    speciesId: saved.speciesId && getDinoSpecies(saved.speciesId) ? saved.speciesId : d.speciesId,
+                    level: Math.max(1, Math.min(MAX_LEVEL, Number(saved.level || d.defaultLevel))),
+                    respawnAt: Number(saved.respawnAt || 0),
+                    spawnVersion: Number(saved.spawnVersion || 0),
+                    updatedAt: Number(saved.updatedAt || 0)
                   };
                 }
               }
@@ -3584,15 +3758,70 @@ export function initGameRuntime(hooks = {}) {
           if (!state.worldNodes) state.worldNodes = createInitialWorldNodes();
           const def = getWorldNodeDef(nodeId);
           if (!state.worldNodes[nodeId] && def) {
-            state.worldNodes[nodeId] = { remaining: def.capacity, respawnAt: 0 };
+            state.worldNodes[nodeId] = {
+              xPct: def.xPct,
+              yPct: def.yPct,
+              resource: def.resource,
+              name: def.name,
+              level: def.level,
+              capacity: def.capacity,
+              remaining: def.capacity,
+              respawnAt: 0,
+              spawnVersion: 0,
+              updatedAt: 0
+            };
           }
-          return state.worldNodes[nodeId];
+          const st = state.worldNodes[nodeId];
+          if (st && def) {
+            if (typeof st.xPct !== 'number') st.xPct = def.xPct;
+            if (typeof st.yPct !== 'number') st.yPct = def.yPct;
+            if (!st.resource) st.resource = def.resource;
+            if (!st.name) st.name = def.name;
+            if (!st.level) st.level = def.level;
+            if (!st.capacity) st.capacity = def.capacity;
+          }
+          return st;
         }
 
-        function getWorldMarchTravelSec(nodeDef) {
+        function getWorldNodeInfo(nodeId) {
+          const def = getWorldNodeDef(nodeId);
+          if (!def) return null;
+          const nState = getWorldNodeState(nodeId);
+          const meta = buildNodeMetadataForSpot(nState.resource || def.resource, nState.level || def.level);
+          return {
+            ...def,
+            ...meta,
+            id: def.id,
+            name: nState.name || meta.name || def.name,
+            resource: nState.resource || def.resource,
+            level: nState.level || def.level,
+            capacity: nState.capacity || def.capacity,
+            xPct: typeof nState.xPct === 'number' ? nState.xPct : def.xPct,
+            yPct: typeof nState.yPct === 'number' ? nState.yPct : def.yPct
+          };
+        }
+
+        function getNodePos(nodeId) {
+          const info = getWorldNodeInfo(nodeId);
+          if (!info) return null;
+          const wx = (info.xPct / 100) * WORLD_GRID_COLS;
+          const wy = (info.yPct / 100) * WORLD_GRID_ROWS;
+          return {
+            xPct: info.xPct,
+            yPct: info.yPct,
+            wx,
+            wy,
+            coordX: Math.round(wx),
+            coordY: Math.round(wy)
+          };
+        }
+
+        function getWorldMarchTravelSec(targetPos) {
           const home = getHomePos();
-          const dx = (nodeDef.xPct - home.xPct) * 1.6;
-          const dy = nodeDef.yPct - home.yPct;
+          const tx = typeof targetPos?.xPct === 'number' ? targetPos.xPct : home.xPct;
+          const ty = typeof targetPos?.yPct === 'number' ? targetPos.yPct : home.yPct;
+          const dx = (tx - home.xPct) * 1.6;
+          const dy = ty - home.yPct;
           const dist = Math.hypot(dx, dy);
           const heroBonus = getHeroBonuses();
           let sec = Math.max(10, Math.round((7 + dist * 0.42) / (1 + heroBonus.march)));
@@ -3608,14 +3837,36 @@ export function initGameRuntime(hooks = {}) {
           return mult;
         }
 
-        function getWorldGatherDurationSec(nodeDef, amount) {
-          const ratio = Math.max(0.15, amount / nodeDef.capacity);
-          const speed = getWorldGatherSpeedMult(nodeDef.resource);
-          return Math.max(12, Math.round((nodeDef.baseGatherSec * ratio) / speed));
+        function getGatherSquadSpeedMult(resource, heroIds = [], troops = null) {
+          let mult = getWorldGatherSpeedMult(resource);
+          const hCnt = Array.isArray(heroIds) ? heroIds.length : 0;
+          const soldCnt = troops ? (troops.slinger || 0) + (troops.clubman || 0) + (troops.dinorider || 0) : 0;
+          mult += hCnt * 0.1;
+          mult += Math.min(0.65, soldCnt * 0.015);
+          return mult;
+        }
+
+        function getWorldGatherDurationSec(nodeInfo, amount, heroIds = [], troops = null) {
+          const cap = Math.max(1, nodeInfo.capacity || 60);
+          const ratio = Math.max(0.15, amount / cap);
+          const speed = getGatherSquadSpeedMult(nodeInfo.resource, heroIds, troops);
+          return Math.max(10, Math.round((nodeInfo.baseGatherSec * ratio) / speed));
         }
 
         function getActiveMarchForNode(nodeId) {
           return (state.worldMarches || []).find((m) => (m.kind || 'gather') === 'gather' && m.nodeId === nodeId) || null;
+        }
+
+        function getEnemyNodeOccupant(nodeId) {
+          const ownUid = mpWorld.session ? mpWorld.session.uid : null;
+          const now = Date.now();
+          for (const occ of mpWorld.nodeOccupants || []) {
+            if (!occ || occ.nodeId !== nodeId) continue;
+            if (ownUid && occ.uid === ownUid) continue;
+            if (occ.gatherEndsAt && occ.gatherEndsAt <= now) continue;
+            return occ;
+          }
+          return null;
         }
 
         function getDinoSpecies(speciesId) {
@@ -3630,9 +3881,221 @@ export function initGameRuntime(hooks = {}) {
           if (!state.worldDinos) state.worldDinos = createInitialWorldDinos();
           const def = getWorldDinoDef(dinoId);
           if (!state.worldDinos[dinoId] && def) {
-            state.worldDinos[dinoId] = { speciesId: def.speciesId, level: def.defaultLevel, respawnAt: 0 };
+            state.worldDinos[dinoId] = {
+              xPct: def.xPct,
+              yPct: def.yPct,
+              speciesId: def.speciesId,
+              level: def.defaultLevel,
+              respawnAt: 0,
+              spawnVersion: 0,
+              updatedAt: 0
+            };
           }
-          return state.worldDinos[dinoId];
+          const st = state.worldDinos[dinoId];
+          if (st && def) {
+            if (typeof st.xPct !== 'number') st.xPct = def.xPct;
+            if (typeof st.yPct !== 'number') st.yPct = def.yPct;
+            if (!st.speciesId) st.speciesId = def.speciesId;
+            if (!st.level) st.level = def.defaultLevel;
+          }
+          return st;
+        }
+
+        function getDinoPos(dinoId) {
+          const def = getWorldDinoDef(dinoId);
+          if (!def) return null;
+          const dState = getWorldDinoState(dinoId);
+          const xPct = typeof dState.xPct === 'number' ? dState.xPct : def.xPct;
+          const yPct = typeof dState.yPct === 'number' ? dState.yPct : def.yPct;
+          const wx = (xPct / 100) * WORLD_GRID_COLS;
+          const wy = (yPct / 100) * WORLD_GRID_ROWS;
+          return {
+            xPct,
+            yPct,
+            wx,
+            wy,
+            coordX: Math.round(wx),
+            coordY: Math.round(wy)
+          };
+        }
+
+        function pickFreeWorldSpawnSpot(excludeId = null) {
+          const home = getHomePos();
+          const occupiedPts = [{ gx: home.wx, gy: home.wy, minDist: 28 }];
+          for (const pl of mpWorld.settlements || []) {
+            occupiedPts.push({ gx: Number(pl.tileX) + 1, gy: Number(pl.tileY) + 1, minDist: 24 });
+          }
+          for (const n of WORLD_NODES) {
+            if (n.id === excludeId) continue;
+            const st = getWorldNodeState(n.id);
+            if (!st) continue;
+            occupiedPts.push({ gx: (st.xPct / 100) * WORLD_GRID_COLS, gy: (st.yPct / 100) * WORLD_GRID_ROWS, minDist: 22 });
+          }
+          for (const d of WORLD_DINOS) {
+            if (d.id === excludeId) continue;
+            const st = getWorldDinoState(d.id);
+            if (!st) continue;
+            occupiedPts.push({ gx: (st.xPct / 100) * WORLD_GRID_COLS, gy: (st.yPct / 100) * WORLD_GRID_ROWS, minDist: 22 });
+          }
+
+          for (let attempt = 0; attempt < 180; attempt++) {
+            const gx = 65 + Math.floor(Math.random() * (WORLD_GRID_COLS - 130));
+            const gy = 65 + Math.floor(Math.random() * (WORLD_GRID_ROWS - 130));
+            if (getStaticWorldTileState(gx, gy) !== TILE_FREE) continue;
+            let blocked = false;
+            for (const pt of occupiedPts) {
+              if (Math.hypot(gx - pt.gx, gy - pt.gy) < pt.minDist) {
+                blocked = true;
+                break;
+              }
+            }
+            if (blocked) continue;
+            return {
+              gx,
+              gy,
+              xPct: Number(((gx / WORLD_GRID_COLS) * 100).toFixed(2)),
+              yPct: Number(((gy / WORLD_GRID_ROWS) * 100).toFixed(2))
+            };
+          }
+          // Fallback auf freien Ring
+          const angle = Math.random() * Math.PI * 2;
+          const r = 240 + Math.random() * 260;
+          const gx = Math.max(100, Math.min(WORLD_GRID_COLS - 100, Math.round(600 + Math.cos(angle) * r)));
+          const gy = Math.max(100, Math.min(WORLD_GRID_ROWS - 100, Math.round(600 + Math.sin(angle) * r)));
+          return {
+            gx,
+            gy,
+            xPct: Number(((gx / WORLD_GRID_COLS) * 100).toFixed(2)),
+            yPct: Number(((gy / WORLD_GRID_ROWS) * 100).toFixed(2))
+          };
+        }
+
+        function relocateWorldNode(nodeId, broadcast = true) {
+          const def = getWorldNodeDef(nodeId);
+          const nState = getWorldNodeState(nodeId);
+          if (!def || !nState) return;
+          const spot = pickFreeWorldSpawnSpot(nodeId);
+          const distFromCenter = Math.hypot(spot.gx - 600, spot.gy - 600);
+          const normCenter = Math.max(0, Math.min(1, 1 - (distFromCenter - 155) / 480));
+          const resources = ['wood', 'meat', 'stone', 'fur'];
+          const nextRes = resources[Math.floor(Math.random() * resources.length)];
+          const nextLevel = Math.max(1, Math.min(8, Math.round(1 + normCenter * 6 + (Math.random() - 0.5) * 2)));
+          const meta = buildNodeMetadataForSpot(nextRes, nextLevel);
+          const now = Date.now();
+
+          nState.xPct = spot.xPct;
+          nState.yPct = spot.yPct;
+          nState.resource = meta.resource;
+          nState.name = meta.name;
+          nState.level = meta.level;
+          nState.capacity = meta.capacity;
+          nState.remaining = meta.capacity;
+          nState.respawnAt = 0;
+          nState.spawnVersion = (nState.spawnVersion || 0) + 1;
+          nState.updatedAt = now;
+
+          initWorldStaticGrid(state);
+          if (openSheet && openSheet.type === 'worldNode' && openSheet.id === nodeId) {
+            closeSheet();
+          }
+
+          if (broadcast && window.DinoMultiplayer && typeof window.DinoMultiplayer.relocateWorldSpawn === 'function') {
+            void window.DinoMultiplayer.relocateWorldSpawn({
+              id: nodeId,
+              kind: 'node',
+              xPct: nState.xPct,
+              yPct: nState.yPct,
+              resource: nState.resource,
+              level: nState.level,
+              capacity: nState.capacity,
+              remaining: nState.remaining
+            });
+          }
+        }
+
+        function relocateWorldDino(dinoId, broadcast = true) {
+          const def = getWorldDinoDef(dinoId);
+          const dState = getWorldDinoState(dinoId);
+          if (!def || !dState) return;
+          const spot = pickFreeWorldSpawnSpot(dinoId);
+          const distFromCenter = Math.hypot(spot.gx - 600, spot.gy - 600);
+          const normCenter = Math.max(0, Math.min(1, 1 - (distFromCenter - 155) / 480));
+          const spIndex = Math.max(
+            0,
+            Math.min(DINO_SPECIES.length - 1, Math.floor(normCenter * DINO_SPECIES.length * 0.92 + Math.random() * 1.4))
+          );
+          const sp = DINO_SPECIES[spIndex] || getDinoSpecies(dState.speciesId) || DINO_SPECIES[0];
+          const [minL, maxL] = sp.levelRange;
+          const nextLevel = minL + Math.floor(Math.random() * (maxL - minL + 1));
+          const now = Date.now();
+
+          dState.xPct = spot.xPct;
+          dState.yPct = spot.yPct;
+          dState.speciesId = sp.id;
+          dState.level = nextLevel;
+          dState.respawnAt = 0;
+          dState.spawnVersion = (dState.spawnVersion || 0) + 1;
+          dState.updatedAt = now;
+
+          initWorldStaticGrid(state);
+          if (openSheet && openSheet.type === 'worldDino' && openSheet.id === dinoId) {
+            closeSheet();
+          }
+
+          if (broadcast && window.DinoMultiplayer && typeof window.DinoMultiplayer.relocateWorldSpawn === 'function') {
+            void window.DinoMultiplayer.relocateWorldSpawn({
+              id: dinoId,
+              kind: 'dino',
+              xPct: dState.xPct,
+              yPct: dState.yPct,
+              speciesId: dState.speciesId,
+              level: dState.level
+            });
+          }
+        }
+
+        function applyRemoteDynamicSpawns(dynamicSpawns) {
+          if (!Array.isArray(dynamicSpawns) || dynamicSpawns.length === 0) return;
+          let changed = false;
+          for (const sp of dynamicSpawns) {
+            if (!sp || !sp.id) continue;
+            if (sp.kind === 'node') {
+              const nState = getWorldNodeState(sp.id);
+              if (!nState) continue;
+              if ((sp.updatedAt || 0) <= (nState.updatedAt || 0)) continue;
+              const nextRes = sp.resource && RESOURCE_LABELS[sp.resource] ? sp.resource : nState.resource;
+              const nextLvl = Math.max(1, Math.min(10, Number(sp.level || nState.level || 1)));
+              const meta = buildNodeMetadataForSpot(nextRes, nextLvl);
+              nState.xPct = Number(sp.xPct);
+              nState.yPct = Number(sp.yPct);
+              nState.resource = nextRes;
+              nState.name = meta.name;
+              nState.level = nextLvl;
+              nState.capacity = Number(sp.capacity || meta.capacity);
+              nState.remaining = Number(sp.remaining ?? nState.capacity);
+              nState.respawnAt = 0;
+              nState.updatedAt = Number(sp.updatedAt || Date.now());
+              changed = true;
+            } else if (sp.kind === 'dino') {
+              const dState = getWorldDinoState(sp.id);
+              if (!dState) continue;
+              if ((sp.updatedAt || 0) <= (dState.updatedAt || 0)) continue;
+              dState.xPct = Number(sp.xPct);
+              dState.yPct = Number(sp.yPct);
+              if (sp.speciesId && getDinoSpecies(sp.speciesId)) {
+                dState.speciesId = sp.speciesId;
+              }
+              if (sp.level) {
+                dState.level = Math.max(1, Math.min(MAX_LEVEL, Number(sp.level)));
+              }
+              dState.respawnAt = 0;
+              dState.updatedAt = Number(sp.updatedAt || Date.now());
+              changed = true;
+            }
+          }
+          if (changed) {
+            initWorldStaticGrid(state);
+          }
         }
 
         function getBestiaryEntry(speciesId) {
@@ -3671,7 +4134,7 @@ export function initGameRuntime(hooks = {}) {
         function getDeployedHeroIds() {
           const set = new Set();
           for (const m of state.worldMarches || []) {
-            if (m.kind === 'hunt' && Array.isArray(m.heroes)) {
+            if ((m.kind === 'hunt' || (m.kind || 'gather') === 'gather') && Array.isArray(m.heroes)) {
               for (const hId of m.heroes) set.add(hId);
             }
           }
@@ -3681,7 +4144,7 @@ export function initGameRuntime(hooks = {}) {
         function getDeployedTroops() {
           const out = { slinger: 0, clubman: 0, dinorider: 0 };
           for (const m of state.worldMarches || []) {
-            if (m.kind === 'hunt' && m.troops) {
+            if ((m.kind === 'hunt' || (m.kind || 'gather') === 'gather') && m.troops) {
               out.slinger += m.troops.slinger || 0;
               out.clubman += m.troops.clubman || 0;
               out.dinorider += m.troops.dinorider || 0;
@@ -3885,7 +4348,8 @@ export function initGameRuntime(hooks = {}) {
           }
           state.stamina = Math.max(0, Math.floor(state.stamina || 0) - DINO_HUNT_STAMINA_COST);
 
-          const travelSec = getWorldMarchTravelSec(def);
+          const dinoPos = getDinoPos(def.id) || def;
+          const travelSec = getWorldMarchTravelSec(dinoPos);
           const powerInfo = computeHuntSquadPower(validHeroes, sendTroops, species);
 
           const huntMarchObj = {
@@ -3894,6 +4358,8 @@ export function initGameRuntime(hooks = {}) {
             dinoId: def.id,
             speciesId: species.id,
             dinoLevel: dState.level,
+            targetX: dinoPos.xPct,
+            targetY: dinoPos.yPct,
             heroes: validHeroes,
             troops: sendTroops,
             squadPower: powerInfo.total,
@@ -3914,8 +4380,8 @@ export function initGameRuntime(hooks = {}) {
               kind: 'hunt',
               fromX: home.xPct,
               fromY: home.yPct,
-              toX: def.xPct,
-              toY: def.yPct,
+              toX: dinoPos.xPct,
+              toY: dinoPos.yPct,
               targetLabel: `${species.name} St.${dState.level}`,
               durationMs: travelSec * 1000
             });
@@ -4214,8 +4680,6 @@ export function initGameRuntime(hooks = {}) {
               Object.assign(resources, srv.resources);
               Object.assign(items, srv.items);
               xp = srv.xp || march.dinoLevel * 35;
-              dState.respawnAt = arriveTs + def.respawnSec * 1000;
-              dState.level = srv.nextDinoLevel || march.dinoLevel;
             } else {
               const lvlScale = 1 + (march.dinoLevel - species.levelRange[0]) * 0.14;
               for (const entry of species.lootTable) {
@@ -4230,11 +4694,9 @@ export function initGameRuntime(hooks = {}) {
                 }
               }
               xp = march.dinoLevel * 35;
-
-              dState.respawnAt = arriveTs + def.respawnSec * 1000;
-              const [minL, maxL] = species.levelRange;
-              dState.level = minL + Math.floor(Math.random() * (maxL - minL + 1));
             }
+            // Erlegter Dino verschwindet sofort und spawnt an einer neuen freien Position auf der 1200×1200-Karte
+            relocateWorldDino(march.dinoId, true);
           }
 
           const battleLog = buildDinoBattleLog({
@@ -4265,18 +4727,183 @@ export function initGameRuntime(hooks = {}) {
           return { victory, resources, items, xp, lostTotal, injuredTotal, fallenTotal, newlyDiscovered, battleId: battleLog.id };
         }
 
+        function computeGatherSquadPower(heroIds, troops, fallbackWorkers = 0) {
+          let heroBase = 0;
+          let pvpBonusPct = 0;
+          for (const hId of heroIds || []) {
+            const def = HEROES_LIST.find((h) => h.id === hId);
+            const hState = state.heroes && state.heroes[hId];
+            if (!def || !hState || !hState.unlocked) continue;
+            heroBase += getHeroPower(def, hState);
+            const pvpSkills = (hState.skills && hState.skills.pvp) || [1, 1, 1];
+            for (const lv of pvpSkills) {
+              pvpBonusPct += Math.max(0, lv - 1) * 5;
+            }
+          }
+          let troopBase = 0;
+          for (const [key, tDef] of Object.entries(TROOP_DEFS)) {
+            const count = (troops && troops[key]) || 0;
+            troopBase += count * tDef.powerPerUnit;
+          }
+          const militiaBase = heroBase === 0 && troopBase === 0 ? Math.max(1, fallbackWorkers) * 18 : 0;
+          const mult = 1 + pvpBonusPct / 100;
+          const total = Math.round((heroBase + troopBase + militiaBase) * mult);
+          return { total, heroBase, troopBase, pvpBonusPct };
+        }
+
+        function computeGatherCarryCapacity(nodeInfo, heroIds, troops) {
+          const hCnt = Array.isArray(heroIds) ? heroIds.length : 0;
+          const s = (troops && troops.slinger) || 0;
+          const c = (troops && troops.clubman) || 0;
+          const d = (troops && troops.dinorider) || 0;
+          const squadCarry = hCnt * 55 + s * 8 + c * 11 + d * 18;
+          if (hCnt === 0 && s + c + d === 0) {
+            return nodeInfo ? nodeInfo.capacity : 80;
+          }
+          return Math.max(nodeInfo ? Math.min(nodeInfo.capacity, 60) : 60, squadCarry);
+        }
+
+        function initGatherDraft(nodeId) {
+          const busyHeroes = getDeployedHeroIds();
+          const unlocked = HEROES_LIST.filter(
+            (h) => state.heroes && state.heroes[h.id] && state.heroes[h.id].unlocked && !busyHeroes.has(h.id)
+          ).sort((a, b) => getHeroPower(b, state.heroes[b.id]) - getHeroPower(a, state.heroes[a.id]));
+          const picked = [];
+          const usedRoles = new Set();
+          for (const h of unlocked) {
+            if (picked.length >= 3) break;
+            if (!usedRoles.has(h.role)) {
+              usedRoles.add(h.role);
+              picked.push(h.id);
+            }
+          }
+          for (const h of unlocked) {
+            if (picked.length >= 3) break;
+            if (!picked.includes(h.id)) picked.push(h.id);
+          }
+          gatherDraft = {
+            nodeId,
+            heroIds: picked,
+            troops: {
+              slinger: getAvailableTroopCount('slinger'),
+              clubman: getAvailableTroopCount('clubman'),
+              dinorider: getAvailableTroopCount('dinorider')
+            }
+          };
+        }
+
+        function toggleGatherDraftHero(heroId) {
+          const def = HEROES_LIST.find((h) => h.id === heroId);
+          const hState = state.heroes && state.heroes[heroId];
+          if (!def || !hState || !hState.unlocked) return;
+          if (getDeployedHeroIds().has(heroId)) {
+            SoundFX.play('error');
+            showToast(`${def.name} ist bereits auf einem anderen Marsch im Einsatz.`, 'warn');
+            return;
+          }
+          const idx = gatherDraft.heroIds.indexOf(heroId);
+          if (idx >= 0) {
+            gatherDraft.heroIds.splice(idx, 1);
+            SoundFX.play('tap');
+            renderSheet();
+            return;
+          }
+          if (gatherDraft.heroIds.length >= 3) {
+            SoundFX.play('error');
+            showToast('Maximal 3 Helden pro Sammeltrupp möglich.', 'warn');
+            return;
+          }
+          gatherDraft.heroIds.push(heroId);
+          SoundFX.play('tap');
+          renderSheet();
+        }
+
+        function adjustGatherDraftTroop(troopType, delta) {
+          if (!TROOP_DEFS[troopType]) return;
+          const avail = getAvailableTroopCount(troopType);
+          const cur = gatherDraft.troops[troopType] || 0;
+          gatherDraft.troops[troopType] = Math.max(0, Math.min(avail, cur + delta));
+          SoundFX.play('tap');
+          renderSheet();
+        }
+
+        function setGatherDraftTroopMax(troopType) {
+          if (!TROOP_DEFS[troopType]) return;
+          gatherDraft.troops[troopType] = getAvailableTroopCount(troopType);
+          SoundFX.play('tap');
+          renderSheet();
+        }
+
+        function fillGatherDraftAllTroops() {
+          for (const key of Object.keys(TROOP_DEFS)) {
+            gatherDraft.troops[key] = getAvailableTroopCount(key);
+          }
+          SoundFX.play('tap');
+          renderSheet();
+        }
+
+        function clearGatherDraftTroops() {
+          for (const key of Object.keys(TROOP_DEFS)) {
+            gatherDraft.troops[key] = 0;
+          }
+          SoundFX.play('tap');
+          renderSheet();
+        }
+
+        function applyPvpCasualtiesToMarch(march, lossRate) {
+          const result = { lostTotal: 0, injuredTotal: 0, fallenTotal: 0 };
+          if (!march || !march.troops || !lossRate || lossRate <= 0) return result;
+          if (!state.injuredTroops) state.injuredTroops = { slinger: 0, clubman: 0, dinorider: 0 };
+          if (!state.fallenTroops) state.fallenTroops = { slinger: 0, clubman: 0, dinorider: 0 };
+
+          const totalSent = Object.keys(TROOP_DEFS).reduce((sum, k) => sum + (march.troops[k] || 0), 0);
+          if (totalSent <= 0) return result;
+
+          for (const key of Object.keys(TROOP_DEFS)) {
+            const sent = march.troops[key] || 0;
+            if (sent <= 0) continue;
+            let lost = Math.min(sent, Math.round(sent * lossRate));
+            if (lost === 0 && lossRate >= 0.1 && sent >= 2) lost = 1;
+            if (lost <= 0) continue;
+            march.troops[key] = Math.max(0, sent - lost);
+            state.troops[key] = Math.max(0, (state.troops[key] || 0) - lost);
+            result.lostTotal += lost;
+
+            const freeBeds = getInfirmaryFreeBeds();
+            const toInfirmary = Math.min(lost, freeBeds);
+            const toGraveyard = lost - toInfirmary;
+            if (toInfirmary > 0) {
+              state.injuredTroops[key] = (state.injuredTroops[key] || 0) + toInfirmary;
+              result.injuredTotal += toInfirmary;
+            }
+            if (toGraveyard > 0) {
+              state.fallenTroops[key] = (state.fallenTroops[key] || 0) + toGraveyard;
+              result.fallenTotal += toGraveyard;
+            }
+          }
+          return result;
+        }
+
+        function formatCasualtyNote(cas) {
+          if (!cas || cas.lostTotal <= 0) return '';
+          const parts = [];
+          if (cas.injuredTotal > 0) parts.push(`${cas.injuredTotal} verletzt`);
+          if (cas.fallenTotal > 0) parts.push(`${cas.fallenTotal} gefallen`);
+          return parts.length ? ` (${parts.join(', ')})` : ` (${cas.lostTotal} Verluste)`;
+        }
+
         function launchWorldMarch(nodeId) {
-          const def = getWorldNodeDef(nodeId);
-          if (!def) return;
+          const info = getWorldNodeInfo(nodeId);
+          if (!info) return;
           const nState = getWorldNodeState(nodeId);
           if (nState.remaining <= 0) {
             SoundFX.play('error');
-            showToast('Diese Sammelstelle ist erschöpft und regeneriert sich noch.', 'warn');
+            showToast('Diese Sammelstelle ist bereits erschöpft.', 'warn');
             return;
           }
           if (getActiveMarchForNode(nodeId)) {
             SoundFX.play('error');
-            showToast('Hier ist bereits ein Sammeltrupp unterwegs.', 'warn');
+            showToast('Hier ist bereits ein eigener Sammeltrupp unterwegs.', 'warn');
             return;
           }
           if (state.worldMarches.length >= getMaxWorldMarches()) {
@@ -4284,30 +4911,71 @@ export function initGameRuntime(hooks = {}) {
             showToast(`Alle ${getMaxWorldMarches()} Marschwarteschlange(n) belegt. Baue das Signalfeuer aus für mehr Plätze!`, 'warn');
             return;
           }
-          if (getFreePop() < def.workersNeeded) {
+
+          // Validierung: bis zu 3 freie Helden + freie Soldaten (oder Dorfbewohner als Fallback)
+          const busyHeroes = getDeployedHeroIds();
+          const validHeroes = [];
+          for (const hId of gatherDraft.heroIds || []) {
+            const hDef = HEROES_LIST.find((h) => h.id === hId);
+            const hSt = state.heroes && state.heroes[hId];
+            if (!hDef || !hSt || !hSt.unlocked || busyHeroes.has(hId)) continue;
+            if (validHeroes.includes(hId)) continue;
+            if (validHeroes.length >= 3) break;
+            validHeroes.push(hId);
+          }
+
+          const sendTroops = {
+            slinger: Math.min(getAvailableTroopCount('slinger'), Math.max(0, Math.floor(gatherDraft.troops.slinger || 0))),
+            clubman: Math.min(getAvailableTroopCount('clubman'), Math.max(0, Math.floor(gatherDraft.troops.clubman || 0))),
+            dinorider: Math.min(getAvailableTroopCount('dinorider'), Math.max(0, Math.floor(gatherDraft.troops.dinorider || 0)))
+          };
+          const totalSoldiers = sendTroops.slinger + sendTroops.clubman + sendTroops.dinorider;
+          const usingCombatSquad = validHeroes.length > 0 || totalSoldiers > 0;
+          const workersNeeded = usingCombatSquad ? 0 : info.workersNeeded;
+
+          if (!usingCombatSquad && getFreePop() < workersNeeded) {
             SoundFX.play('error');
-            showToast(`Es werden ${def.workersNeeded} freie Dorfbewohner benötigt.`, 'err');
+            showToast(`Wähle Helden/Soldaten oder stelle ${workersNeeded} freie Dorfbewohner bereit.`, 'err');
+            return;
+          }
+
+          const enemyOcc = getEnemyNodeOccupant(nodeId);
+          if (enemyOcc && !usingCombatSquad) {
+            SoundFX.play('error');
+            showToast(`„${info.name}“ ist von ${enemyOcc.tribeName} besetzt! Wähle Helden oder Soldaten zum Angreifen.`, 'err');
             return;
           }
 
           const now = Date.now();
-          const travelSec = getWorldMarchTravelSec(def);
-          const targetAmount = nState.remaining;
-          const gatherSec = getWorldGatherDurationSec(def, targetAmount);
+          const nodePos = getNodePos(nodeId) || info;
+          const travelSec = getWorldMarchTravelSec(nodePos);
+          const carryCap = computeGatherCarryCapacity(info, validHeroes, sendTroops);
+          const targetAmount = Math.min(nState.remaining, carryCap);
+          const gatherSec = getWorldGatherDurationSec(info, targetAmount, validHeroes, sendTroops);
+          const powerInfo = computeGatherSquadPower(validHeroes, sendTroops, workersNeeded);
 
           const gatherId = `wm_${now}_${Math.floor(Math.random() * 999)}`;
           state.worldMarches.push({
             id: gatherId,
             kind: 'gather',
-            nodeId: def.id,
-            workers: def.workersNeeded,
+            nodeId: info.id,
+            targetName: info.name,
+            targetResource: info.resource,
+            targetLevel: info.level,
+            targetX: nodePos.xPct,
+            targetY: nodePos.yPct,
+            workers: workersNeeded,
+            heroes: validHeroes,
+            troops: sendTroops,
+            squadPower: powerInfo.total,
             phase: 'marching_out',
             startedAt: now,
             phaseEndsAt: now + travelSec * 1000,
             travelSec,
             gatherSec,
             targetAmount,
-            carriedAmount: 0
+            carriedAmount: 0,
+            arrivalPending: false
           });
 
           if (window.DinoMultiplayer) {
@@ -4317,17 +4985,99 @@ export function initGameRuntime(hooks = {}) {
               kind: 'gather',
               fromX: home.xPct,
               fromY: home.yPct,
-              toX: def.xPct,
-              toY: def.yPct,
-              targetLabel: def.name,
+              toX: nodePos.xPct,
+              toY: nodePos.yPct,
+              targetLabel: enemyOcc ? `⚔ Angriff: ${info.name}` : info.name,
               durationMs: (travelSec * 2 + gatherSec) * 1000
             });
           }
 
           SoundFX.play('horn');
-          showToast(`${def.workersNeeded} Sammler marschieren zu „${def.name}“!`, 'ok');
+          if (enemyOcc) {
+            showToast(
+              `⚔ Kampftrupp (${validHeroes.length} Helden · ${totalSoldiers} Soldaten · ${fmtNum(powerInfo.total)} KK) greift ${enemyOcc.tribeName} bei „${info.name}“ an!`,
+              'warn'
+            );
+          } else if (usingCombatSquad) {
+            showToast(
+              `Sammeltrupp (${validHeroes.length} Helden · ${totalSoldiers} Soldaten) marschiert zu „${info.name}“!`,
+              'ok'
+            );
+          } else {
+            showToast(`${workersNeeded} Sammler marschieren zu „${info.name}“!`, 'ok');
+          }
           saveState();
           renderAll();
+        }
+
+        async function resolveGatherNodeArrival(march) {
+          if (!march || march.arrivalPending) return;
+          march.arrivalPending = true;
+          march.phase = 'occupying';
+          const nodeName = march.targetName || (getWorldNodeInfo(march.nodeId)?.name || 'Sammelstelle');
+
+          try {
+            if (window.DinoMultiplayer && typeof window.DinoMultiplayer.occupyResourceNode === 'function') {
+              const resp = await window.DinoMultiplayer.occupyResourceNode({
+                nodeId: march.nodeId,
+                marchId: march.id,
+                targetAmount: march.targetAmount,
+                gatherSec: march.gatherSec,
+                squadPower: march.squadPower || 50,
+                heroIds: march.heroes || [],
+                troops: march.troops || { slinger: 0, clubman: 0, dinorider: 0 }
+              });
+
+              const now = Date.now();
+              if (resp && resp.contest) {
+                const cas = applyPvpCasualtiesToMarch(march, resp.contest.attackerLossRate || 0);
+                const casNote = formatCasualtyNote(cas);
+                if (resp.contest.attackerWon) {
+                  const nState = getWorldNodeState(march.nodeId);
+                  if (nState && resp.contest.defenderCollectedBeforeEviction > 0) {
+                    nState.remaining = Math.max(1, nState.remaining - resp.contest.defenderCollectedBeforeEviction);
+                    march.targetAmount = Math.min(march.targetAmount, nState.remaining);
+                  }
+                  march.phase = 'gathering';
+                  march.startedAt = now;
+                  march.phaseEndsAt = now + march.gatherSec * 1000;
+                  SoundFX.play('upgrade');
+                  showToast(
+                    `⚔ Sieg bei „${nodeName}“! ${resp.contest.defenderTribeName} vertrieben — dein Trupp sammelt jetzt!${casNote}`,
+                    'ok'
+                  );
+                } else {
+                  march.carriedAmount = 0;
+                  march.phase = 'marching_back';
+                  march.startedAt = now;
+                  march.phaseEndsAt = now + march.travelSec * 1000;
+                  SoundFX.play('error');
+                  showToast(
+                    `⚔ Angriff auf „${nodeName}“ abgewehrt! ${resp.contest.defenderTribeName} war stärker.${casNote}`,
+                    'warn'
+                  );
+                }
+              } else {
+                march.phase = 'gathering';
+                march.startedAt = now;
+                march.phaseEndsAt = now + march.gatherSec * 1000;
+              }
+            } else {
+              const now = Date.now();
+              march.phase = 'gathering';
+              march.startedAt = now;
+              march.phaseEndsAt = now + march.gatherSec * 1000;
+            }
+          } catch {
+            const now = Date.now();
+            march.phase = 'gathering';
+            march.startedAt = now;
+            march.phaseEndsAt = now + march.gatherSec * 1000;
+          } finally {
+            march.arrivalPending = false;
+            saveState();
+            renderAll();
+          }
         }
 
         function recallWorldMarch(marchId) {
@@ -4349,10 +5099,11 @@ export function initGameRuntime(hooks = {}) {
             return;
           }
 
-          const def = getWorldNodeDef(march.nodeId);
+          const info = getWorldNodeInfo(march.nodeId);
           const nState = getWorldNodeState(march.nodeId);
+          const resKey = march.targetResource || (info ? info.resource : 'wood');
 
-          if (march.phase === 'marching_out') {
+          if (march.phase === 'marching_out' || march.phase === 'occupying') {
             const elapsedMs = Math.max(1500, now - march.startedAt);
             const returnMs = Math.min(march.travelSec * 1000, elapsedMs);
             march.phase = 'marching_back';
@@ -4362,21 +5113,26 @@ export function initGameRuntime(hooks = {}) {
           } else if (march.phase === 'gathering') {
             const totalMs = Math.max(1000, march.phaseEndsAt - march.startedAt);
             const ratio = Math.min(1, Math.max(0, (now - march.startedAt) / totalMs));
-            const collected = Math.min(nState.remaining, Math.floor(march.targetAmount * ratio));
-            nState.remaining = Math.max(0, nState.remaining - collected);
-            if (nState.remaining <= 0 && def) {
-              nState.respawnAt = now + def.respawnSec * 1000;
+            const collected = Math.min(nState ? nState.remaining : march.targetAmount, Math.floor(march.targetAmount * ratio));
+            if (nState) {
+              nState.remaining = Math.max(0, nState.remaining - collected);
+              if (nState.remaining <= 0) {
+                relocateWorldNode(march.nodeId, true);
+              }
             }
             march.carriedAmount = collected;
             march.phase = 'marching_back';
             march.startedAt = now;
             march.phaseEndsAt = now + march.travelSec * 1000;
+            if (window.DinoMultiplayer && typeof window.DinoMultiplayer.releaseResourceNode === 'function') {
+              void window.DinoMultiplayer.releaseResourceNode(march.nodeId, march.id);
+            }
           }
 
           SoundFX.play('tap');
           showToast(
-            march.carriedAmount > 0 && def
-              ? `Trupp kehrt mit ${march.carriedAmount} ${RESOURCE_LABELS[def.resource]} zurück.`
+            march.carriedAmount > 0
+              ? `Trupp kehrt mit ${march.carriedAmount} ${RESOURCE_LABELS[resKey]} zurück.`
               : 'Sammeltrupp zurückgerufen.',
             'info'
           );
@@ -4385,15 +5141,13 @@ export function initGameRuntime(hooks = {}) {
         }
 
         function processWorldMapTick(now, silentReport = null) {
-          // 1. Erschöpfte Sammelstellen regenerieren
+          // 1. Falls alte Saves erschöpfte Sammelstellen oder Respawn-Timer haben, sofort an neuen Ort versetzen
           for (const def of WORLD_NODES) {
             const nState = getWorldNodeState(def.id);
-            if (nState.remaining <= 0 && nState.respawnAt > 0 && now >= nState.respawnAt) {
-              nState.remaining = def.capacity;
-              nState.respawnAt = 0;
+            if (nState.remaining <= 0) {
+              relocateWorldNode(def.id, false);
             }
           }
-          // 1b. Erlegte wilde Dinos wieder erscheinen lassen
           for (const def of WORLD_DINOS) {
             const dState = getWorldDinoState(def.id);
             if (dState.respawnAt > 0 && now >= dState.respawnAt) {
@@ -4473,16 +5227,28 @@ export function initGameRuntime(hooks = {}) {
               continue;
             }
 
-            // Standard-Sammelmarsch
+            // Standard- & Kampf-Sammelmarsch
             const def = getWorldNodeDef(march.nodeId);
             if (!def) continue;
             const nState = getWorldNodeState(def.id);
+            const resKey = march.targetResource || nState.resource || def.resource;
+            const nodeLabel = march.targetName || nState.name || def.name;
+            const nodeLvl = march.targetLevel || nState.level || def.level;
+
+            if (march.phase === 'occupying') {
+              remainingMarches.push(march);
+              continue;
+            }
 
             let guard = 0;
             let completed = false;
             while (now >= march.phaseEndsAt && guard < 4) {
               guard++;
               if (march.phase === 'marching_out') {
+                if (!silentReport && window.DinoMultiplayer && typeof window.DinoMultiplayer.occupyResourceNode === 'function') {
+                  void resolveGatherNodeArrival(march);
+                  break;
+                }
                 const startT = march.phaseEndsAt;
                 march.phase = 'gathering';
                 march.startedAt = startT;
@@ -4491,12 +5257,12 @@ export function initGameRuntime(hooks = {}) {
                 const startT = march.phaseEndsAt;
                 const collected = Math.min(nState.remaining, march.targetAmount);
                 nState.remaining = Math.max(0, nState.remaining - collected);
+                if (window.DinoMultiplayer && typeof window.DinoMultiplayer.releaseResourceNode === 'function') {
+                  void window.DinoMultiplayer.releaseResourceNode(march.nodeId, march.id);
+                }
                 if (nState.remaining <= 0) {
-                  nState.respawnAt = startT + def.respawnSec * 1000;
-                  if (now >= nState.respawnAt) {
-                    nState.remaining = def.capacity;
-                    nState.respawnAt = 0;
-                  }
+                  // Abgebaute Sammelstelle verschwindet sofort und spawnt an neuem zufälligen Ort
+                  relocateWorldNode(def.id, !silentReport);
                 }
                 march.carriedAmount = collected;
                 march.phase = 'marching_back';
@@ -4505,23 +5271,23 @@ export function initGameRuntime(hooks = {}) {
               } else if (march.phase === 'marching_back') {
                 const amt = march.carriedAmount || 0;
                 if (amt > 0) {
-                  state.resources[def.resource] += amt;
+                  state.resources[resKey] = (state.resources[resKey] || 0) + amt;
                   let bonusBoneText = '';
                   if (Math.random() < 0.45) {
                     addInventoryItem('bones', 1);
                     bonusBoneText = ' (+1 Knochen!)';
                   }
-                  if (def.level >= 5 && Math.random() < 0.18) {
+                  if (nodeLvl >= 5 && Math.random() < 0.18) {
                     addInventoryItem('goldenBones', 1);
                     bonusBoneText += ' (+1 Goldener Knochen!)';
                   }
-                  addInventoryItem('heroXp', def.level * 15);
+                  addInventoryItem('heroXp', nodeLvl * 15);
                   if (silentReport) {
-                    silentReport.gained[def.resource] = (silentReport.gained[def.resource] || 0) + amt;
+                    silentReport.gained[resKey] = (silentReport.gained[resKey] || 0) + amt;
                     silentReport.worldDeliveries = (silentReport.worldDeliveries || 0) + 1;
                   } else {
                     deliveredAny = true;
-                    showToast(`Weltkarte: +${amt} ${RESOURCE_LABELS[def.resource]} aus „${def.name}“ geliefert!${bonusBoneText}`, 'ok');
+                    showToast(`Weltkarte: +${amt} ${RESOURCE_LABELS[resKey]} aus „${nodeLabel}“ geliefert!${bonusBoneText}`, 'ok');
                   }
                 }
                 completed = true;
@@ -6886,7 +7652,7 @@ export function initGameRuntime(hooks = {}) {
             const entry = getBestiaryEntry(sp.id);
             const isDisc = entry.discovered;
             const isHunted = (entry.huntedCount || 0) > 0;
-            const matchingSpawn = WORLD_DINOS.find((d) => d.speciesId === sp.id);
+            const matchingSpawn = WORLD_DINOS.find((d) => (getWorldDinoState(d.id)?.speciesId || d.speciesId) === sp.id);
             const samplePower = getDinoCombatPower(sp, sp.levelRange[0]);
             const maxPower = getDinoCombatPower(sp, sp.levelRange[1]);
 
@@ -7270,6 +8036,7 @@ export function initGameRuntime(hooks = {}) {
         function updateProjectedWorldMarkers(vw, vh) {
           const markersEl = document.getElementById('worldMapMarkers');
           if (!markersEl) return;
+          markersEl.classList.toggle('wm-zoom-far', worldCam.zoom < WORLD_CAM_DEFAULT_ZOOM * 0.72);
           const scale = Math.max(
             0.72,
             Math.min(1.08, 0.78 + Math.log2(Math.max(0.25, worldCam.zoom) / 0.65) * 0.065)
@@ -7303,9 +8070,11 @@ export function initGameRuntime(hooks = {}) {
 
           for (const march of state.worldMarches || []) {
             const isHunt = march.kind === 'hunt';
-            const def = isHunt ? getWorldDinoDef(march.dinoId) : getWorldNodeDef(march.nodeId);
-            if (!def) continue;
-            const tPt = worldToScreen((def.xPct / 100) * WORLD_GRID_COLS, (def.yPct / 100) * WORLD_GRID_ROWS, vw, vh);
+            const livePos = isHunt ? getDinoPos(march.dinoId) : getNodePos(march.nodeId);
+            const txPct = typeof march.targetX === 'number' ? march.targetX : livePos ? livePos.xPct : null;
+            const tyPct = typeof march.targetY === 'number' ? march.targetY : livePos ? livePos.yPct : null;
+            if (txPct === null || tyPct === null) continue;
+            const tPt = worldToScreen((txPct / 100) * WORLD_GRID_COLS, (tyPct / 100) * WORLD_GRID_ROWS, vw, vh);
             const total = Math.max(1000, march.phaseEndsAt - march.startedAt);
             const prog = Math.min(1, Math.max(0, (now - march.startedAt) / total));
 
@@ -7316,7 +8085,7 @@ export function initGameRuntime(hooks = {}) {
               svgHtml += `<line class="wm-march-line ${isHunt ? 'hunt-out' : 'out'}" x1="${homePt.sx.toFixed(1)}" y1="${homePt.sy.toFixed(1)}" x2="${tPt.sx.toFixed(1)}" y2="${tPt.sy.toFixed(1)}" />`;
               svgHtml += `<circle cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="8" fill="#171412" stroke="${strokeCol}" stroke-width="2.4" />`;
               svgHtml += `<circle cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="3.4" fill="${strokeCol}" />`;
-            } else if (march.phase === 'gathering') {
+            } else if (march.phase === 'gathering' || march.phase === 'occupying') {
               svgHtml += `<line class="wm-march-line gather" x1="${homePt.sx.toFixed(1)}" y1="${homePt.sy.toFixed(1)}" x2="${tPt.sx.toFixed(1)}" y2="${tPt.sy.toFixed(1)}" />`;
             } else if (march.phase === 'marching_back') {
               const mx = tPt.sx + (homePt.sx - tPt.sx) * prog;
@@ -7636,40 +8405,47 @@ export function initGameRuntime(hooks = {}) {
           }
 
           for (const def of WORLD_NODES) {
+            const info = getWorldNodeInfo(def.id);
             const nState = getWorldNodeState(def.id);
+            const pos = getNodePos(def.id);
+            if (!info || !pos) continue;
             const march = getActiveMarchForNode(def.id);
+            const enemyOcc = getEnemyNodeOccupant(def.id);
             const depleted = nState.remaining <= 0 && !march;
-            const accent = RESOURCE_COLORS[def.resource] || '#f59e0b';
-            const wx = ((def.xPct / 100) * WORLD_GRID_COLS).toFixed(2);
-            const wy = ((def.yPct / 100) * WORLD_GRID_ROWS).toFixed(2);
+            const accent = RESOURCE_COLORS[info.resource] || '#f59e0b';
+            const wx = pos.wx.toFixed(2);
+            const wy = pos.wy.toFixed(2);
             let progHtml = '';
             if (march) {
               const total = Math.max(1000, march.phaseEndsAt - march.startedAt);
               const pct = Math.min(100, Math.max(4, ((now - march.startedAt) / total) * 100));
               progHtml = `<div class="wm-mini-prog"><div class="wm-mini-prog-fill" style="width:${pct.toFixed(1)}%"></div></div>`;
             }
-            const subLabel = depleted
-              ? `Leer · ${fmtClock(Math.max(0, (nState.respawnAt - now) / 1000))}`
-              : march
+            const subLabel = march
               ? march.phase === 'marching_out'
                 ? 'Hinmarsch'
+                : march.phase === 'occupying'
+                ? 'Gefecht...'
                 : march.phase === 'gathering'
                 ? 'Sammelt...'
                 : 'Rückmarsch'
-              : `${nState.remaining} ${RESOURCE_LABELS[def.resource]}`;
+              : enemyOcc
+              ? `⚔ ${escapeHtmlMp(enemyOcc.tribeName || 'Feind')}`
+              : `${nState.remaining} ${RESOURCE_LABELS[info.resource]}`;
 
             markersHtml += `
               <button
-                class="wm-node ${depleted ? 'depleted' : ''} ${march ? 'active-gather' : ''}"
+                class="wm-node is-resource ${depleted ? 'depleted' : ''} ${march ? 'active-gather' : ''} ${enemyOcc && !march ? 'occupied-enemy' : ''}"
                 data-wm-node="${def.id}"
                 data-wx="${wx}"
                 data-wy="${wy}"
                 style="--node-accent:${accent};"
-                aria-label="${def.name} Stufe ${def.level}"
+                aria-label="${info.name} Stufe ${info.level}${enemyOcc ? ` · Besetzt von ${escapeHtmlMp(enemyOcc.tribeName)}` : ''}"
               >
                 <div class="wm-pin-ring">
-                  ${getResourceIconSVG(def.resource, 18)}
-                  <span class="wm-pin-lvl">${def.level}</span>
+                  ${getResourceIconSVG(info.resource, 12)}
+                  <span class="wm-pin-lvl">${info.level}</span>
+                  ${enemyOcc && !march ? `<span class="wm-pvp-badge" title="Besetzt von ${escapeHtmlMp(enemyOcc.tribeName)}">⚔</span>` : ''}
                 </div>
                 <span class="wm-nameplate">${subLabel}</span>
                 ${progHtml}
@@ -7680,11 +8456,12 @@ export function initGameRuntime(hooks = {}) {
           for (const dDef of WORLD_DINOS) {
             const dState = getWorldDinoState(dDef.id);
             const sp = getDinoSpecies(dState.speciesId);
-            if (!sp) continue;
+            const pos = getDinoPos(dDef.id);
+            if (!sp || !pos) continue;
             const march = getActiveMarchForDino(dDef.id);
             const respawning = dState.respawnAt > now && !march;
-            const wx = ((dDef.xPct / 100) * WORLD_GRID_COLS).toFixed(2);
-            const wy = ((dDef.yPct / 100) * WORLD_GRID_ROWS).toFixed(2);
+            const wx = pos.wx.toFixed(2);
+            const wy = pos.wy.toFixed(2);
             let progHtml = '';
             if (march) {
               const total = Math.max(1000, march.phaseEndsAt - march.startedAt);
@@ -7693,10 +8470,10 @@ export function initGameRuntime(hooks = {}) {
             }
             const shortDino = sp.name.split('-').pop();
             const subLabel = respawning
-              ? `Kehrt zurück ${fmtClock(Math.max(0, (dState.respawnAt - now) / 1000))}`
+              ? `Respawn ${fmtClock(Math.max(0, (dState.respawnAt - now) / 1000))}`
               : march
               ? march.phase === 'marching_out'
-                ? 'Jagd läuft...'
+                ? 'Jagd...'
                 : 'Rückmarsch'
               : shortDino;
 
@@ -7710,8 +8487,8 @@ export function initGameRuntime(hooks = {}) {
                 aria-label="${sp.name} Stufe ${dState.level}"
               >
                 <div class="wm-pin-ring">
-                  ${getDinoIconSVG(sp.id, 20, sp.accent)}
-                  <span class="wm-pin-lvl">St.${dState.level}</span>
+                  ${getDinoIconSVG(sp.id, 13, sp.accent)}
+                  <span class="wm-pin-lvl">${dState.level}</span>
                 </div>
                 <span class="wm-nameplate">${subLabel}</span>
                 ${progHtml}
@@ -7730,20 +8507,25 @@ export function initGameRuntime(hooks = {}) {
           `;
           for (const march of state.worldMarches || []) {
             const isHunt = march.kind === 'hunt';
-            const def = isHunt ? getWorldDinoDef(march.dinoId) : getWorldNodeDef(march.nodeId);
-            if (!def) continue;
+            const livePos = isHunt ? getDinoPos(march.dinoId) : getNodePos(march.nodeId);
+            const tx = typeof march.targetX === 'number' ? march.targetX : livePos ? livePos.xPct : null;
+            const ty = typeof march.targetY === 'number' ? march.targetY : livePos ? livePos.yPct : null;
+            if (tx === null || ty === null) continue;
             const col = march.phase === 'marching_back' ? '#4ade80' : isHunt ? '#f87171' : '#fbbf24';
-            miniHtml += `<line x1="${(home.wx * mScale).toFixed(1)}" y1="${(home.wy * mScale).toFixed(1)}" x2="${(def.xPct * 1.2).toFixed(1)}" y2="${(def.yPct * 1.2).toFixed(1)}" stroke="${col}" stroke-width="1.2" opacity="0.88" />`;
+            miniHtml += `<line x1="${(home.wx * mScale).toFixed(1)}" y1="${(home.wy * mScale).toFixed(1)}" x2="${(tx * 1.2).toFixed(1)}" y2="${(ty * 1.2).toFixed(1)}" stroke="${col}" stroke-width="1.2" opacity="0.88" />`;
           }
           for (const def of WORLD_NODES) {
+            const info = getWorldNodeInfo(def.id);
             const nState = getWorldNodeState(def.id);
-            const col = nState.remaining > 0 ? RESOURCE_COLORS[def.resource] : '#57534e';
-            miniHtml += `<circle cx="${(def.xPct * 1.2).toFixed(1)}" cy="${(def.yPct * 1.2).toFixed(1)}" r="2" fill="${col}" />`;
+            const enemyOcc = getEnemyNodeOccupant(def.id);
+            if (!info) continue;
+            const col = enemyOcc ? '#ef4444' : nState.remaining > 0 ? RESOURCE_COLORS[info.resource] : '#57534e';
+            miniHtml += `<circle cx="${(info.xPct * 1.2).toFixed(1)}" cy="${(info.yPct * 1.2).toFixed(1)}" r="${enemyOcc ? '1.8' : '1.25'}" fill="${col}" />`;
           }
           for (const dDef of WORLD_DINOS) {
             const dState = getWorldDinoState(dDef.id);
-            const col = dState.respawnAt > now ? '#57534e' : '#ef4444';
-            miniHtml += `<circle cx="${(dDef.xPct * 1.2).toFixed(1)}" cy="${(dDef.yPct * 1.2).toFixed(1)}" r="2.1" fill="${col}" />`;
+            const col = dState.respawnAt > now ? '#57534e' : '#f87171';
+            miniHtml += `<circle cx="${(dState.xPct * 1.2).toFixed(1)}" cy="${(dState.yPct * 1.2).toFixed(1)}" r="1.25" fill="${col}" />`;
           }
           for (const pl of mpWorld.settlements || []) {
             if (ownUid && pl.uid === ownUid) continue;
@@ -7816,19 +8598,29 @@ export function initGameRuntime(hooks = {}) {
                   `;
                 }
 
-                const def = getWorldNodeDef(m.nodeId);
-                if (!def) return '';
+                const info = getWorldNodeInfo(m.nodeId);
+                const nodeTitle = m.targetName || (info ? info.name : 'Sammelstelle');
+                const nodeLvl = m.targetLevel || (info ? info.level : 1);
+                const resKey = m.targetResource || (info ? info.resource : 'wood');
+                const hCnt = (m.heroes || []).length;
+                const soldCnt = (m.troops?.slinger || 0) + (m.troops?.clubman || 0) + (m.troops?.dinorider || 0);
+                const squadLabel =
+                  hCnt > 0 || soldCnt > 0
+                    ? `${hCnt} Helden · ${soldCnt} Soldaten`
+                    : `${m.workers || 1} Sammler`;
                 const phaseText =
                   m.phase === 'marching_out'
-                    ? `Hinmarsch (${m.workers} Sammler)`
+                    ? `Hinmarsch (${squadLabel})`
+                    : m.phase === 'occupying'
+                    ? `Sammelstelle sichern / PvP...`
                     : m.phase === 'gathering'
-                    ? `Sammelt ${RESOURCE_LABELS[def.resource]} (${m.workers} Sammler)`
-                    : `Rückmarsch (+${m.carriedAmount} ${RESOURCE_LABELS[def.resource]})`;
+                    ? `Sammelt ${RESOURCE_LABELS[resKey]} (${squadLabel})`
+                    : `Rückmarsch (+${m.carriedAmount} ${RESOURCE_LABELS[resKey]})`;
                 return `
-                  <div class="wm-march-card" data-wm-focus-node="${def.id}">
+                  <div class="wm-march-card" data-wm-focus-node="${m.nodeId}">
                     <div class="wm-march-meta">
                       <div class="wm-march-title">
-                        <span>${def.name} (St. ${def.level})</span>
+                        <span>${nodeTitle} (St. ${nodeLvl})</span>
                         <span class="mono">${fmtClock(rem)}</span>
                       </div>
                       <div class="wm-march-phase">${phaseText}</div>
@@ -7890,6 +8682,7 @@ export function initGameRuntime(hooks = {}) {
         }
 
         function openWorldNodeSheet(nodeId) {
+          initGatherDraft(nodeId);
           openSheet = { type: 'worldNode', id: nodeId };
           document.getElementById('detailBackdrop').classList.add('open');
           renderSheet();
@@ -8059,12 +8852,13 @@ export function initGameRuntime(hooks = {}) {
           const now = Date.now();
           const march = getActiveMarchForDino(dinoId);
           const bestEntry = getBestiaryEntry(sp.id);
+          const dinoPos = getDinoPos(dinoId) || def;
           const dinoPower = getDinoCombatPower(sp, dState.level);
-          const travelSec = getWorldMarchTravelSec(def);
+          const travelSec = getWorldMarchTravelSec(dinoPos);
           const activeMarches = (state.worldMarches || []).length;
           const maxMarches = getMaxWorldMarches();
-          const coordX = Math.round(def.xPct * 10);
-          const coordY = Math.round(def.yPct * 10);
+          const coordX = dinoPos.coordX ?? Math.round((dinoPos.xPct / 100) * WORLD_GRID_COLS);
+          const coordY = dinoPos.coordY ?? Math.round((dinoPos.yPct / 100) * WORLD_GRID_ROWS);
 
           document.getElementById('sheetTitle').textContent = `${sp.name} · St. ${dState.level}`;
           document.getElementById('sheetSub').textContent = `${sp.tier} · Empf. KK ${fmtNum(dinoPower)} · [X: ${coordX}, Y: ${coordY}]`;
@@ -8324,34 +9118,98 @@ export function initGameRuntime(hooks = {}) {
         }
 
         function renderWorldNodeSheet(nodeId) {
-          const def = getWorldNodeDef(nodeId);
-          if (!def) return;
+          const info = getWorldNodeInfo(nodeId);
+          if (!info) return;
           const nState = getWorldNodeState(nodeId);
+          const pos = getNodePos(nodeId);
           const march = getActiveMarchForNode(nodeId);
+          const enemyOcc = getEnemyNodeOccupant(nodeId);
           const now = Date.now();
           const freePop = getFreePop();
           const activeMarches = (state.worldMarches || []).length;
           const maxMarches = getMaxWorldMarches();
-          const travelSec = getWorldMarchTravelSec(def);
-          const gatherSec = getWorldGatherDurationSec(def, Math.max(1, nState.remaining));
-          const speedMult = getWorldGatherSpeedMult(def.resource);
-          const coordX = Math.round(def.xPct * 10);
-          const coordY = Math.round(def.yPct * 10);
+          const travelSec = getWorldMarchTravelSec(pos || info);
+          const coordX = pos ? pos.coordX : Math.round((info.xPct / 100) * WORLD_GRID_COLS);
+          const coordY = pos ? pos.coordY : Math.round((info.yPct / 100) * WORLD_GRID_ROWS);
 
-          document.getElementById('sheetTitle').textContent = def.name;
-          document.getElementById('sheetSub').textContent = `Stufe ${def.level} · ${RESOURCE_LABELS[def.resource]} · [X: ${coordX}, Y: ${coordY}]`;
+          document.getElementById('sheetTitle').textContent = info.name;
+          document.getElementById('sheetSub').textContent = `Stufe ${info.level} · ${RESOURCE_LABELS[info.resource]} · [X: ${coordX}, Y: ${coordY}]`;
 
-          let html = `<p class="sheet-desc">${def.desc}</p>`;
+          let html = `<p class="sheet-desc">${info.desc}</p>`;
+
+          // Bereinige gatherDraft von inzwischen beschäftigten Helden / Truppen
+          const busyHeroes = getDeployedHeroIds();
+          gatherDraft.heroIds = (gatherDraft.heroIds || [])
+            .filter((id) => !busyHeroes.has(id) && state.heroes && state.heroes[id] && state.heroes[id].unlocked)
+            .slice(0, 3);
+          for (const tk of Object.keys(TROOP_DEFS)) {
+            gatherDraft.troops[tk] = Math.min(getAvailableTroopCount(tk), Math.max(0, gatherDraft.troops[tk] || 0));
+          }
+
+          const totalAvailSoldiers = Object.keys(TROOP_DEFS).reduce((s, k) => s + getAvailableTroopCount(k), 0);
+          const totalSelectedSoldiers = Object.keys(TROOP_DEFS).reduce((s, k) => s + (gatherDraft.troops[k] || 0), 0);
+          const selectedHeroCount = gatherDraft.heroIds.length;
+          const usingCombatSquad = selectedHeroCount > 0 || totalSelectedSoldiers > 0;
+          const carryCap = computeGatherCarryCapacity(info, gatherDraft.heroIds, gatherDraft.troops);
+          const plannedAmount = Math.min(nState.remaining, carryCap);
+          const gatherSec = getWorldGatherDurationSec(info, Math.max(1, plannedAmount), gatherDraft.heroIds, gatherDraft.troops);
+          const speedMult = getGatherSquadSpeedMult(info.resource, gatherDraft.heroIds, gatherDraft.troops);
+          const squadInfo = computeGatherSquadPower(gatherDraft.heroIds, gatherDraft.troops, usingCombatSquad ? 0 : info.workersNeeded);
+
+          if (enemyOcc && !march) {
+            const enemySoldiers =
+              (enemyOcc.troops?.slinger || 0) + (enemyOcc.troops?.clubman || 0) + (enemyOcc.troops?.dinorider || 0);
+            const enemyHeroes = (enemyOcc.heroIds || []).length;
+            const remOccSec = Math.max(0, (enemyOcc.gatherEndsAt - now) / 1000);
+            const ratio = squadInfo.total / Math.max(1, enemyOcc.squadPower || 50);
+            const oddsLabel =
+              !usingCombatSquad
+                ? 'Helden/Soldaten nötig'
+                : ratio >= 1.25
+                ? 'Sehr hohe Siegchance'
+                : ratio >= 1.02
+                ? 'Vorteil (Glücksfaktor ±12%)'
+                : ratio >= 0.84
+                ? 'Knappes PvP-Gefecht (±12% Glück)'
+                : 'Gegner deutlich stärker';
+            const oddsColor =
+              !usingCombatSquad
+                ? '#f87171'
+                : ratio >= 1.25
+                ? '#4ade80'
+                : ratio >= 1.02
+                ? '#86efac'
+                : ratio >= 0.84
+                ? '#fbbf24'
+                : '#f87171';
+
+            html += `
+              <div class="gather-pvp-banner">
+                <div class="gather-pvp-banner-head">
+                  <span>⚔ Besetzt von ${escapeHtmlMp(enemyOcc.tribeName || 'Fremdstamm')} (Feuer St. ${enemyOcc.bonfireLevel || 1})</span>
+                  <span class="mono">KK ${fmtNum(enemyOcc.squadPower || 50)}</span>
+                </div>
+                <div class="gather-pvp-banner-sub">
+                  Trupp vor Ort: <strong>${enemyHeroes} Helden · ${enemySoldiers} Soldaten</strong> · Sammelt noch <span class="mono">${fmtClock(remOccSec)}</span>.<br/>
+                  Schicke bis zu 3 Helden + Soldaten hinein, um den Spieler anzugreifen — bist du stärker (mit etwas Kampfglück), vertreibst du ihn und übernimmst die Sammelstelle!
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; margin-top:2px;">
+                  <span style="color:var(--text-secondary);">Deine PvP-KK: <strong class="mono">${fmtNum(squadInfo.total)}</strong></span>
+                  <span style="font-weight:700; color:${oddsColor};">${oddsLabel}</span>
+                </div>
+              </div>
+            `;
+          }
 
           html += `
             <div class="stat-grid">
               <div class="stat-box">
                 <div class="stat-label">Verbleibender Vorrat</div>
-                <div class="stat-value mono" style="color:${RESOURCE_COLORS[def.resource]}">${nState.remaining} / ${def.capacity} ${RESOURCE_LABELS[def.resource]}</div>
+                <div class="stat-value mono" style="color:${RESOURCE_COLORS[info.resource]}">${nState.remaining} / ${info.capacity} ${RESOURCE_LABELS[info.resource]}</div>
               </div>
               <div class="stat-box">
-                <div class="stat-label">Benötigte Sammler</div>
-                <div class="stat-value mono">${def.workersNeeded} (Frei: ${freePop})</div>
+                <div class="stat-label">Traglast / Beute</div>
+                <div class="stat-value mono">${plannedAmount} ${RESOURCE_LABELS[info.resource]} (Max ${carryCap})</div>
               </div>
               <div class="stat-box">
                 <div class="stat-label">Marschzeit (einfach)</div>
@@ -8368,45 +9226,135 @@ export function initGameRuntime(hooks = {}) {
             const total = Math.max(1000, march.phaseEndsAt - march.startedAt);
             const rem = Math.max(0, (march.phaseEndsAt - now) / 1000);
             const pct = Math.min(100, Math.max(0, ((now - march.startedAt) / total) * 100));
+            const mRes = march.targetResource || info.resource;
+            const mHeroNames = (march.heroes || [])
+              .map((hId) => HEROES_LIST.find((h) => h.id === hId)?.name.split(' ')[0])
+              .filter(Boolean);
+            const mSoldCnt = (march.troops?.slinger || 0) + (march.troops?.clubman || 0) + (march.troops?.dinorider || 0);
             const phaseLabel =
               march.phase === 'marching_out'
                 ? 'Trupp auf dem Hinmarsch'
+                : march.phase === 'occupying'
+                ? 'Sichert Sammelstelle (PvP)...'
                 : march.phase === 'gathering'
-                ? `Sammelt ${RESOURCE_LABELS[def.resource]}...`
-                : `Auf dem Rückweg mit +${march.carriedAmount} ${RESOURCE_LABELS[def.resource]}`;
+                ? `Sammelt ${RESOURCE_LABELS[mRes]} (wird gegen Angriffe verteidigt)`
+                : `Auf dem Rückweg mit +${march.carriedAmount} ${RESOURCE_LABELS[mRes]}`;
 
             html += `
               <div class="stat-box">
                 <div class="queue-title"><span>${phaseLabel}</span><span class="mono">${fmtClock(rem)}</span></div>
                 <div class="prog-bar"><div class="prog-fill ${march.phase === 'marching_back' ? 'done' : ''}" style="width:${pct.toFixed(1)}%"></div></div>
+                <div style="margin-top:6px; font-size:11px; color:var(--text-secondary);">
+                  Trupp: ${mHeroNames.length ? mHeroNames.join(', ') : `${march.workers || 0} Dorfbewohner`} · ${mSoldCnt} Soldaten · <strong class="mono">KK ${fmtNum(march.squadPower || 0)}</strong>
+                </div>
               </div>
             `;
             if (march.phase !== 'marching_back') {
               html += `<button class="btn-secondary" data-wm-recall="${march.id}">Trupp zurückrufen${march.phase === 'gathering' ? ' (bisherige Beute behalten)' : ''}</button>`;
             }
-          } else if (nState.remaining <= 0) {
-            const respRem = Math.max(0, (nState.respawnAt - now) / 1000);
+          } else {
+            // 3-Helden-Auswahl für die Sammelstelle
+            const unlockedHeroes = HEROES_LIST.filter((h) => state.heroes && state.heroes[h.id] && state.heroes[h.id].unlocked);
             html += `
-              <div class="req-row missing">
-                <div class="req-main"><span class="req-mark">✕</span><span>Sammelstelle erschöpft · Regeneriert in <strong class="mono">${fmtClock(respRem)}</strong></span></div>
+              <div>
+                <p class="sheet-section-title">Helden für Sammelstelle wählen (${selectedHeroCount} / 3)</p>
+                <div class="hunt-hero-grid">
+                  ${unlockedHeroes
+                    .map((h) => {
+                      const hSt = state.heroes[h.id];
+                      const busy = busyHeroes.has(h.id);
+                      const sel = gatherDraft.heroIds.includes(h.id);
+                      const pwr = getHeroPower(h, hSt);
+                      return `
+                        <button class="hunt-hero-btn ${sel ? 'selected' : ''}" data-gather-toggle-hero="${h.id}" ${busy ? 'disabled' : ''}>
+                          <div style="display:flex; width:100%; justify-content:space-between; align-items:center; gap:4px;">
+                            <span style="font-size:11.5px; font-weight:700; color:var(--text-primary);">${h.name.split(' ')[0]}</span>
+                            <span class="mono" style="font-size:10px; color:${busy ? '#f87171' : sel ? '#fbbf24' : 'var(--text-muted)'};">${busy ? 'Im Einsatz' : `KK ${fmtNum(pwr)}`}</span>
+                          </div>
+                          <span style="font-size:10px; color:var(--text-secondary);">${h.role} · St. ${hSt.level}</span>
+                        </button>
+                      `;
+                    })
+                    .join('')}
+                </div>
               </div>
             `;
-          } else {
-            const hasSlot = activeMarches < maxMarches;
-            const hasPop = freePop >= def.workersNeeded;
-            const canSend = hasSlot && hasPop;
 
+            // Ausgebildete Soldaten auswählen
             html += `
-              <div class="req-list">
-                <div class="req-row ${hasSlot ? 'met' : 'missing'}">
-                  <div class="req-main"><span class="req-mark">${hasSlot ? '✓' : '✕'}</span><span>Freier Sammeltrupp-Slot (${activeMarches}/${maxMarches} aktiv)</span></div>
+              <div>
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px;">
+                  <p class="sheet-section-title" style="margin:0;">Soldaten mitschicken (${totalSelectedSoldiers} gewählt)</p>
+                  <div style="display:inline-flex; gap:5px;">
+                    <button class="hunt-mini-btn" data-gather-fill-all="1" ${totalAvailSoldiers <= 0 ? 'disabled' : ''}>Alle</button>
+                    <button class="hunt-mini-btn" data-gather-clear="1" ${totalSelectedSoldiers <= 0 ? 'disabled' : ''}>0</button>
+                  </div>
                 </div>
-                <div class="req-row ${hasPop ? 'met' : 'missing'}">
-                  <div class="req-main"><span class="req-mark">${hasPop ? '✓' : '✕'}</span><span>${def.workersNeeded} freie Dorfbewohner verfügbar (${freePop} frei)</span></div>
+                <div class="hunt-troop-list">
+                  ${Object.values(TROOP_DEFS)
+                    .map((td) => {
+                      const avail = getAvailableTroopCount(td.id);
+                      const chosen = gatherDraft.troops[td.id] || 0;
+                      return `
+                        <div class="hunt-troop-row">
+                          <div>
+                            <div style="font-size:12px; font-weight:700; color:var(--text-primary);">${td.name} <span style="font-size:10.5px; color:var(--text-muted);">(${td.role})</span></div>
+                            <div class="mono" style="font-size:10.5px; color:var(--text-secondary);">Gewählt: ${chosen} / ${avail} frei · ${td.powerPerUnit} KK</div>
+                          </div>
+                          <div class="hunt-troop-controls">
+                            <button class="hunt-mini-btn" data-gather-troop-delta="${td.id}|-5" ${chosen <= 0 ? 'disabled' : ''}>-5</button>
+                            <button class="hunt-mini-btn" data-gather-troop-delta="${td.id}|-1" ${chosen <= 0 ? 'disabled' : ''}>−</button>
+                            <button class="hunt-mini-btn" data-gather-troop-delta="${td.id}|1" ${chosen >= avail ? 'disabled' : ''}>+</button>
+                            <button class="hunt-mini-btn" data-gather-troop-max="${td.id}" ${chosen >= avail ? 'disabled' : ''}>Max</button>
+                          </div>
+                        </div>
+                      `;
+                    })
+                    .join('')}
                 </div>
               </div>
-              <button class="btn-primary" data-wm-send="${def.id}" ${canSend ? '' : 'disabled'}>
-                ${!hasSlot ? 'Alle Sammeltrupps unterwegs' : !hasPop ? 'Zu wenig freie Bewohner' : `${def.workersNeeded} Sammler entsenden (${nState.remaining} ${RESOURCE_LABELS[def.resource]})`}
+            `;
+
+            const hasSlot = activeMarches < maxMarches;
+            const hasForce = enemyOcc ? usingCombatSquad : usingCombatSquad || freePop >= info.workersNeeded;
+            const canSend = hasSlot && hasForce && nState.remaining > 0;
+
+            html += `
+              <div class="hunt-power-bar">
+                <div>
+                  <div style="font-size:10.5px; color:var(--text-muted);">Sammeltrupp-Kampfkraft (PvP-Schutz)</div>
+                  <div class="mono" style="font-size:13px; font-weight:700; color:var(--text-primary);">KK ${fmtNum(squadInfo.total)}${squadInfo.pvpBonusPct > 0 ? ` <span style="font-size:10px; color:#86efac;">(PvP-Skills +${squadInfo.pvpBonusPct}%)</span>` : ''}</div>
+                </div>
+                <span style="font-size:11px; font-weight:700; color:${usingCombatSquad ? '#4ade80' : '#fbbf24'}; text-align:right;">
+                  ${usingCombatSquad ? `${selectedHeroCount} Helden · ${totalSelectedSoldiers} Soldaten` : `Fallback: ${info.workersNeeded} Dorfbewohner`}
+                </span>
+              </div>
+              <div class="req-list">
+                <div class="req-row ${hasSlot ? 'met' : 'missing'}">
+                  <div class="req-main"><span class="req-mark">${hasSlot ? '✓' : '✕'}</span><span>Freier Marschwarteschlangen-Slot (${activeMarches}/${maxMarches} aktiv)</span></div>
+                </div>
+                <div class="req-row ${hasForce ? 'met' : 'missing'}">
+                  <div class="req-main"><span class="req-mark">${hasForce ? '✓' : '✕'}</span><span>${
+                    enemyOcc
+                      ? 'Mindestens 1 Held oder Soldat für PvP-Angriff nötig'
+                      : usingCombatSquad
+                      ? `Kampf-Sammeltrupp bereit (kein Dorfbewohner nötig)`
+                      : `${info.workersNeeded} freie Dorfbewohner oder Helden/Soldaten (${freePop} Bewohner frei)`
+                  }</span></div>
+                </div>
+              </div>
+              <button class="btn-primary" data-wm-send="${info.id}" ${canSend ? '' : 'disabled'}>
+                ${
+                  !hasSlot
+                    ? 'Alle Marschwarteschlangen belegt'
+                    : !hasForce
+                    ? enemyOcc
+                      ? 'Helden oder Soldaten zum Angreifen wählen'
+                      : 'Helden/Soldaten oder freie Bewohner nötig'
+                    : enemyOcc
+                    ? `⚔ Sammelstelle angreifen & erobern (KK ${fmtNum(squadInfo.total)})`
+                    : `Sammeltrupp entsenden (${plannedAmount} ${RESOURCE_LABELS[info.resource]})`
+                }
               </button>
             `;
           }
@@ -10144,21 +11092,23 @@ export function initGameRuntime(hooks = {}) {
             }
             const focusCard = e.target.closest('[data-wm-focus-node]');
             if (focusCard) {
-              const def = getWorldNodeDef(focusCard.dataset.wmFocusNode);
-              if (def) {
+              const nodeId = focusCard.dataset.wmFocusNode;
+              const pos = getNodePos(nodeId);
+              if (pos) {
                 SoundFX.play('tap');
-                centerWorldMapOn(def.xPct, def.yPct);
-                openWorldNodeSheet(def.id);
+                centerWorldMapOn(pos.xPct, pos.yPct);
+                openWorldNodeSheet(nodeId);
               }
               return;
             }
             const focusDino = e.target.closest('[data-wm-focus-dino]');
             if (focusDino) {
-              const dDef = getWorldDinoDef(focusDino.dataset.wmFocusDino);
-              if (dDef) {
+              const dinoId = focusDino.dataset.wmFocusDino;
+              const pos = getDinoPos(dinoId);
+              if (pos) {
                 SoundFX.play('tap');
-                centerWorldMapOn(dDef.xPct, dDef.yPct);
-                openWorldDinoSheet(dDef.id);
+                centerWorldMapOn(pos.xPct, pos.yPct);
+                openWorldDinoSheet(dinoId);
               }
             }
           });
@@ -10192,12 +11142,13 @@ export function initGameRuntime(hooks = {}) {
             }
             const gotoWmDino = e.target.closest('[data-goto-world-dino]');
             if (gotoWmDino) {
-              const dDef = getWorldDinoDef(gotoWmDino.dataset.gotoWorldDino);
+              const dinoId = gotoWmDino.dataset.gotoWorldDino;
+              const pos = getDinoPos(dinoId);
               SoundFX.play('tap');
               switchTab('worldmap');
-              if (dDef) {
-                centerWorldMapOn(dDef.xPct, dDef.yPct);
-                openWorldDinoSheet(dDef.id);
+              if (pos) {
+                centerWorldMapOn(pos.xPct, pos.yPct);
+                openWorldDinoSheet(dinoId);
               }
               return;
             }
@@ -10355,12 +11306,13 @@ export function initGameRuntime(hooks = {}) {
             }
             const gotoWmDino = e.target.closest('[data-goto-world-dino]');
             if (gotoWmDino) {
-              const dDef = getWorldDinoDef(gotoWmDino.dataset.gotoWorldDino);
+              const dinoId = gotoWmDino.dataset.gotoWorldDino;
+              const pos = getDinoPos(dinoId);
               SoundFX.play('tap');
               switchTab('worldmap');
-              if (dDef) {
-                centerWorldMapOn(dDef.xPct, dDef.yPct);
-                openWorldDinoSheet(dDef.id);
+              if (pos) {
+                centerWorldMapOn(pos.xPct, pos.yPct);
+                openWorldDinoSheet(dinoId);
               }
               return;
             }
@@ -10449,6 +11401,32 @@ export function initGameRuntime(hooks = {}) {
             if (enterVillageBtn) {
               closeSheet();
               switchTab('village');
+              return;
+            }
+            const gatherHeroBtn = e.target.closest('[data-gather-toggle-hero]');
+            if (gatherHeroBtn) {
+              toggleGatherDraftHero(gatherHeroBtn.dataset.gatherToggleHero);
+              return;
+            }
+            const gatherDeltaBtn = e.target.closest('[data-gather-troop-delta]');
+            if (gatherDeltaBtn) {
+              const [tKey, dStr] = gatherDeltaBtn.dataset.gatherTroopDelta.split('|');
+              adjustGatherDraftTroop(tKey, Number(dStr));
+              return;
+            }
+            const gatherMaxBtn = e.target.closest('[data-gather-troop-max]');
+            if (gatherMaxBtn) {
+              setGatherDraftTroopMax(gatherMaxBtn.dataset.gatherTroopMax);
+              return;
+            }
+            const gatherFillBtn = e.target.closest('[data-gather-fill-all]');
+            if (gatherFillBtn) {
+              fillGatherDraftAllTroops();
+              return;
+            }
+            const gatherClearBtn = e.target.closest('[data-gather-clear]');
+            if (gatherClearBtn) {
+              clearGatherDraftTroops();
               return;
             }
             const wmSendBtn = e.target.closest('[data-wm-send]');
@@ -10829,14 +11807,66 @@ export function initGameRuntime(hooks = {}) {
               mpWorld.onlinePlayers = session.onlinePlayers || 1;
               renderWorldChatUI();
             },
-            onWorldUpdate: ({ settlements, marches, onlinePlayers }) => {
+            onWorldUpdate: ({ settlements, marches, nodeOccupants, dynamicSpawns, onlinePlayers }) => {
               mpWorld.settlements = settlements || [];
               mpWorld.marches = marches || [];
+              mpWorld.nodeOccupants = nodeOccupants || [];
+              mpWorld.dynamicSpawns = dynamicSpawns || [];
               mpWorld.onlinePlayers = onlinePlayers || 1;
+              applyRemoteDynamicSpawns(mpWorld.dynamicSpawns);
               if (activeTab === 'worldmap') {
                 renderWorldMap();
               }
+              if (openSheet && openSheet.type === 'worldNode') {
+                renderWorldNodeSheet(openSheet.id);
+              }
               renderWorldChatUI();
+            },
+            onNodeContest: (contest, myUid) => {
+              try {
+                if (!contest || !myUid) return;
+                if (contest.defenderUid !== myUid) return;
+                const march = (state.worldMarches || []).find(
+                  (m) => (m.kind || 'gather') === 'gather' && m.nodeId === contest.nodeId && (m.phase === 'gathering' || m.phase === 'occupying')
+                );
+                const info = getWorldNodeInfo(contest.nodeId);
+                const nodeName = (march && march.targetName) || (info ? info.name : 'Sammelstelle');
+                const resKey = (march && march.targetResource) || (info ? info.resource : 'wood');
+                const cas = march ? applyPvpCasualtiesToMarch(march, contest.defenderLossRate || 0) : { lostTotal: 0, injuredTotal: 0, fallenTotal: 0 };
+                const casNote = formatCasualtyNote(cas);
+
+                if (contest.attackerWon) {
+                  if (march) {
+                    const now = Date.now();
+                    const kept = Math.max(0, Number(contest.defenderCollectedBeforeEviction || 0));
+                    const nState = getWorldNodeState(contest.nodeId);
+                    if (nState && kept > 0) {
+                      nState.remaining = Math.max(0, nState.remaining - kept);
+                    }
+                    march.carriedAmount = kept;
+                    march.phase = 'marching_back';
+                    march.startedAt = now;
+                    march.phaseEndsAt = now + march.travelSec * 1000;
+                  }
+                  SoundFX.play('error');
+                  showToast(
+                    `⚔ Überfall auf „${nodeName}“! ${contest.attackerTribeName} hat deinen Trupp vertrieben${
+                      march && march.carriedAmount > 0 ? ` (Rückzug mit ${march.carriedAmount} ${RESOURCE_LABELS[resKey]})` : ''
+                    }.${casNote}`,
+                    'err'
+                  );
+                } else {
+                  SoundFX.play('complete');
+                  showToast(
+                    `🛡 Sammelstelle „${nodeName}“ gegen ${contest.attackerTribeName} erfolgreich verteidigt!${casNote}`,
+                    'ok'
+                  );
+                }
+                saveState();
+                renderAll();
+              } catch {
+                // ignore non-fatal pvp event sync error
+              }
             },
             onChatUpdate: (messages) => {
               const prevLen = mpWorld.chat.length;

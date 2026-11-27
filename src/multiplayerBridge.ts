@@ -4,11 +4,16 @@ import type {
   BuildValidationResponse,
   DinoHuntCombatRequest,
   DinoHuntCombatResponse,
+  NodeOccupyRequest,
+  NodeOccupyResponse,
   RealtimeEvent,
   ResourceKey,
   TeleportResponse,
   WorldChatMessageDTO,
+  WorldDynamicSpawnDTO,
   WorldMarchDTO,
+  WorldNodeContestResultDTO,
+  WorldNodeOccupantDTO,
   WorldSettlementDTO,
   WorldTradeDTO,
 } from './shared/apiTypes';
@@ -41,10 +46,13 @@ import {
   postDinoHuntCombat,
   postMarch,
   postMigrateGuest,
+  postNodeOccupy,
+  postNodeRelease,
   postProposeTrade,
   postRespondTrade,
   postServerPlayerSave,
   postSettlement,
+  postSpawnRelocate,
   postValidateBuild,
   type SocketDebugEvent,
 } from './services/gameApiClient';
@@ -113,8 +121,11 @@ export interface BridgeCallbacks {
   onWorldUpdate?: (data: {
     settlements: WorldSettlementDTO[];
     marches: WorldMarchDTO[];
+    nodeOccupants: WorldNodeOccupantDTO[];
+    dynamicSpawns: WorldDynamicSpawnDTO[];
     onlinePlayers: number;
   }) => void;
+  onNodeContest?: (contest: WorldNodeContestResultDTO, myUid: string) => void;
   onChatUpdate?: (messages: WorldChatMessageDTO[]) => void;
   onTradeCompleted?: (trade: WorldTradeDTO, myUid: string) => void;
   onCloudStateLoaded?: (cloudState: Record<string, unknown>, tribeName: string) => void;
@@ -191,6 +202,9 @@ class DinoMultiplayerBridge {
 
   private settlementsMap = new Map<string, WorldSettlementDTO>();
   private marchesMap = new Map<string, WorldMarchDTO>();
+  private nodeOccupantsMap = new Map<string, WorldNodeOccupantDTO>();
+  private dynamicSpawnsMap = new Map<string, WorldDynamicSpawnDTO>();
+  private handledContestIds = new Set<string>();
   private chatMap = new Map<string, WorldChatMessageDTO>();
   private tradesMap = new Map<string, WorldTradeDTO>();
   private settledTradeIds = new Set<string>(loadSettledTradeIds());
@@ -367,6 +381,8 @@ class DinoMultiplayerBridge {
   getWorldData(): {
     settlements: WorldSettlementDTO[];
     marches: WorldMarchDTO[];
+    nodeOccupants: WorldNodeOccupantDTO[];
+    dynamicSpawns: WorldDynamicSpawnDTO[];
     chat: WorldChatMessageDTO[];
     trades: WorldTradeDTO[];
     onlinePlayers: number;
@@ -376,6 +392,10 @@ class DinoMultiplayerBridge {
     const marches = Array.from(this.marchesMap.values()).filter(
       (m) => m.status === 'active' && m.endsAt + 8000 >= now
     );
+    const nodeOccupants = Array.from(this.nodeOccupantsMap.values()).filter(
+      (o) => o.endsAt + 8000 >= now
+    );
+    const dynamicSpawns = Array.from(this.dynamicSpawnsMap.values());
     const chat = Array.from(this.chatMap.values())
       .sort((a, b) => a.createdAt - b.createdAt)
       .slice(-60);
@@ -390,6 +410,8 @@ class DinoMultiplayerBridge {
     return {
       settlements: Array.from(this.settlementsMap.values()),
       marches,
+      nodeOccupants,
+      dynamicSpawns,
       chat,
       trades,
       onlinePlayers: this.onlinePlayers,
@@ -580,6 +602,12 @@ class DinoMultiplayerBridge {
       for (const t of world.trades || []) {
         this.upsertTradeAndCheckSettlement(t);
       }
+      for (const occ of world.nodeOccupants || []) {
+        this.nodeOccupantsMap.set(occ.nodeId, occ);
+      }
+      for (const sp of world.dynamicSpawns || []) {
+        this.dynamicSpawnsMap.set(sp.key, sp);
+      }
       this.syncState = 'synced';
       this.emitSession();
       this.emitWorld();
@@ -646,6 +674,13 @@ class DinoMultiplayerBridge {
       for (const t of w.trades || []) {
         this.upsertTradeAndCheckSettlement(t);
       }
+      this.nodeOccupantsMap.clear();
+      for (const occ of w.nodeOccupants || []) {
+        this.nodeOccupantsMap.set(occ.nodeId, occ);
+      }
+      for (const sp of w.dynamicSpawns || []) {
+        this.dynamicSpawnsMap.set(sp.key, sp);
+      }
       this.emitSession();
       this.emitWorld();
       this.emitChat();
@@ -661,6 +696,26 @@ class DinoMultiplayerBridge {
       } else {
         this.marchesMap.set(ev.payload.marchId, ev.payload);
       }
+      this.emitWorld();
+    } else if (ev.type === 'world:node_occupant') {
+      if (ev.payload.occupant) {
+        this.nodeOccupantsMap.set(ev.payload.nodeId, ev.payload.occupant);
+      } else {
+        this.nodeOccupantsMap.delete(ev.payload.nodeId);
+      }
+      this.emitWorld();
+    } else if (ev.type === 'world:node_contest') {
+      const c = ev.payload;
+      if (!this.handledContestIds.has(c.contestId)) {
+        this.handledContestIds.add(c.contestId);
+        if (this.handledContestIds.size > 120) {
+          const first = this.handledContestIds.values().next().value;
+          if (first) this.handledContestIds.delete(first);
+        }
+        this.callbacks.onNodeContest?.(c, this.getSession().uid);
+      }
+    } else if (ev.type === 'world:spawn_update') {
+      this.dynamicSpawnsMap.set(ev.payload.key, ev.payload);
       this.emitWorld();
     } else if (ev.type === 'world:trade') {
       this.upsertTradeAndCheckSettlement(ev.payload);
@@ -1278,6 +1333,102 @@ class DinoMultiplayerBridge {
     }
   }
 
+  async occupyResourceNode(
+    payload: Omit<NodeOccupyRequest, 'tribeName'>
+  ): Promise<NodeOccupyResponse | null> {
+    const session = this.getSession();
+    if (!this.serverAvailable && !this.wsConnected) {
+      return {
+        ok: true,
+        occupied: true,
+        occupant: {
+          nodeId: payload.nodeId,
+          uid: session.uid,
+          tribeName: session.tribeName,
+          marchId: payload.marchId,
+          squadPower: payload.squadPower,
+          heroIds: payload.heroIds,
+          heroNames: payload.heroNames,
+          troops: payload.troops,
+          startedAt: Date.now(),
+          endsAt: Date.now() + payload.gatherSec * 1000,
+          targetAmount: payload.targetAmount,
+          resource: payload.resource,
+        },
+        serverTimeMs: Date.now(),
+      };
+    }
+    const token = await this.getActiveBearerToken();
+    if (!token) return null;
+    try {
+      const resp = await postNodeOccupy(
+        {
+          ...payload,
+          tribeName: session.tribeName,
+        },
+        token
+      );
+      if (resp.occupant) {
+        this.nodeOccupantsMap.set(payload.nodeId, resp.occupant);
+        this.emitWorld();
+      }
+      if (resp.contest) {
+        this.handledContestIds.add(resp.contest.contestId);
+      }
+      return resp;
+    } catch {
+      return null;
+    }
+  }
+
+  async releaseResourceNode(nodeId: string, marchId?: string): Promise<void> {
+    const existing = this.nodeOccupantsMap.get(nodeId);
+    const myUid = this.getSession().uid;
+    if (existing && existing.uid === myUid && (!marchId || existing.marchId === marchId)) {
+      this.nodeOccupantsMap.delete(nodeId);
+      this.emitWorld();
+    }
+    if (!this.serverAvailable && !this.wsConnected) return;
+    const token = await this.getActiveBearerToken();
+    if (!token) return;
+    try {
+      await postNodeRelease({ nodeId, marchId }, token);
+    } catch {
+      // ignore offline release errors
+    }
+  }
+
+  async relocateWorldSpawn(
+    payload: Omit<WorldDynamicSpawnDTO, 'key' | 'updatedAt'>
+  ): Promise<WorldDynamicSpawnDTO | null> {
+    const key = `${payload.kind}:${payload.id}`;
+    const localDto: WorldDynamicSpawnDTO = {
+      ...payload,
+      key,
+      updatedAt: Date.now(),
+    };
+    this.dynamicSpawnsMap.set(key, localDto);
+    if (payload.kind === 'node') {
+      this.nodeOccupantsMap.delete(payload.id);
+    }
+    this.emitWorld();
+
+    if (!this.serverAvailable && !this.wsConnected) return localDto;
+    const token = await this.getActiveBearerToken();
+    if (!token) return localDto;
+    try {
+      const resp = await postSpawnRelocate(payload, token);
+      if (resp.ok && resp.spawn) {
+        this.dynamicSpawnsMap.set(resp.spawn.key, resp.spawn);
+        this.emitWorld();
+        return resp.spawn;
+      }
+    } catch {
+      // keep local relocated spawn
+    }
+    return localDto;
+  }
+
   async sendChat(text: string, bonfireLevel: number): Promise<{ ok: boolean; error?: string }> {
     const clean = String(text || '').trim().slice(0, 240);
     if (!clean) return { ok: false, error: 'Nachricht ist leer.' };
@@ -1611,6 +1762,8 @@ class DinoMultiplayerBridge {
     this.callbacks.onWorldUpdate?.({
       settlements: w.settlements,
       marches: w.marches,
+      nodeOccupants: w.nodeOccupants,
+      dynamicSpawns: w.dynamicSpawns,
       onlinePlayers: w.onlinePlayers,
     });
     this.notifyListeners();

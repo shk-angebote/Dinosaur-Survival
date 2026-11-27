@@ -62,6 +62,78 @@ export interface WorldTradeDTO {
   updatedAt: number;
 }
 
+export interface WorldNodeOccupantDTO {
+  nodeId: string;
+  uid: string;
+  tribeName: string;
+  marchId: string;
+  squadPower: number;
+  heroIds: string[];
+  heroNames: string[];
+  troops: Record<TroopKey, number>;
+  startedAt: number;
+  endsAt: number;
+  targetAmount: number;
+  resource: ResourceKey;
+}
+
+export interface WorldNodeContestResultDTO {
+  contestId: string;
+  nodeId: string;
+  nodeName: string;
+  resource: ResourceKey;
+  attackerUid: string;
+  attackerTribeName: string;
+  attackerPower: number;
+  defenderUid: string;
+  defenderTribeName: string;
+  defenderPower: number;
+  attackerWon: boolean;
+  attackerLossRate: number;
+  defenderLossRate: number;
+  defenderCollectedBeforeEviction: number;
+  timestamp: number;
+}
+
+export interface WorldDynamicSpawnDTO {
+  key: string;
+  kind: 'node' | 'dino';
+  id: string;
+  xPct: number;
+  yPct: number;
+  resource?: ResourceKey;
+  name?: string;
+  level: number;
+  capacity?: number;
+  remaining?: number;
+  speciesId?: string;
+  spawnVersion: number;
+  updatedAt: number;
+}
+
+export interface NodeOccupyRequest {
+  nodeId: string;
+  nodeName: string;
+  marchId: string;
+  tribeName: string;
+  squadPower: number;
+  heroIds: string[];
+  heroNames: string[];
+  troops: Record<TroopKey, number>;
+  gatherSec: number;
+  targetAmount: number;
+  resource: ResourceKey;
+}
+
+export interface NodeOccupyResponse {
+  ok: boolean;
+  occupied: boolean;
+  occupant: WorldNodeOccupantDTO | null;
+  contest?: WorldNodeContestResultDTO;
+  serverTimeMs: number;
+  error?: string;
+}
+
 export interface BuildValidationRequest {
   buildingId: string;
   currentLevel: number;
@@ -143,6 +215,8 @@ export interface WorldStateResponse {
   marches: WorldMarchDTO[];
   chat: WorldChatMessageDTO[];
   trades?: WorldTradeDTO[];
+  nodeOccupants?: WorldNodeOccupantDTO[];
+  dynamicSpawns?: WorldDynamicSpawnDTO[];
 }
 
 export interface TeleportRequest {
@@ -190,6 +264,9 @@ export type RealtimeEvent =
   | { type: 'world:settlement_removed'; payload: { uid: string } }
   | { type: 'world:march'; payload: WorldMarchDTO }
   | { type: 'world:trade'; payload: WorldTradeDTO }
+  | { type: 'world:node_occupant'; payload: { nodeId: string; occupant: WorldNodeOccupantDTO | null } }
+  | { type: 'world:node_contest'; payload: WorldNodeContestResultDTO }
+  | { type: 'world:spawn_update'; payload: WorldDynamicSpawnDTO }
   | { type: 'chat:message'; payload: WorldChatMessageDTO }
   | { type: 'world:presence'; payload: { onlinePlayers: number; serverTimeMs: number } };
 

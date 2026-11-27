@@ -5,12 +5,15 @@ import type {
   DinoHuntCombatResponse,
   GuestAuthResponse,
   MigrateGuestResponse,
+  NodeOccupyRequest,
+  NodeOccupyResponse,
   PlayerSaveDTO,
   RealtimeEvent,
   ResourceKey,
   TeleportRequest,
   TeleportResponse,
   WorldChatMessageDTO,
+  WorldDynamicSpawnDTO,
   WorldMarchDTO,
   WorldStateResponse,
   WorldTradeDTO,
@@ -211,6 +214,48 @@ export async function postRespondTrade(
 ): Promise<{ ok: boolean; trade?: WorldTradeDTO; error?: string; serverTimeMs?: number }> {
   return fetchJson(
     '/api/v1/world/trade/respond',
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+    bearerToken
+  );
+}
+
+export async function postNodeOccupy(
+  payload: NodeOccupyRequest,
+  bearerToken: string
+): Promise<NodeOccupyResponse> {
+  return fetchJson(
+    '/api/v1/world/node/occupy',
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+    bearerToken
+  );
+}
+
+export async function postNodeRelease(
+  payload: { nodeId: string; marchId?: string },
+  bearerToken: string
+): Promise<{ ok: boolean; serverTimeMs: number }> {
+  return fetchJson(
+    '/api/v1/world/node/release',
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+    bearerToken
+  );
+}
+
+export async function postSpawnRelocate(
+  payload: Omit<WorldDynamicSpawnDTO, 'key' | 'updatedAt'>,
+  bearerToken: string
+): Promise<{ ok: boolean; spawn?: WorldDynamicSpawnDTO; serverTimeMs: number }> {
+  return fetchJson(
+    '/api/v1/world/spawn/relocate',
     {
       method: 'POST',
       body: JSON.stringify(payload),
