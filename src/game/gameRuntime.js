@@ -5158,7 +5158,40 @@ export function initGameRuntime(hooks = {}) {
           return (state.worldMarches || []).find((m) => m.kind === 'volcano') || null;
         }
 
-        function initVolcanoDraft() {
+        function ensureVolcanoMobilizationState() {
+          if (!state.volcanoMobilization || typeof state.volcanoMobilization !== 'object') {
+            state.volcanoMobilization = {
+              configured: false,
+              heroIds: [],
+              troops: { slinger: 0, clubman: 0, dinorider: 0 }
+            };
+          }
+          if (!Array.isArray(state.volcanoMobilization.heroIds)) {
+            state.volcanoMobilization.heroIds = [];
+          }
+          if (!state.volcanoMobilization.troops || typeof state.volcanoMobilization.troops !== 'object') {
+            state.volcanoMobilization.troops = { slinger: 0, clubman: 0, dinorider: 0 };
+          }
+          for (const key of Object.keys(TROOP_DEFS)) {
+            state.volcanoMobilization.troops[key] = Math.max(0, Math.floor(Number(state.volcanoMobilization.troops[key] || 0)));
+          }
+          return state.volcanoMobilization;
+        }
+
+        function syncVolcanoDraftToState() {
+          const mob = ensureVolcanoMobilizationState();
+          mob.configured = true;
+          mob.heroIds = Array.isArray(volcanoDraft.heroIds) ? volcanoDraft.heroIds.slice(0, 3) : [];
+          mob.troops = {
+            slinger: Math.max(0, Math.floor(Number(volcanoDraft.troops?.slinger || 0))),
+            clubman: Math.max(0, Math.floor(Number(volcanoDraft.troops?.clubman || 0))),
+            dinorider: Math.max(0, Math.floor(Number(volcanoDraft.troops?.dinorider || 0)))
+          };
+          saveState();
+          if (typeof emitSnapshot === 'function') emitSnapshot();
+        }
+
+        function getAutoPickedVolcanoHeroes() {
           const busyHeroes = getDeployedHeroIds();
           const unlocked = HEROES_LIST.filter(
             (h) => state.heroes && state.heroes[h.id] && state.heroes[h.id].unlocked && !busyHeroes.has(h.id)
@@ -5176,6 +5209,102 @@ export function initGameRuntime(hooks = {}) {
             if (picked.length >= 3) break;
             if (!picked.includes(h.id)) picked.push(h.id);
           }
+          return picked;
+        }
+
+        function getVolcanoMobilizationSnapshot() {
+          const totalTroops = {
+            slinger: Math.max(0, Math.floor(Number(state?.troops?.slinger || 0))),
+            clubman: Math.max(0, Math.floor(Number(state?.troops?.clubman || 0))),
+            dinorider: Math.max(0, Math.floor(Number(state?.troops?.dinorider || 0)))
+          };
+          const availableTroops = {
+            slinger: getAvailableTroopCount('slinger'),
+            clubman: getAvailableTroopCount('clubman'),
+            dinorider: getAvailableTroopCount('dinorider')
+          };
+          const availableTotal = availableTroops.slinger + availableTroops.clubman + availableTroops.dinorider;
+
+          const activeMarch = getActiveMarchForVolcano();
+          if (activeMarch) {
+            const mTroops = {
+              slinger: Math.max(0, Math.floor(Number(activeMarch.troops?.slinger || 0))),
+              clubman: Math.max(0, Math.floor(Number(activeMarch.troops?.clubman || 0))),
+              dinorider: Math.max(0, Math.floor(Number(activeMarch.troops?.dinorider || 0)))
+            };
+            const mTotal = mTroops.slinger + mTroops.clubman + mTroops.dinorider;
+            const mHeroNames = Array.isArray(activeMarch.heroNames) && activeMarch.heroNames.length
+              ? activeMarch.heroNames.slice(0, 3)
+              : (activeMarch.heroes || [])
+                  .map((hId) => HEROES_LIST.find((h) => h.id === hId)?.name || hId)
+                  .slice(0, 3);
+            return {
+              status: 'marching',
+              marchPhase: activeMarch.phase || 'marching_out',
+              assignedTroops: mTroops,
+              availableTroops,
+              totalTroops,
+              assignedTotal: mTotal,
+              availableTotal: availableTotal + mTotal,
+              assignedHeroes: mHeroNames.length,
+              assignedHeroNames: mHeroNames,
+              maxHeroes: 3,
+              squadPower: Math.max(0, Math.round(Number(activeMarch.squadPower || 0)))
+            };
+          }
+
+          const mob = ensureVolcanoMobilizationState();
+          const busyHeroes = getDeployedHeroIds();
+          const validHeroes = (mob.heroIds || [])
+            .filter((hId) => !busyHeroes.has(hId) && state.heroes && state.heroes[hId] && state.heroes[hId].unlocked)
+            .slice(0, 3);
+          const assignedTroops = {
+            slinger: Math.min(availableTroops.slinger, Math.max(0, mob.troops.slinger || 0)),
+            clubman: Math.min(availableTroops.clubman, Math.max(0, mob.troops.clubman || 0)),
+            dinorider: Math.min(availableTroops.dinorider, Math.max(0, mob.troops.dinorider || 0))
+          };
+          const assignedTotal = assignedTroops.slinger + assignedTroops.clubman + assignedTroops.dinorider;
+          const assignedHeroNames = validHeroes
+            .map((hId) => HEROES_LIST.find((h) => h.id === hId)?.name || hId)
+            .slice(0, 3);
+          const squadPower =
+            validHeroes.length > 0 || assignedTotal > 0
+              ? computeGatherSquadPower(validHeroes, assignedTroops, 0).total
+              : 0;
+
+          return {
+            status: assignedTotal > 0 || validHeroes.length > 0 ? 'ready' : 'idle',
+            marchPhase: null,
+            assignedTroops,
+            availableTroops,
+            totalTroops,
+            assignedTotal,
+            availableTotal,
+            assignedHeroes: validHeroes.length,
+            assignedHeroNames,
+            maxHeroes: 3,
+            squadPower
+          };
+        }
+
+        function initVolcanoDraft() {
+          const mob = ensureVolcanoMobilizationState();
+          const busyHeroes = getDeployedHeroIds();
+          if (mob.configured) {
+            const validHeroes = (mob.heroIds || [])
+              .filter((hId) => !busyHeroes.has(hId) && state.heroes && state.heroes[hId] && state.heroes[hId].unlocked)
+              .slice(0, 3);
+            volcanoDraft = {
+              heroIds: validHeroes,
+              troops: {
+                slinger: Math.min(getAvailableTroopCount('slinger'), mob.troops.slinger || 0),
+                clubman: Math.min(getAvailableTroopCount('clubman'), mob.troops.clubman || 0),
+                dinorider: Math.min(getAvailableTroopCount('dinorider'), mob.troops.dinorider || 0)
+              }
+            };
+            return;
+          }
+          const picked = getAutoPickedVolcanoHeroes();
           volcanoDraft = {
             heroIds: picked,
             troops: {
@@ -5184,6 +5313,7 @@ export function initGameRuntime(hooks = {}) {
               dinorider: getAvailableTroopCount('dinorider')
             }
           };
+          syncVolcanoDraftToState();
         }
 
         function toggleVolcanoDraftHero(heroId) {
@@ -5198,6 +5328,7 @@ export function initGameRuntime(hooks = {}) {
           const idx = volcanoDraft.heroIds.indexOf(heroId);
           if (idx >= 0) {
             volcanoDraft.heroIds.splice(idx, 1);
+            syncVolcanoDraftToState();
             SoundFX.play('tap');
             renderSheet();
             return;
@@ -5208,40 +5339,69 @@ export function initGameRuntime(hooks = {}) {
             return;
           }
           volcanoDraft.heroIds.push(heroId);
+          syncVolcanoDraftToState();
           SoundFX.play('tap');
           renderSheet();
+        }
+
+        function hydrateVolcanoDraftFromState() {
+          const mob = ensureVolcanoMobilizationState();
+          if (mob.configured) {
+            const busyHeroes = getDeployedHeroIds();
+            volcanoDraft.heroIds = (mob.heroIds || [])
+              .filter((hId) => !busyHeroes.has(hId) && state.heroes && state.heroes[hId] && state.heroes[hId].unlocked)
+              .slice(0, 3);
+            volcanoDraft.troops = {
+              slinger: Math.min(getAvailableTroopCount('slinger'), mob.troops.slinger || 0),
+              clubman: Math.min(getAvailableTroopCount('clubman'), mob.troops.clubman || 0),
+              dinorider: Math.min(getAvailableTroopCount('dinorider'), mob.troops.dinorider || 0)
+            };
+          } else if (!volcanoDraft.heroIds || volcanoDraft.heroIds.length === 0) {
+            volcanoDraft.heroIds = getAutoPickedVolcanoHeroes();
+          }
         }
 
         function adjustVolcanoDraftTroop(troopType, delta) {
           if (!TROOP_DEFS[troopType]) return;
+          hydrateVolcanoDraftFromState();
           const avail = getAvailableTroopCount(troopType);
           const cur = volcanoDraft.troops[troopType] || 0;
           volcanoDraft.troops[troopType] = Math.max(0, Math.min(avail, cur + delta));
+          syncVolcanoDraftToState();
           SoundFX.play('tap');
-          renderSheet();
+          if (openSheet && openSheet.type === 'volcano') renderSheet();
         }
 
         function setVolcanoDraftTroopMax(troopType) {
           if (!TROOP_DEFS[troopType]) return;
+          hydrateVolcanoDraftFromState();
           volcanoDraft.troops[troopType] = getAvailableTroopCount(troopType);
+          syncVolcanoDraftToState();
           SoundFX.play('tap');
-          renderSheet();
+          if (openSheet && openSheet.type === 'volcano') renderSheet();
         }
 
         function fillVolcanoDraftAllTroops() {
+          hydrateVolcanoDraftFromState();
+          if (!volcanoDraft.heroIds || volcanoDraft.heroIds.length === 0) {
+            volcanoDraft.heroIds = getAutoPickedVolcanoHeroes();
+          }
           for (const key of Object.keys(TROOP_DEFS)) {
             volcanoDraft.troops[key] = getAvailableTroopCount(key);
           }
+          syncVolcanoDraftToState();
           SoundFX.play('tap');
-          renderSheet();
+          if (openSheet && openSheet.type === 'volcano') renderSheet();
         }
 
         function clearVolcanoDraftTroops() {
+          hydrateVolcanoDraftFromState();
           for (const key of Object.keys(TROOP_DEFS)) {
             volcanoDraft.troops[key] = 0;
           }
+          syncVolcanoDraftToState();
           SoundFX.play('tap');
-          renderSheet();
+          if (openSheet && openSheet.type === 'volcano') renderSheet();
         }
 
         function launchVolcanoMarch() {
@@ -12977,7 +13137,9 @@ export function initGameRuntime(hooks = {}) {
       homeTile: {
         x: typeof state?.homeTile?.x === "number" ? state.homeTile.x : DEFAULT_HOME_TILE.x,
         y: typeof state?.homeTile?.y === "number" ? state.homeTile.y : DEFAULT_HOME_TILE.y
-      }
+      },
+      volcanoMobilization:
+        typeof getVolcanoMobilizationSnapshot === "function" ? getVolcanoMobilizationSnapshot() : undefined
     });
   };
   emitSnapshot();
@@ -13021,6 +13183,65 @@ export function initGameRuntime(hooks = {}) {
         const yPct = ((Number(tileY) + 1) / WORLD_GRID_ROWS) * 100;
         if (typeof centerWorldMapOn === "function") {
           setTimeout(() => centerWorldMapOn(xPct, yPct, { minZoom: 6, animate: true }), 60);
+        }
+      } catch {
+        // ignore
+      }
+    },
+    focusVolcano() {
+      try {
+        if (typeof SoundFX !== "undefined" && typeof SoundFX.play === "function") {
+          SoundFX.play("tap");
+        }
+        if (typeof switchTab === "function") switchTab("worldmap");
+        if (typeof centerWorldMapOn === "function") {
+          setTimeout(() => centerWorldMapOn(VOLCANO_POS.xPct, VOLCANO_POS.yPct, { minZoom: 6, animate: true }), 60);
+        }
+      } catch {
+        // ignore
+      }
+    },
+    openVolcano() {
+      try {
+        if (typeof SoundFX !== "undefined" && typeof SoundFX.play === "function") {
+          SoundFX.play("tap");
+        }
+        if (typeof switchTab === "function") switchTab("worldmap");
+        if (typeof centerWorldMapOn === "function") {
+          setTimeout(() => centerWorldMapOn(VOLCANO_POS.xPct, VOLCANO_POS.yPct, { minZoom: 6, animate: true }), 60);
+        }
+        if (typeof openVolcanoSheet === "function") {
+          setTimeout(() => openVolcanoSheet(), 90);
+        }
+      } catch {
+        // ignore
+      }
+    },
+    adjustVolcanoMobilizationTroop(troopType, delta) {
+      try {
+        if (typeof getActiveMarchForVolcano === "function" && getActiveMarchForVolcano()) return;
+        if (typeof adjustVolcanoDraftTroop === "function") {
+          adjustVolcanoDraftTroop(troopType, Number(delta || 0));
+        }
+      } catch {
+        // ignore
+      }
+    },
+    fillAllVolcanoMobilization() {
+      try {
+        if (typeof getActiveMarchForVolcano === "function" && getActiveMarchForVolcano()) return;
+        if (typeof fillVolcanoDraftAllTroops === "function") {
+          fillVolcanoDraftAllTroops();
+        }
+      } catch {
+        // ignore
+      }
+    },
+    clearVolcanoMobilization() {
+      try {
+        if (typeof getActiveMarchForVolcano === "function" && getActiveMarchForVolcano()) return;
+        if (typeof clearVolcanoDraftTroops === "function") {
+          clearVolcanoDraftTroops();
         }
       } catch {
         // ignore

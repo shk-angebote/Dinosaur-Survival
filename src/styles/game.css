@@ -5401,3 +5401,773 @@
   color: #fbbf24;
   flex-shrink: 0;
 }
+
+/* ==================== VULKAN-STATUS UI-KOMPONENTE ==================== */
+.volc-hud-trigger {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 44;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(245, 239, 230, 0.16);
+  background: rgba(18, 15, 13, 0.95);
+  color: var(--text-primary);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.55);
+  transition: transform 160ms var(--ease-out), border-color 160ms var(--ease-out), opacity 160ms var(--ease-out);
+}
+
+.volc-hud-trigger.is-battle {
+  border-color: rgba(249, 115, 22, 0.58);
+}
+
+.volc-hud-trigger.is-peace {
+  border-color: rgba(56, 189, 248, 0.42);
+}
+
+.volc-hud-trigger.is-own {
+  border-color: rgba(74, 222, 128, 0.58);
+}
+
+.volc-hud-trigger:hover {
+  transform: translateY(-1px);
+  border-color: rgba(251, 191, 36, 0.72);
+}
+
+.volc-hud-trigger:active {
+  transform: translateY(0);
+}
+
+.volc-hud-trigger-label {
+  white-space: nowrap;
+}
+
+.volc-hud-trigger-sep {
+  color: var(--text-muted);
+}
+
+.volc-hud-trigger-time {
+  color: #fde68a;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.volc-hud-trigger.is-peace .volc-hud-trigger-time {
+  color: #bae6fd;
+}
+
+.volc-hud-trigger.is-own .volc-hud-trigger-time {
+  color: #86efac;
+}
+
+.volc-hud-panel {
+  position: fixed;
+  top: 62px;
+  right: 14px;
+  width: min(368px, calc(100vw - 24px));
+  max-height: min(620px, calc(100dvh - 88px));
+  z-index: 67;
+  display: none;
+  flex-direction: column;
+  border-radius: 14px;
+  border: 1px solid rgba(245, 239, 230, 0.14);
+  background: rgba(15, 13, 12, 0.98);
+  box-shadow: 0 22px 48px rgba(0, 0, 0, 0.76);
+  overflow: hidden;
+}
+
+.volc-hud-panel.open {
+  display: flex;
+  animation: fadeIn 160ms var(--ease-out);
+}
+
+@media (max-width: 767px) {
+  .volc-hud-trigger {
+    top: auto;
+    right: 12px;
+    bottom: calc(var(--nav-h, 66px) + 56px);
+    min-height: 40px;
+    padding: 0 12px;
+  }
+
+  .volc-hud-panel {
+    top: auto;
+    right: 12px;
+    bottom: calc(var(--nav-h, 66px) + 104px);
+    max-height: min(520px, calc(100dvh - 180px));
+  }
+}
+
+.volc-hud-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid rgba(245, 239, 230, 0.08);
+  flex-shrink: 0;
+}
+
+.volc-hud-heading-block {
+  min-width: 0;
+}
+
+.volc-hud-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text-primary);
+  text-wrap: balance;
+}
+
+.volc-hud-meta {
+  margin: 4px 0 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.volc-hud-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.volc-hud-icon-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  transition: opacity 150ms var(--ease-out), transform 150ms var(--ease-out), color 150ms var(--ease-out);
+}
+
+.volc-hud-icon-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: rgba(245, 239, 230, 0.06);
+}
+
+.volc-hud-icon-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+@keyframes volcSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.volc-spin {
+  animation: volcSpin 750ms linear infinite;
+}
+
+.volc-hud-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.volc-hud-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.volc-hud-section + .volc-hud-section {
+  padding-top: 14px;
+  border-top: 1px solid rgba(245, 239, 230, 0.08);
+}
+
+.volc-phase-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.volc-phase-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.volc-phase-text.is-battle {
+  color: #fb923c;
+}
+
+.volc-phase-text.is-peace {
+  color: #7dd3fc;
+}
+
+.volc-phase-date {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.volc-countdown-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid rgba(245, 239, 230, 0.08);
+  border-bottom: 1px solid rgba(245, 239, 230, 0.08);
+  padding: 10px 0;
+}
+
+.volc-cd-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.volc-cd-cell + .volc-cd-cell {
+  border-left: 1px solid rgba(245, 239, 230, 0.08);
+}
+
+.volc-cd-num {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--text-primary);
+}
+
+.volc-cd-unit {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.volc-progress-track {
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(245, 239, 230, 0.08);
+  overflow: hidden;
+}
+
+.volc-progress-fill {
+  height: 100%;
+  border-radius: 2px;
+}
+
+.volc-progress-fill.is-battle {
+  background: linear-gradient(90deg, #ea580c, #f59e0b);
+}
+
+.volc-progress-fill.is-peace {
+  background: linear-gradient(90deg, #0284c7, #38bdf8);
+}
+
+.volc-phase-note {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.volc-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.volc-tab-btn {
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 150ms var(--ease-out), background 150ms var(--ease-out);
+}
+
+.volc-tab-btn.active {
+  background: var(--surface-panel);
+  color: var(--text-primary);
+}
+
+.volc-tab-content {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.volc-section-heading {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.volc-section-head-inline {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.volc-buff-state {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.volc-buff-state.is-active {
+  color: #4ade80;
+  font-weight: 600;
+}
+
+.volc-control-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.volc-control-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.volc-ruler-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: #fde68a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.volc-ruler-name.is-own {
+  color: #4ade80;
+}
+
+.volc-ruler-name.is-enemy {
+  color: #fca5a5;
+}
+
+.volc-control-sub {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.volc-power-readout {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex-shrink: 0;
+}
+
+.volc-power-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.volc-power-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fb923c;
+  white-space: nowrap;
+}
+
+.volc-detail-list {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(245, 239, 230, 0.06);
+}
+
+.volc-detail-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.volc-detail-row dt {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.volc-detail-row dd {
+  margin: 0;
+  color: var(--text-secondary);
+  text-align: right;
+  min-width: 0;
+}
+
+.volc-reward-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.volc-reward-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid rgba(245, 239, 230, 0.06);
+}
+
+.volc-reward-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.volc-reward-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.volc-reward-desc {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
+.volc-reward-val {
+  font-size: 13px;
+  font-weight: 700;
+  color: #fde68a;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.volc-reward-val.is-active {
+  color: #4ade80;
+}
+
+.volc-chronicle-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.volc-chronicle-row {
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(245, 239, 230, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.volc-chronicle-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.volc-chronicle-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.volc-chronicle-outcome {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 0;
+}
+
+.volc-chronicle-outcome.is-conquest {
+  color: #fb923c;
+}
+
+.volc-chronicle-time {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.volc-chronicle-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.volc-empty-note {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.volc-hud-footer {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 12px 16px 16px;
+  border-top: 1px solid rgba(245, 239, 230, 0.08);
+  flex-shrink: 0;
+}
+
+.volc-btn-primary,
+.volc-btn-secondary {
+  min-height: 42px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 150ms var(--ease-out), opacity 150ms var(--ease-out);
+}
+
+.volc-btn-primary {
+  background: linear-gradient(180deg, #f97316 0%, #c2410c 100%);
+  color: #fffaf5;
+}
+
+.volc-btn-secondary {
+  background: var(--surface-panel);
+  border: 1px solid rgba(245, 239, 230, 0.14);
+  color: var(--text-primary);
+}
+
+.volc-btn-primary:hover,
+.volc-btn-secondary:hover {
+  transform: translateY(-1px);
+}
+
+.volc-btn-primary:active,
+.volc-btn-secondary:active {
+  transform: translateY(0);
+}
+
+.volc-progress-fill.is-mob {
+  background: linear-gradient(90deg, #16a34a, #4ade80);
+}
+
+.volc-mob-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.volc-mob-state.is-ready {
+  color: #4ade80;
+}
+
+.volc-mob-state.is-marching {
+  color: #fb923c;
+}
+
+.volc-mob-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.volc-mob-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.volc-mob-count {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.volc-mob-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  min-width: 0;
+}
+
+.volc-mob-heroes {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 170px;
+}
+
+.volc-mob-power {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fde68a;
+  white-space: nowrap;
+}
+
+.volc-mob-unit-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.volc-mob-unit-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(245, 239, 230, 0.06);
+}
+
+.volc-mob-unit-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.volc-mob-unit-name {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.volc-mob-unit-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.volc-mob-unit-count {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.volc-mob-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.volc-mob-step-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 7px;
+  border: 1px solid rgba(245, 239, 230, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 140ms var(--ease-out), border-color 140ms var(--ease-out), opacity 140ms var(--ease-out);
+}
+
+.volc-mob-step-btn:hover:not(:disabled) {
+  background: rgba(245, 239, 230, 0.1);
+  border-color: rgba(245, 239, 230, 0.28);
+}
+
+.volc-mob-step-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.volc-mob-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.volc-mob-quick-btn {
+  min-height: 40px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(245, 239, 230, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 140ms var(--ease-out), border-color 140ms var(--ease-out), opacity 140ms var(--ease-out);
+}
+
+.volc-mob-quick-btn:hover:not(:disabled) {
+  background: rgba(245, 239, 230, 0.09);
+  border-color: rgba(245, 239, 230, 0.24);
+}
+
+.volc-mob-quick-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .volc-hud-trigger,
+  .volc-hud-panel.open,
+  .volc-spin,
+  .volc-btn-primary,
+  .volc-btn-secondary,
+  .volc-mob-step-btn,
+  .volc-mob-quick-btn {
+    animation: none;
+    transition: none;
+  }
+}
+

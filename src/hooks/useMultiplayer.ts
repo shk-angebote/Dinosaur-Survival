@@ -10,6 +10,7 @@ import type {
   WorldMarchDTO,
   WorldSettlementDTO,
   WorldTradeDTO,
+  WorldVolcanoStateDTO,
 } from '../shared/apiTypes';
 
 export interface MultiplayerSnapshot {
@@ -18,6 +19,7 @@ export interface MultiplayerSnapshot {
   marches: WorldMarchDTO[];
   chat: WorldChatMessageDTO[];
   trades: WorldTradeDTO[];
+  volcano: WorldVolcanoStateDTO | null;
   onlinePlayers: number;
   diagnostics: ConnectionDiagnostics;
   logs: DiagnosticLogEntry[];
@@ -32,6 +34,7 @@ function readSnapshot(): MultiplayerSnapshot {
     marches: world.marches,
     chat: world.chat,
     trades: world.trades,
+    volcano: world.volcano,
     onlinePlayers: world.onlinePlayers,
     diagnostics: bridge.getDiagnostics(),
     logs: bridge.getLogs(),
@@ -71,6 +74,10 @@ export function useMultiplayer() {
     bridge.clearLogs();
   }, []);
 
+  const refreshVolcanoState = useCallback(async () => {
+    return bridge.refreshVolcanoState();
+  }, []);
+
   const proposeTrade = useCallback(
     async (req: {
       toUid: string;
@@ -99,6 +106,7 @@ export function useMultiplayer() {
     setTribeName,
     runDiagnostics,
     clearLogs,
+    refreshVolcanoState,
     proposeTrade,
     confirmTrade,
     cancelTrade,

@@ -29,6 +29,28 @@ export interface NeighborActionResult {
   message: string;
 }
 
+export type TroopKey = 'slinger' | 'clubman' | 'dinorider';
+
+export interface TroopCounts {
+  slinger: number;
+  clubman: number;
+  dinorider: number;
+}
+
+export interface VolcanoMobilizationSnapshot {
+  status: 'marching' | 'ready' | 'idle';
+  marchPhase?: 'marching_out' | 'attacking' | 'marching_back' | null;
+  assignedTroops: TroopCounts;
+  availableTroops: TroopCounts;
+  totalTroops: TroopCounts;
+  assignedTotal: number;
+  availableTotal: number;
+  assignedHeroes: number;
+  assignedHeroNames: string[];
+  maxHeroes: number;
+  squadPower: number;
+}
+
 export interface GameRuntimeSnapshot {
   bonfireLevel: number;
   power: number;
@@ -40,10 +62,16 @@ export interface GameRuntimeSnapshot {
     x: number;
     y: number;
   };
+  volcanoMobilization?: VolcanoMobilizationSnapshot;
 }
 
 export interface GameRuntimeHandle {
   jumpToWorldTile: (tileX: number, tileY: number) => void;
+  focusVolcano: () => void;
+  openVolcano: () => void;
+  adjustVolcanoMobilizationTroop: (troopType: TroopKey, delta: number) => void;
+  fillAllVolcanoMobilization: () => void;
+  clearVolcanoMobilization: () => void;
   visitSettlement: (target: VisitSettlementTarget) => void;
   tradeResourcesWithNeighbor: (req: NeighborTradeRequest) => NeighborActionResult;
   supportNeighborBonfire: (target: VisitSettlementTarget) => NeighborActionResult;
