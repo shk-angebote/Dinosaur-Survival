@@ -7764,12 +7764,21 @@ export function initGameRuntime(hooks = {}) {
           return Math.max(0.24, Math.min(vw, vh) / WORLD_GRID_COLS);
         }
 
+        function isWorldMap3DReady() {
+          return Boolean(window.WorldMap3D && window.WorldMap3D.isReady());
+        }
+
+        function getWorldIsoYScale() {
+          return isWorldMap3DReady() ? window.WorldMap3D.getIsoYScale() : 1;
+        }
+
         function clampWorldCameraState(cx, cy, zoom) {
           const { vw, vh } = getWorldViewportSize();
           const minZoom = getWorldMinZoom(vw, vh);
           const z = Math.max(minZoom, Math.min(WORLD_CAM_MAX_ZOOM, Number(zoom) || WORLD_CAM_DEFAULT_ZOOM));
+          const isoY = getWorldIsoYScale();
           const halfW = vw / (2 * z);
-          const halfH = vh / (2 * z);
+          const halfH = vh / (2 * z * isoY);
           let nextCx = cx;
           let nextCy = cy;
           if (WORLD_GRID_COLS * z <= vw) {
@@ -7777,7 +7786,7 @@ export function initGameRuntime(hooks = {}) {
           } else {
             nextCx = Math.max(halfW, Math.min(WORLD_GRID_COLS - halfW, cx));
           }
-          if (WORLD_GRID_ROWS * z <= vh) {
+          if (WORLD_GRID_ROWS * z * isoY <= vh) {
             nextCy = WORLD_GRID_ROWS / 2;
           } else {
             nextCy = Math.max(halfH, Math.min(WORLD_GRID_ROWS - halfH, cy));
@@ -7786,6 +7795,10 @@ export function initGameRuntime(hooks = {}) {
         }
 
         function worldToScreen(wx, wy, vw, vh) {
+          if (isWorldMap3DReady()) {
+            const pt = window.WorldMap3D.projectWorld(wx, wy, 0);
+            return { sx: pt.sx, sy: pt.sy };
+          }
           return {
             sx: vw / 2 + (wx - worldCam.cx) * worldCam.zoom,
             sy: vh / 2 + (wy - worldCam.cy) * worldCam.zoom
@@ -7793,6 +7806,9 @@ export function initGameRuntime(hooks = {}) {
         }
 
         function screenToWorld(sx, sy, vw, vh) {
+          if (isWorldMap3DReady()) {
+            return window.WorldMap3D.unprojectScreen(sx, sy);
+          }
           return {
             wx: worldCam.cx + (sx - vw / 2) / worldCam.zoom,
             wy: worldCam.cy + (sy - vh / 2) / worldCam.zoom
@@ -7849,21 +7865,28 @@ export function initGameRuntime(hooks = {}) {
           const { vw, vh } = getWorldViewportSize();
           const fx = typeof focalSx === 'number' ? focalSx : vw / 2;
           const fy = typeof focalSy === 'number' ? focalSy : vh / 2;
+          const isoY = getWorldIsoYScale();
           const baseZoom = animate ? worldCam.targetZoom : worldCam.zoom;
           const baseCx = animate ? worldCam.targetCx : worldCam.cx;
           const baseCy = animate ? worldCam.targetCy : worldCam.cy;
           const worldX = baseCx + (fx - vw / 2) / baseZoom;
-          const worldY = baseCy + (fy - vh / 2) / baseZoom;
+          const worldY = baseCy + (fy - vh / 2) / (baseZoom * isoY);
           const minZoom = getWorldMinZoom(vw, vh);
           const nextZoom = Math.max(minZoom, Math.min(WORLD_CAM_MAX_ZOOM, baseZoom * factor));
           const nextCx = worldX - (fx - vw / 2) / nextZoom;
-          const nextCy = worldY - (fy - vh / 2) / nextZoom;
+          const nextCy = worldY - (fy - vh / 2) / (nextZoom * isoY);
           setWorldCameraTarget(nextCx, nextCy, nextZoom, animate);
         }
 
         function drawWorldMapCanvas(vw, vh) {
           const canvas = document.getElementById('worldMapCanvas');
+          if (isWorldMap3DReady()) {
+            if (canvas && canvas.style.display !== 'none') canvas.style.display = 'none';
+            window.WorldMap3D.setCamera(worldCam.cx, worldCam.cy, worldCam.zoom, vw, vh);
+            return;
+          }
           if (!canvas) return;
+          if (canvas.style.display === 'none') canvas.style.display = 'block';
           const dpr = Math.min(window.devicePixelRatio || 1, 2);
           const targetW = Math.max(1, Math.round(vw * dpr));
           const targetH = Math.max(1, Math.round(vh * dpr));
@@ -8036,10 +8059,11 @@ export function initGameRuntime(hooks = {}) {
         function updateProjectedWorldMarkers(vw, vh) {
           const markersEl = document.getElementById('worldMapMarkers');
           if (!markersEl) return;
+          const is3d = isWorldMap3DReady();
           markersEl.classList.toggle('wm-zoom-far', worldCam.zoom < WORLD_CAM_DEFAULT_ZOOM * 0.72);
           const scale = Math.max(
-            0.72,
-            Math.min(1.08, 0.78 + Math.log2(Math.max(0.25, worldCam.zoom) / 0.65) * 0.065)
+            0.78,
+            Math.min(1.06, 0.84 + Math.log2(Math.max(0.25, worldCam.zoom) / 0.65) * 0.055)
           );
           const margin = 96;
           const nodes = markersEl.children;
@@ -8053,7 +8077,10 @@ export function initGameRuntime(hooks = {}) {
               if (el.style.display !== 'none') el.style.display = 'none';
             } else {
               if (el.style.display === 'none') el.style.display = '';
-              el.style.transform = `translate3d(${sx.toFixed(1)}px, ${sy.toFixed(1)}px, 0) translate(-50%, -50%) scale(${scale.toFixed(3)})`;
+              // In 3D mode anchor the Village-style plaque neatly below each 3D miniature's base
+              const yOffsetPx = is3d ? Number(el.dataset.yOff || 8) : 0;
+              const yAnchor = is3d ? `${yOffsetPx}px` : '-50%';
+              el.style.transform = `translate3d(${sx.toFixed(1)}px, ${sy.toFixed(1)}px, 0) translate(-50%, ${yAnchor}) scale(${scale.toFixed(3)})`;
             }
           }
         }
@@ -8115,12 +8142,14 @@ export function initGameRuntime(hooks = {}) {
         function positionTeleportGhostElement(vw, vh) {
           const preview = document.getElementById('wmGhostPreview');
           if (!preview) return;
+          const isoY = getWorldIsoYScale();
           const sizePx = Math.max(38, 2 * worldCam.zoom);
+          const heightPx = Math.max(30, sizePx * isoY);
           const centerPt = worldToScreen(teleportGhost.anchorX + 1, teleportGhost.anchorY + 1, vw, vh);
           preview.style.left = `${(centerPt.sx - sizePx / 2).toFixed(1)}px`;
-          preview.style.top = `${(centerPt.sy - sizePx / 2).toFixed(1)}px`;
+          preview.style.top = `${(centerPt.sy - heightPx / 2).toFixed(1)}px`;
           preview.style.width = `${sizePx.toFixed(1)}px`;
-          preview.style.height = `${sizePx.toFixed(1)}px`;
+          preview.style.height = `${heightPx.toFixed(1)}px`;
         }
 
         function applyWorldCamera(cx, cy, zoom = worldCam.zoom) {
@@ -8166,10 +8195,12 @@ export function initGameRuntime(hooks = {}) {
         function renderWorldMinimapViewport(vw, vh) {
           const rect = document.getElementById('wmMiniViewportRect');
           if (!rect) return;
-          const visW = vw / worldCam.zoom;
-          const visH = vh / worldCam.zoom;
-          const leftTile = worldCam.cx - visW / 2;
-          const topTile = worldCam.cy - visH / 2;
+          const topLeft = screenToWorld(0, 0, vw, vh);
+          const bottomRight = screenToWorld(vw, vh, vw, vh);
+          const leftTile = Math.min(topLeft.wx, bottomRight.wx);
+          const topTile = Math.min(topLeft.wy, bottomRight.wy);
+          const visW = Math.max(1, Math.abs(bottomRight.wx - topLeft.wx));
+          const visH = Math.max(1, Math.abs(bottomRight.wy - topLeft.wy));
           const scale = 120 / WORLD_GRID_COLS;
           const rx = Math.max(0, Math.min(120, leftTile * scale));
           const ry = Math.max(0, Math.min(120, topTile * scale));
@@ -8255,6 +8286,85 @@ export function initGameRuntime(hooks = {}) {
           centerWorldMapOn(home.xPct, home.yPct, { animate: true });
         }
 
+        function syncWorldMap3DEntities() {
+          if (!isWorldMap3DReady()) return;
+          const now = Date.now();
+          const home = getHomePos();
+          const ownUid = mpWorld.session ? mpWorld.session.uid : null;
+          const settlements = [
+            {
+              id: 'home',
+              isOwn: true,
+              wx: home.wx,
+              wy: home.wy,
+              bonfireLevel: state.buildings.bonfire.level,
+              tribeName: (mpWorld.session && mpWorld.session.tribeName) || 'Meine Siedlung'
+            }
+          ];
+          for (const pl of mpWorld.settlements || []) {
+            if (ownUid && pl.uid === ownUid) continue;
+            settlements.push({
+              id: String(pl.uid),
+              isOwn: false,
+              wx: Number(pl.tileX) + 1,
+              wy: Number(pl.tileY) + 1,
+              bonfireLevel: Number(pl.bonfireLevel) || 1,
+              tribeName: pl.tribeName || 'Fremdstamm'
+            });
+          }
+
+          const nodes = [];
+          for (const def of WORLD_NODES) {
+            const info = getWorldNodeInfo(def.id);
+            const nState = getWorldNodeState(def.id);
+            const pos = getNodePos(def.id);
+            if (!info || !pos) continue;
+            const march = getActiveMarchForNode(def.id);
+            const enemyOcc = getEnemyNodeOccupant(def.id);
+            nodes.push({
+              id: def.id,
+              resource: info.resource,
+              level: info.level,
+              wx: pos.wx,
+              wy: pos.wy,
+              depleted: nState.remaining <= 0 && !march,
+              activeGather: Boolean(march),
+              enemyOccupied: Boolean(enemyOcc && !march)
+            });
+          }
+
+          const dinos = [];
+          for (const dDef of WORLD_DINOS) {
+            const dState = getWorldDinoState(dDef.id);
+            const sp = getDinoSpecies(dState.speciesId);
+            const pos = getDinoPos(dDef.id);
+            if (!sp || !pos) continue;
+            const march = getActiveMarchForDino(dDef.id);
+            dinos.push({
+              id: dDef.id,
+              speciesId: sp.id,
+              level: dState.level,
+              accent: sp.accent,
+              wx: pos.wx,
+              wy: pos.wy,
+              respawning: dState.respawnAt > now && !march,
+              activeHunt: Boolean(march)
+            });
+          }
+
+          window.WorldMap3D.syncEntities({
+            settlements,
+            nodes,
+            dinos,
+            teleportGhost: {
+              active: Boolean(teleportGhost.active),
+              anchorX: teleportGhost.anchorX,
+              anchorY: teleportGhost.anchorY,
+              valid: Boolean(teleportGhost.valid)
+            }
+          });
+        }
+
         function renderTeleportGhostUI() {
           const ghostLayer = document.getElementById('wmGhostLayer');
           const tpBar = document.getElementById('wmTeleportBar');
@@ -8265,6 +8375,8 @@ export function initGameRuntime(hooks = {}) {
           if (tpBtn) tpBtn.classList.toggle('active', teleportGhost.active);
           if (tpBtnLabel) tpBtnLabel.textContent = teleportGhost.active ? 'Aktiv' : `Teleport (${tpCount})`;
 
+          syncWorldMap3DEntities();
+
           if (!teleportGhost.active) {
             if (ghostLayer) ghostLayer.innerHTML = '';
             if (tpBar) tpBar.classList.remove('visible');
@@ -8274,6 +8386,7 @@ export function initGameRuntime(hooks = {}) {
           if (tpBar) tpBar.classList.add('visible');
 
           const { vw, vh } = getWorldViewportSize();
+          const isoY = getWorldIsoYScale();
           const v = teleportGhost.validation || validateGhost2x2(teleportGhost.anchorX, teleportGhost.anchorY);
           const coordX = teleportGhost.anchorX;
           const coordY = teleportGhost.anchorY;
@@ -8281,9 +8394,10 @@ export function initGameRuntime(hooks = {}) {
           const strokeCol = v.valid ? '#86efac' : '#fca5a5';
           const fillCol = v.valid ? 'rgba(34, 197, 94, 0.35)' : 'rgba(239, 68, 68, 0.42)';
           const sizePx = Math.max(38, 2 * worldCam.zoom);
+          const heightPx = Math.max(30, sizePx * isoY);
           const centerPt = worldToScreen(teleportGhost.anchorX + 1, teleportGhost.anchorY + 1, vw, vh);
           const leftPx = centerPt.sx - sizePx / 2;
-          const topPx = centerPt.sy - sizePx / 2;
+          const topPx = centerPt.sy - heightPx / 2;
 
           const cellsHtml = v.cells
             .map((c) => `<div class="wm-ghost-cell ${c.free ? 'cell-free' : 'cell-blocked'}"></div>`)
@@ -8294,7 +8408,7 @@ export function initGameRuntime(hooks = {}) {
               <div
                 class="wm-ghost-2x2 ${v.valid ? 'is-valid' : 'is-invalid'} ${teleportGhost.dragging ? 'dragging' : ''}"
                 id="wmGhostPreview"
-                style="left:${leftPx.toFixed(1)}px; top:${topPx.toFixed(1)}px; width:${sizePx.toFixed(1)}px; height:${sizePx.toFixed(1)}px;"
+                style="left:${leftPx.toFixed(1)}px; top:${topPx.toFixed(1)}px; width:${sizePx.toFixed(1)}px; height:${heightPx.toFixed(1)}px;"
               >
                 ${cellsHtml}
                 <div class="wm-ghost-silhouette">
@@ -8328,7 +8442,7 @@ export function initGameRuntime(hooks = {}) {
           if (helpEl) {
             helpEl.textContent =
               tpCount > 0
-                ? `Ziehe die 2×2-Vorschau über das Raster oder tippe ein Feld an · ${tpCount}× Teleport-Item verfügbar.`
+                ? `Ziehe die 2×2-Vorschau über das Raster oder tippe ein Ziel an · ${tpCount}× Teleport-Item verfügbar.`
                 : 'Kein Siedlungs-Teleport mehr vorhanden — Vorschau nur zur Ansicht.';
           }
           if (confirmBtn) {
@@ -8360,7 +8474,10 @@ export function initGameRuntime(hooks = {}) {
             `;
           }
 
-          // 1. Marker mit Welt-Kachelkoordinaten (data-wx / data-wy) für schnelles GPU-Projektions-Update
+          // 0b. 3D-Weltkarten-Modelle (Siedlungen, 48 Sammelstellen, 40 Dinos & 2×2 Teleport-Pad) synchronisieren
+          syncWorldMap3DEntities();
+
+          // 1. Dorf-Plaketten (.wm-caption) unter jedem 3D-Modell für klare Lesbarkeit & Klickbarkeit
           const markersEl = document.getElementById('worldMapMarkers');
           const bfLvl = state.buildings.bonfire.level;
           const ownUid = mpWorld.session ? mpWorld.session.uid : null;
@@ -8371,13 +8488,16 @@ export function initGameRuntime(hooks = {}) {
               data-wm-home="1"
               data-wx="${home.wx}"
               data-wy="${home.wy}"
+              data-y-off="14"
               aria-label="${ownTribeLabel} Stufe ${bfLvl}"
             >
-              <div class="wm-pin-ring">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#86efac" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2c2.5 3.6 5 6.4 5 10a5 5 0 1 1-10 0c0-3.6 2.5-6.4 5-10Z"/><path d="M5 21h14"/></svg>
-                <span class="wm-pin-lvl">St.${bfLvl}</span>
+              <div class="wm-caption">
+                <div class="wm-cap-row">
+                  <span class="wm-cap-lvl">St.${bfLvl}</span>
+                  <span class="wm-cap-name">${ownTribeLabel}</span>
+                </div>
+                <span class="wm-cap-meta">Signalfeuer · [${home.coordX}, ${home.coordY}]</span>
               </div>
-              <span class="wm-nameplate">${ownTribeLabel}</span>
             </button>
           `;
 
@@ -8393,13 +8513,15 @@ export function initGameRuntime(hooks = {}) {
                 data-wm-player="${escapeHtmlMp(pl.uid)}"
                 data-wx="${wx}"
                 data-wy="${wy}"
+                data-y-off="13"
                 aria-label="Spielerstamm ${safeName} Stufe ${pl.bonfireLevel}"
               >
-                <div class="wm-pin-ring">
-                  <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#7dd3fc" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20h18"/><path d="M5 20L12 5l7 15"/><path d="M10 20v-5h4v5"/></svg>
-                  <span class="wm-pin-lvl">St.${pl.bonfireLevel}</span>
+                <div class="wm-caption">
+                  <div class="wm-cap-row">
+                    <span class="wm-cap-lvl">St.${pl.bonfireLevel}</span>
+                    <span class="wm-cap-name">${safeName}</span>
+                  </div>
                 </div>
-                <span class="wm-nameplate">${safeName}</span>
               </button>
             `;
           }
@@ -8439,16 +8561,18 @@ export function initGameRuntime(hooks = {}) {
                 data-wm-node="${def.id}"
                 data-wx="${wx}"
                 data-wy="${wy}"
+                data-y-off="7"
                 style="--node-accent:${accent};"
                 aria-label="${info.name} Stufe ${info.level}${enemyOcc ? ` · Besetzt von ${escapeHtmlMp(enemyOcc.tribeName)}` : ''}"
               >
-                <div class="wm-pin-ring">
-                  ${getResourceIconSVG(info.resource, 12)}
-                  <span class="wm-pin-lvl">${info.level}</span>
-                  ${enemyOcc && !march ? `<span class="wm-pvp-badge" title="Besetzt von ${escapeHtmlMp(enemyOcc.tribeName)}">⚔</span>` : ''}
+                <div class="wm-caption">
+                  <div class="wm-cap-row">
+                    <span class="wm-cap-dot"></span>
+                    <span class="wm-cap-lvl">${info.level}</span>
+                    <span class="wm-cap-name">${subLabel}</span>
+                  </div>
+                  ${progHtml}
                 </div>
-                <span class="wm-nameplate">${subLabel}</span>
-                ${progHtml}
               </button>
             `;
           }
@@ -8483,15 +8607,18 @@ export function initGameRuntime(hooks = {}) {
                 data-wm-dino="${dDef.id}"
                 data-wx="${wx}"
                 data-wy="${wy}"
+                data-y-off="8"
                 style="--node-accent:${sp.accent};"
                 aria-label="${sp.name} Stufe ${dState.level}"
               >
-                <div class="wm-pin-ring">
-                  ${getDinoIconSVG(sp.id, 13, sp.accent)}
-                  <span class="wm-pin-lvl">${dState.level}</span>
+                <div class="wm-caption">
+                  <div class="wm-cap-row">
+                    <span class="wm-cap-dot"></span>
+                    <span class="wm-cap-lvl">${dState.level}</span>
+                    <span class="wm-cap-name">${subLabel}</span>
+                  </div>
+                  ${progHtml}
                 </div>
-                <span class="wm-nameplate">${subLabel}</span>
-                ${progHtml}
               </button>
             `;
           }
@@ -9833,7 +9960,11 @@ export function initGameRuntime(hooks = {}) {
           if (window.Village3D) {
             window.Village3D.setVisible(tabName === 'village');
           }
+          if (window.WorldMap3D) {
+            window.WorldMap3D.setVisible(tabName === 'worldmap');
+          }
           if (tabName === 'village') resizeVillageScene();
+          if (tabName === 'worldmap' && window.WorldMap3D) window.WorldMap3D.resize();
           renderAll();
         }
 
@@ -10645,6 +10776,12 @@ export function initGameRuntime(hooks = {}) {
 
         function resizeCanvas() {
           resizeVillageScene();
+          if (window.WorldMap3D) {
+            window.WorldMap3D.resize();
+            if (activeTab === 'worldmap') {
+              applyWorldCamera(worldCam.cx, worldCam.cy, worldCam.zoom);
+            }
+          }
           const stage = document.getElementById('villageStage');
           if (!stage) return;
           const rect = stage.getBoundingClientRect();
@@ -10893,13 +11030,14 @@ export function initGameRuntime(hooks = {}) {
                 const rect = wmViewport.getBoundingClientRect();
                 const vw = rect.width || 380;
                 const vh = rect.height || 600;
+                const isoY = getWorldIsoYScale();
                 const minZoom = getWorldMinZoom(vw, vh);
                 const ratio = info.dist / Math.max(12, worldCam.pinchStartDist);
                 const nextZoom = Math.max(minZoom, Math.min(WORLD_CAM_MAX_ZOOM, worldCam.pinchStartZoom * ratio));
                 const midSx = info.midX - rect.left;
                 const midSy = info.midY - rect.top;
                 const nextCx = worldCam.pinchWorldX - (midSx - vw / 2) / nextZoom;
-                const nextCy = worldCam.pinchWorldY - (midSy - vh / 2) / nextZoom;
+                const nextCy = worldCam.pinchWorldY - (midSy - vh / 2) / (nextZoom * isoY);
                 setWorldCameraTarget(nextCx, nextCy, nextZoom, false);
               }
               return;
@@ -10916,8 +11054,9 @@ export function initGameRuntime(hooks = {}) {
               } catch (_) {}
             }
             if (worldCam.moved) {
+              const isoY = getWorldIsoYScale();
               const nextCx = worldCam.originCx - dx / worldCam.zoom;
-              const nextCy = worldCam.originCy - dy / worldCam.zoom;
+              const nextCy = worldCam.originCy - dy / (worldCam.zoom * isoY);
               setWorldCameraTarget(nextCx, nextCy, worldCam.zoom, false);
             }
           });
@@ -10970,6 +11109,33 @@ export function initGameRuntime(hooks = {}) {
               const targetAy = Math.floor(pt.wy - 0.5);
               SoundFX.play('tap');
               setGhostAnchor(targetAx, targetAy);
+            } else if (
+              !wasMoved &&
+              !teleportGhost.active &&
+              isWorldMap3DReady() &&
+              !e.target.closest('.wm-node') &&
+              !e.target.closest('.wm-top-bar') &&
+              !e.target.closest('.wm-march-bar') &&
+              !e.target.closest('.wm-teleport-bar')
+            ) {
+              // Direktes Antippen auf ein 3D-Modell (Siedlung, Sammelstelle oder Dino) per Raycast
+              const rect = wmViewport.getBoundingClientRect();
+              const pick = window.WorldMap3D.pickEntityAt(e.clientX - rect.left, e.clientY - rect.top);
+              if (pick) {
+                SoundFX.play('tap');
+                if (pick.kind === 'home') {
+                  openOwnSettlementSheet();
+                } else if (pick.kind === 'player') {
+                  const pl = (mpWorld.settlements || []).find((s) => String(s.uid) === String(pick.id));
+                  if (pl) {
+                    showToast(`${pl.tribeName} · Signalfeuer St. ${pl.bonfireLevel} · Macht ${pl.power} · Grid [${pl.tileX}, ${pl.tileY}]`, 'info');
+                  }
+                } else if (pick.kind === 'node') {
+                  openWorldNodeSheet(pick.id);
+                } else if (pick.kind === 'dino') {
+                  openWorldDinoSheet(pick.id);
+                }
+              }
             }
 
             if (wasMoved) {
@@ -11979,6 +12145,18 @@ export function initGameRuntime(hooks = {}) {
           renderVillageMap();
         }
 
+        function bootstrapWorldMap3D() {
+          const mount = document.getElementById('worldMap3dMount');
+          if (!mount || !window.WorldMap3D) return;
+          const ok = window.WorldMap3D.init(mount);
+          if (!ok) return;
+          window.WorldMap3D.setVisible(activeTab === 'worldmap');
+          syncWorldMap3DEntities();
+          if (activeTab === 'worldmap') {
+            renderWorldMap();
+          }
+        }
+
         function init() {
           const loaded = loadState();
           let offlineReport = null;
@@ -11991,7 +12169,9 @@ export function initGameRuntime(hooks = {}) {
 
           bindEvents();
           bootstrapVillage3D();
+          bootstrapWorldMap3D();
           window.addEventListener('village3d-ready', bootstrapVillage3D, { once: true });
+          window.addEventListener('worldmap3d-ready', bootstrapWorldMap3D, { once: true });
           // Multiplayer-Bridge direkt oder nach Modul-Ladung initialisieren
           if (window.DinoMultiplayer) {
             bootstrapMultiplayer();

@@ -990,6 +990,22 @@
         cursor: grabbing;
       }
 
+      .worldmap-3d-mount {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 1;
+        pointer-events: none;
+        overflow: hidden;
+      }
+
+      .worldmap-3d-mount canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+
       .worldmap-canvas {
         position: absolute;
         inset: 0;
@@ -1006,7 +1022,7 @@
         inset: 0;
         pointer-events: none;
         z-index: 4;
-        box-shadow: inset 0 28px 36px rgba(10, 8, 7, 0.55), inset 0 -42px 44px rgba(10, 8, 7, 0.65);
+        box-shadow: inset 0 28px 36px rgba(10, 8, 7, 0.52), inset 0 -42px 44px rgba(10, 8, 7, 0.62);
       }
 
       .worldmap-marches-svg {
@@ -1052,111 +1068,163 @@
         pointer-events: none;
       }
 
+      /* Village-matched 3D Volcanic Plaque Markers */
       .wm-node {
         position: absolute;
         top: 0;
         left: 0;
         will-change: transform;
         pointer-events: auto;
-        min-width: 54px;
-        min-height: 54px;
         display: flex;
         flex-direction: column;
         align-items: center;
-        justify-content: center;
-        gap: 3px;
+        justify-content: flex-start;
+        gap: 2px;
+        padding: 0;
+        background: transparent;
+        border: 0;
         cursor: pointer;
-        transition: filter 160ms var(--ease-out), opacity 160ms var(--ease-out);
+        transition: filter 140ms var(--ease-out), opacity 140ms var(--ease-out);
       }
 
-      .wm-node:active .wm-pin-ring {
-        transform: scale(0.92);
+      .wm-node:hover {
+        filter: brightness(1.14);
+      }
+
+      .wm-node:active .wm-caption {
+        transform: scale(0.95);
       }
 
       .wm-node.depleted {
-        opacity: 0.62;
+        opacity: 0.58;
         filter: saturate(0.45);
       }
 
-      .wm-pin-ring {
+      .wm-caption {
         position: relative;
-        width: 38px;
-        height: 38px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: rgba(15, 13, 12, 0.84);
-        border: 2px solid var(--node-accent, var(--accent-amber));
-        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.72), 0 0 12px rgba(249, 115, 22, 0.2);
-      }
-
-      .wm-node.own-settlement .wm-pin-ring {
-        width: 46px;
-        height: 46px;
-        border: 2.5px solid #4ade80;
-        background: rgba(12, 24, 18, 0.88);
-        box-shadow: 0 0 0 6px rgba(74, 222, 128, 0.16), 0 6px 18px rgba(0, 0, 0, 0.78);
-      }
-
-      .wm-node.active-gather .wm-pin-ring {
-        box-shadow: 0 0 0 5px rgba(245, 158, 11, 0.28), 0 4px 16px rgba(0, 0, 0, 0.78);
-      }
-
-      .wm-pin-lvl {
-        position: absolute;
-        top: -5px;
-        right: -5px;
-        min-width: 18px;
-        height: 18px;
-        padding: 0 4px;
-        border-radius: 6px;
-        background: #171412;
-        border: 1px solid var(--node-accent, var(--accent-amber));
-        color: var(--text-primary);
-        font-family: var(--font-mono);
-        font-size: 9.5px;
-        font-weight: 700;
         display: inline-flex;
+        flex-direction: column;
         align-items: center;
-        justify-content: center;
-        line-height: 1;
+        gap: 1px;
+        padding: 3px 7px;
+        border-radius: 7px;
+        background: rgba(18, 15, 13, 0.95);
+        border: 1px solid rgba(186, 132, 82, 0.46);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.74), inset 0 1px 0 rgba(255, 224, 184, 0.13);
+        text-align: center;
+        transition: transform 110ms var(--ease-out), border-color 140ms var(--ease-out);
       }
 
-      .wm-node.own-settlement .wm-pin-lvl {
-        border-color: #4ade80;
-        color: #86efac;
-      }
-
-      .wm-nameplate {
-        padding: 2px 7px;
-        border-radius: 6px;
-        background: rgba(13, 11, 10, 0.88);
-        border: 1px solid rgba(245, 239, 230, 0.16);
-        color: var(--text-primary);
-        font-size: 10.5px;
-        font-weight: 600;
-        white-space: nowrap;
-        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+      .wm-cap-row {
         display: inline-flex;
         align-items: center;
         gap: 4px;
+        white-space: nowrap;
       }
 
-      .wm-node.own-settlement .wm-nameplate {
-        border-color: rgba(74, 222, 128, 0.52);
-        color: #dcfce7;
-        font-size: 11px;
+      .wm-cap-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--node-accent, var(--accent-amber));
+        box-shadow: 0 0 6px var(--node-accent, var(--accent-amber));
+        flex-shrink: 0;
+      }
+
+      .wm-cap-lvl {
+        font-family: var(--font-mono);
+        font-variant-numeric: tabular-nums;
+        font-size: 8.5px;
         font-weight: 700;
+        padding: 0 3px;
+        border-radius: 4px;
+        background: rgba(34, 26, 21, 0.95);
+        border: 1px solid rgba(190, 128, 72, 0.48);
+        color: #fde68a;
+        line-height: 1.3;
+      }
+
+      .wm-cap-name {
+        font-size: 10px;
+        font-weight: 700;
+        color: #faf6f0;
+        line-height: 1.15;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+      }
+
+      .wm-cap-meta {
+        font-family: var(--font-mono);
+        font-variant-numeric: tabular-nums;
+        font-size: 8.5px;
+        color: #cbbba8;
+        white-space: nowrap;
+        line-height: 1.1;
+      }
+
+      /* Eigene Siedlung (analog zum Dorf-Signalfeuer, mit Smaragd-Akzent) */
+      .wm-node.own-settlement .wm-caption {
+        min-width: 96px;
+        padding: 4px 9px;
+        background: rgba(16, 22, 18, 0.96);
+        border-color: rgba(74, 222, 128, 0.72);
+        box-shadow: 0 5px 15px rgba(0, 0, 0, 0.78), 0 0 12px rgba(74, 222, 128, 0.22), inset 0 1px 0 rgba(187, 247, 208, 0.18);
+      }
+
+      .wm-node.own-settlement .wm-cap-lvl {
+        border-color: rgba(74, 222, 128, 0.65);
+        color: #86efac;
+        background: rgba(12, 32, 20, 0.95);
+      }
+
+      .wm-node.own-settlement .wm-cap-name {
+        font-size: 10.5px;
+        color: #dcfce7;
+      }
+
+      /* Kompakte 3D-Sammelstellen-Plakette */
+      .wm-node.is-resource .wm-caption {
+        padding: 2px 6px;
+        border-radius: 6px;
+        border-color: rgba(186, 132, 82, 0.42);
+      }
+
+      .wm-node.is-resource .wm-cap-name {
+        font-size: 8.8px;
+        font-weight: 600;
+        color: #f5efe6;
+      }
+
+      .wm-node.is-resource.active-gather .wm-caption {
+        border-color: rgba(245, 158, 11, 0.82);
+        background: rgba(28, 20, 13, 0.97);
+        box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.26), 0 4px 12px rgba(0, 0, 0, 0.78);
+      }
+
+      .wm-node.occupied-enemy .wm-caption {
+        border-color: rgba(239, 68, 68, 0.85);
+        background: rgba(42, 12, 14, 0.96);
+        box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.3), 0 4px 12px rgba(0, 0, 0, 0.82);
+        animation: wmPvpPulse 1.8s ease-in-out infinite;
+      }
+
+      .wm-node.occupied-enemy .wm-cap-name {
+        color: #fecaca;
+      }
+
+      .wm-node.occupied-enemy .wm-cap-lvl {
+        border-color: rgba(248, 113, 113, 0.72);
+        background: rgba(127, 29, 29, 0.95);
+        color: #fee2e2;
       }
 
       .wm-mini-prog {
-        width: 44px;
-        height: 4px;
+        width: 40px;
+        height: 3.5px;
+        margin-top: 2px;
         border-radius: 2px;
-        background: rgba(0, 0, 0, 0.75);
+        background: rgba(0, 0, 0, 0.78);
         overflow: hidden;
-        border: 1px solid rgba(245, 239, 230, 0.15);
+        border: 1px solid rgba(255, 224, 184, 0.16);
       }
 
       .wm-mini-prog-fill {
@@ -1164,85 +1232,25 @@
         background: linear-gradient(90deg, var(--accent-ember), var(--accent-amber));
       }
 
-      /* Kompaktere Darstellung für Sammelstellen & Dinos auf der dichteren 1200x1200-Weltkarte */
-      .wm-node.is-resource {
-        min-width: 34px;
-        min-height: 34px;
-        gap: 2px;
-      }
-
-      .wm-node.is-resource .wm-pin-ring {
-        width: 24px;
-        height: 24px;
-        border-width: 1.5px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.7), 0 0 8px rgba(249, 115, 22, 0.16);
-      }
-
-      .wm-node.is-resource .wm-pin-lvl {
-        top: -4px;
-        right: -4px;
-        min-width: 14px;
-        height: 14px;
-        padding: 0 3px;
-        border-radius: 4px;
-        font-size: 8px;
-      }
-
-      .wm-node.is-resource .wm-nameplate {
-        padding: 1px 5px;
-        border-radius: 4px;
-        font-size: 8.5px;
-      }
-
-      .wm-node.is-resource .wm-mini-prog {
-        width: 30px;
+      .wm-node.is-resource .wm-mini-prog,
+      .wm-node.is-dino .wm-mini-prog {
+        width: 34px;
         height: 3px;
-      }
-
-      .wm-node.occupied-enemy .wm-pin-ring {
-        border-color: #ef4444;
-        background: rgba(45, 12, 14, 0.92);
-        box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.34), 0 3px 12px rgba(0, 0, 0, 0.82);
-        animation: wmPvpPulse 1.8s ease-in-out infinite;
-      }
-
-      .wm-node.occupied-enemy .wm-nameplate {
-        border-color: rgba(248, 113, 113, 0.65);
-        background: rgba(42, 12, 14, 0.92);
-        color: #fecaca;
-      }
-
-      .wm-pvp-badge {
-        position: absolute;
-        bottom: -4px;
-        left: -4px;
-        width: 14px;
-        height: 14px;
-        border-radius: 50%;
-        background: #dc2626;
-        border: 1px solid #fecaca;
-        color: #fff;
-        font-size: 8px;
-        font-weight: 800;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        line-height: 1;
-        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.75);
       }
 
       @keyframes wmPvpPulse {
         0%, 100% {
-          box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.32), 0 3px 12px rgba(0, 0, 0, 0.82);
+          box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.34), 0 4px 12px rgba(0, 0, 0, 0.82);
         }
         50% {
-          box-shadow: 0 0 0 6px rgba(239, 68, 68, 0.14), 0 3px 14px rgba(0, 0, 0, 0.88);
+          box-shadow: 0 0 0 5px rgba(239, 68, 68, 0.14), 0 4px 14px rgba(0, 0, 0, 0.88);
         }
       }
 
-      .worldmap-markers.wm-zoom-far .wm-node.is-resource:not(.active-gather):not(.occupied-enemy) .wm-nameplate,
-      .worldmap-markers.wm-zoom-far .wm-node.is-dino:not(.active-hunt) .wm-nameplate {
-        display: none;
+      .worldmap-markers.wm-zoom-far .wm-node.is-resource:not(.active-gather):not(.occupied-enemy),
+      .worldmap-markers.wm-zoom-far .wm-node.is-dino:not(.active-hunt) {
+        opacity: 0;
+        pointer-events: none;
       }
 
       .gather-pvp-banner {
@@ -1292,9 +1300,9 @@
         gap: 6px;
         padding: 5px 8px;
         border-radius: 12px;
-        background: rgba(16, 14, 13, 0.88);
-        border: 1px solid var(--border-subtle);
-        backdrop-filter: blur(8px);
+        background: linear-gradient(180deg, rgba(42, 31, 24, 0.94) 0%, rgba(22, 17, 14, 0.96) 100%);
+        border: 1.5px solid rgba(190, 128, 72, 0.65);
+        box-shadow: inset 0 1px 0 rgba(255, 224, 180, 0.18), 0 6px 18px rgba(0, 0, 0, 0.62);
       }
 
       .wm-coord-readout {
@@ -1339,9 +1347,9 @@
         width: 84px;
         height: 84px;
         border-radius: 10px;
-        background: rgba(14, 12, 11, 0.92);
-        border: 1px solid rgba(245, 239, 230, 0.24);
-        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.65);
+        background: rgba(16, 13, 11, 0.95);
+        border: 1.5px solid rgba(190, 128, 72, 0.62);
+        box-shadow: inset 0 1px 0 rgba(255, 224, 180, 0.16), 0 6px 18px rgba(0, 0, 0, 0.68);
         overflow: hidden;
         cursor: pointer;
         flex-shrink: 0;
@@ -1362,10 +1370,9 @@
         gap: 3px;
         padding: 4px;
         border-radius: 10px;
-        background: rgba(16, 14, 13, 0.88);
-        border: 1px solid var(--border-subtle);
-        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.55);
-        backdrop-filter: blur(8px);
+        background: linear-gradient(180deg, rgba(42, 31, 24, 0.94) 0%, rgba(22, 17, 14, 0.96) 100%);
+        border: 1.5px solid rgba(190, 128, 72, 0.62);
+        box-shadow: inset 0 1px 0 rgba(255, 224, 180, 0.16), 0 6px 16px rgba(0, 0, 0, 0.6);
       }
 
       .wm-zoom-btn {
@@ -1435,9 +1442,9 @@
         gap: 10px;
         padding: 8px 10px;
         border-radius: 12px;
-        background: rgba(16, 14, 13, 0.92);
-        border: 1px solid rgba(245, 158, 11, 0.34);
-        backdrop-filter: blur(8px);
+        background: linear-gradient(180deg, rgba(38, 28, 22, 0.95) 0%, rgba(20, 15, 13, 0.97) 100%);
+        border: 1.5px solid rgba(190, 128, 72, 0.62);
+        box-shadow: inset 0 1px 0 rgba(255, 224, 180, 0.16), 0 6px 18px rgba(0, 0, 0, 0.65);
       }
 
       .wm-march-meta {
@@ -1523,48 +1530,28 @@
         font-size: 10px;
       }
 
-      .wm-node.is-dino {
-        min-width: 36px;
-        min-height: 36px;
-        gap: 2px;
+      .wm-node.is-dino .wm-caption {
+        padding: 2px 6px;
+        border-radius: 6px;
+        background: rgba(26, 14, 13, 0.95);
+        border-color: rgba(248, 113, 113, 0.48);
       }
 
-      .wm-node.is-dino .wm-pin-ring {
-        width: 26px;
-        height: 26px;
-        border: 1.7px solid var(--node-accent, #ef4444);
-        background: rgba(28, 12, 12, 0.92);
-        box-shadow: 0 3px 10px rgba(0, 0, 0, 0.76), 0 0 10px rgba(239, 68, 68, 0.24);
+      .wm-node.is-dino.active-hunt .wm-caption {
+        border-color: rgba(239, 68, 68, 0.85);
+        box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.3), 0 4px 12px rgba(0, 0, 0, 0.82);
       }
 
-      .wm-node.is-dino.active-hunt .wm-pin-ring {
-        box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.34), 0 3px 12px rgba(0, 0, 0, 0.8);
-      }
-
-      .wm-node.is-dino .wm-pin-lvl {
-        top: -4px;
-        right: -4px;
-        min-width: 14px;
-        height: 14px;
-        padding: 0 3px;
-        border-radius: 4px;
-        font-size: 8px;
+      .wm-node.is-dino .wm-cap-lvl {
         border-color: var(--node-accent, #ef4444);
         color: #fecaca;
-        background: #231111;
+        background: #281111;
       }
 
-      .wm-node.is-dino .wm-nameplate {
-        padding: 1px 5px;
-        border-radius: 4px;
-        font-size: 8.5px;
-        border-color: rgba(248, 113, 113, 0.42);
+      .wm-node.is-dino .wm-cap-name {
+        font-size: 8.8px;
+        font-weight: 600;
         color: #fee2e2;
-      }
-
-      .wm-node.is-dino .wm-mini-prog {
-        width: 30px;
-        height: 3px;
       }
 
       .wm-march-line.hunt-out {
@@ -1948,10 +1935,9 @@
         gap: 8px;
         padding: 10px 12px;
         border-radius: 14px;
-        background: rgba(16, 14, 13, 0.95);
-        border: 1.5px solid rgba(190, 128, 72, 0.55);
-        box-shadow: 0 10px 28px rgba(0, 0, 0, 0.75);
-        backdrop-filter: blur(8px);
+        background: linear-gradient(180deg, rgba(38, 28, 22, 0.96) 0%, rgba(18, 14, 12, 0.98) 100%);
+        border: 1.5px solid rgba(190, 128, 72, 0.68);
+        box-shadow: inset 0 1px 0 rgba(255, 224, 180, 0.16), 0 10px 28px rgba(0, 0, 0, 0.78);
       }
 
       .wm-teleport-bar.visible {
@@ -4352,17 +4338,19 @@
       /* =====================================================================
          MULTIPLAYER: FREMDE SIEDLUNGEN, WELT-CHAT & CLOUD-KONTO
          ===================================================================== */
-      .wm-node.other-settlement .wm-pin-ring {
-        border-color: rgba(56, 189, 248, 0.85);
-        background: radial-gradient(circle at 35% 30%, rgba(14, 116, 144, 0.92), rgba(15, 23, 42, 0.96));
-        box-shadow: 0 0 14px rgba(56, 189, 248, 0.35);
+      .wm-node.other-settlement .wm-caption {
+        min-width: 90px;
+        padding: 4px 8px;
+        background: rgba(14, 21, 30, 0.96);
+        border-color: rgba(56, 189, 248, 0.68);
+        box-shadow: 0 5px 15px rgba(0, 0, 0, 0.78), 0 0 12px rgba(56, 189, 248, 0.2), inset 0 1px 0 rgba(186, 230, 253, 0.16);
       }
-      .wm-node.other-settlement .wm-pin-lvl {
-        background: #0284c7;
-        color: #f0f9ff;
+      .wm-node.other-settlement .wm-cap-lvl {
+        border-color: rgba(56, 189, 248, 0.7);
+        background: rgba(12, 42, 68, 0.95);
+        color: #e0f2fe;
       }
-      .wm-node.other-settlement .wm-nameplate {
-        border-color: rgba(56, 189, 248, 0.45);
+      .wm-node.other-settlement .wm-cap-name {
         color: #bae6fd;
       }
       .wm-march-line.other-player {
