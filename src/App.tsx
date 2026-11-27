@@ -5,12 +5,18 @@ import { WorldChatDrawer } from './components/WorldChatDrawer';
 import type {
   GameRuntimeHandle,
   GameRuntimeSnapshot,
+  NeighborActionResult,
+  NeighborTradeRequest,
+  ResourceStock,
   VisitSettlementTarget,
 } from './game/gameRuntime';
+
+const DEFAULT_RESOURCES: ResourceStock = { meat: 0, wood: 0, stone: 0, fur: 0 };
 
 export default function App() {
   const [bonfireLevel, setBonfireLevel] = useState<number>(1);
   const [homeTile, setHomeTile] = useState<{ x: number; y: number }>({ x: 23, y: 13 });
+  const [resources, setResources] = useState<ResourceStock>(DEFAULT_RESOURCES);
   const runtimeRef = useRef<GameRuntimeHandle | null>(null);
 
   const handleSnapshot = useCallback((snapshot: GameRuntimeSnapshot) => {
@@ -18,6 +24,16 @@ export default function App() {
     if (snapshot.homeTile) {
       setHomeTile((prev) =>
         prev.x === snapshot.homeTile.x && prev.y === snapshot.homeTile.y ? prev : snapshot.homeTile
+      );
+    }
+    if (snapshot.resources) {
+      setResources((prev) =>
+        prev.meat === snapshot.resources.meat &&
+        prev.wood === snapshot.resources.wood &&
+        prev.stone === snapshot.resources.stone &&
+        prev.fur === snapshot.resources.fur
+          ? prev
+          : snapshot.resources
       );
     }
   }, []);
@@ -34,6 +50,23 @@ export default function App() {
     runtimeRef.current?.visitSettlement(target);
   }, []);
 
+  const handleTradeResources = useCallback(
+    (req: NeighborTradeRequest): NeighborActionResult => {
+      if (!runtimeRef.current) {
+        return { ok: false, message: 'Spiel-Runtime noch nicht bereit.' };
+      }
+      return runtimeRef.current.tradeResourcesWithNeighbor(req);
+    },
+    []
+  );
+
+  const handleSupportBonfire = useCallback((target: VisitSettlementTarget): NeighborActionResult => {
+    if (!runtimeRef.current) {
+      return { ok: false, message: 'Spiel-Runtime noch nicht bereit.' };
+    }
+    return runtimeRef.current.supportNeighborBonfire(target);
+  }, []);
+
   const handleForceSave = useCallback(() => {
     runtimeRef.current?.forceSave();
   }, []);
@@ -43,8 +76,11 @@ export default function App() {
       <GameShell onSnapshot={handleSnapshot} onRuntimeReady={handleRuntimeReady} />
       <MultiplayerHubDrawer
         homeTile={homeTile}
+        resources={resources}
         onJumpToTile={handleJumpToTile}
         onVisitSettlement={handleVisitSettlement}
+        onTradeResources={handleTradeResources}
+        onSupportBonfire={handleSupportBonfire}
         onForceSave={handleForceSave}
       />
       <WorldChatDrawer bonfireLevel={bonfireLevel} />

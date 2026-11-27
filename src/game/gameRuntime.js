@@ -9034,13 +9034,20 @@ export function initGameRuntime(hooks = {}) {
   // Starte das Spiel im gemounteten React-DOM
   init();
 
-  // Synchronisiere aktuelle Kerndaten (Signalfeuer-Stufe, Macht, Tab, Heimat-Kachel) regelmäßig mit React-Komponenten
+  // Synchronisiere aktuelle Kerndaten (Signalfeuer-Stufe, Macht, Tab, Ressourcen, Glut, Heimat-Kachel) regelmäßig mit React-Komponenten
   const emitSnapshot = () => {
     notifyReact({
       bonfireLevel: state?.buildings?.bonfire?.level || 1,
       power: typeof computeVillagePowerMp === "function" ? computeVillagePowerMp() : 100,
       activeTab: typeof activeTab === "string" ? activeTab : "village",
       started: Boolean(state?.started),
+      ember: Math.round(Number(state?.ember || 0)),
+      resources: {
+        meat: Math.floor(Number(state?.resources?.meat || 0)),
+        wood: Math.floor(Number(state?.resources?.wood || 0)),
+        stone: Math.floor(Number(state?.resources?.stone || 0)),
+        fur: Math.floor(Number(state?.resources?.fur || 0))
+      },
       homeTile: {
         x: typeof state?.homeTile?.x === "number" ? state.homeTile.x : 23,
         y: typeof state?.homeTile?.y === "number" ? state.homeTile.y : 13
@@ -9049,6 +9056,36 @@ export function initGameRuntime(hooks = {}) {
   };
   emitSnapshot();
   setInterval(emitSnapshot, 1000);
+
+  const broadcastNeighborCaravan = (target, label) => {
+    try {
+      if (!window.DinoMultiplayer || !target) return;
+      const homeX = typeof state?.homeTile?.x === "number" ? state.homeTile.x : 23;
+      const homeY = typeof state?.homeTile?.y === "number" ? state.homeTile.y : 13;
+      const fromX = (((homeX + 1) * WORLD_TILE_SIZE) / WORLD_MAP_WIDTH) * 100;
+      const fromY = (((homeY + 1) * WORLD_TILE_SIZE) / WORLD_MAP_HEIGHT) * 100;
+      const toX = (((Number(target.tileX) + 1) * WORLD_TILE_SIZE) / WORLD_MAP_WIDTH) * 100;
+      const toY = (((Number(target.tileY) + 1) * WORLD_TILE_SIZE) / WORLD_MAP_HEIGHT) * 100;
+      const marchId = `ally_${Date.now()}_${Math.floor(Math.random() * 9999)}`;
+      void window.DinoMultiplayer.broadcastMarch({
+        marchId,
+        kind: "gather",
+        fromX,
+        fromY,
+        toX,
+        toY,
+        targetLabel: label,
+        durationMs: 12000
+      });
+      setTimeout(() => {
+        if (window.DinoMultiplayer) {
+          void window.DinoMultiplayer.completeMarch(marchId);
+        }
+      }, 12500);
+    } catch {
+      // ignore non-fatal multiplayer caravan broadcast error
+    }
+  };
 
   runtimeHandle = {
     jumpToWorldTile(tileX, tileY) {
@@ -9099,6 +9136,93 @@ export function initGameRuntime(hooks = {}) {
         }, 70);
       } catch {
         // ignore
+      }
+    },
+    tradeResourcesWithNeighbor(req) {
+      try {
+        const validKeys = ["meat", "wood", "stone", "fur"];
+        if (
+          !req ||
+          !req.target ||
+          !validKeys.includes(req.offerResource) ||
+          !validKeys.includes(req.requestResource) ||
+          req.offerResource === req.requestResource
+        ) {
+          return { ok: false, message: "Ungültige Handelsauswahl." };
+        }
+        const offerAmt = Math.max(1, Math.floor(Number(req.offerAmount || 0)));
+        const reqAmt = Math.max(1, Math.floor(Number(req.requestAmount || 0)));
+        const currentStock = Math.floor(Number(state?.resources?.[req.offerResource] || 0));
+        if (currentStock < offerAmt) {
+          return {
+            ok: false,
+            message: `Zu wenig ${RESOURCE_LABELS[req.offerResource]} (${currentStock}/${offerAmt}).`
+          };
+        }
+
+        state.resources[req.offerResource] = Math.max(0, state.resources[req.offerResource] - offerAmt);
+        state.resources[req.requestResource] = (state.resources[req.requestResource] || 0) + reqAmt;
+
+        if (typeof SoundFX !== "undefined" && typeof SoundFX.play === "function") {
+          SoundFX.play("upgrade");
+        }
+        if (typeof saveState === "function") saveState();
+        if (typeof renderAll === "function") renderAll();
+        emitSnapshot();
+
+        const offerLabel = RESOURCE_LABELS[req.offerResource] || req.offerResource;
+        const reqLabel = RESOURCE_LABELS[req.requestResource] || req.requestResource;
+        const msg = `Handel mit ${req.target.tribeName}: -${offerAmt} ${offerLabel} → +${reqAmt} ${reqLabel}`;
+        if (typeof showToast === "function") showToast(msg, "ok");
+
+        broadcastNeighborCaravan(req.target, `Handel: ${req.target.tribeName}`);
+        if (window.DinoMultiplayer) {
+          void window.DinoMultiplayer.sendChat(
+            `🤝 Karawane an ${req.target.tribeName}: ${offerAmt} ${offerLabel} gegen ${reqAmt} ${reqLabel} getauscht.`,
+            state?.buildings?.bonfire?.level || 1
+          ).catch(() => {});
+        }
+        return { ok: true, message: msg };
+      } catch {
+        return { ok: false, message: "Handel konnte nicht abgeschlossen werden." };
+      }
+    },
+    supportNeighborBonfire(target) {
+      try {
+        if (!target) return { ok: false, message: "Kein Zielstamm gewählt." };
+        const woodCost = 20;
+        const currentWood = Math.floor(Number(state?.resources?.wood || 0));
+        if (currentWood < woodCost) {
+          return {
+            ok: false,
+            message: `Benötigt ${woodCost} Holz für Signalfeuer-Unterstützung (vorhanden: ${currentWood}).`
+          };
+        }
+
+        state.resources.wood = Math.max(0, state.resources.wood - woodCost);
+        state.ember = Math.min(100, Number(state.ember || 0) + 8);
+        state.morale = Math.min(100, Number(state.morale || 100) + 3);
+
+        if (typeof SoundFX !== "undefined" && typeof SoundFX.play === "function") {
+          SoundFX.play("upgrade");
+        }
+        if (typeof saveState === "function") saveState();
+        if (typeof renderAll === "function") renderAll();
+        emitSnapshot();
+
+        const msg = `Signalfeuer von ${target.tribeName} mit ${woodCost} Holz unterstützt (+8% eigene Glut, +3 Moral).`;
+        if (typeof showToast === "function") showToast(msg, "ok");
+
+        broadcastNeighborCaravan(target, `Feuerhilfe: ${target.tribeName}`);
+        if (window.DinoMultiplayer) {
+          void window.DinoMultiplayer.sendChat(
+            `🔥 Unterstützt das Signalfeuer von ${target.tribeName} mit ${woodCost} Feuerholz!`,
+            state?.buildings?.bonfire?.level || 1
+          ).catch(() => {});
+        }
+        return { ok: true, message: msg };
+      } catch {
+        return { ok: false, message: "Signalfeuer-Unterstützung fehlgeschlagen." };
       }
     },
     forceSave() {

@@ -1,6 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useMultiplayer } from '../hooks/useMultiplayer';
-import type { VisitSettlementTarget } from '../game/gameRuntime';
+import type {
+  NeighborActionResult,
+  NeighborTradeRequest,
+  ResourceKey,
+  ResourceStock,
+  VisitSettlementTarget,
+} from '../game/gameRuntime';
 import type { WorldMarchDTO, WorldSettlementDTO } from '../shared/apiTypes';
 import bridge, {
   type ChannelHealth,
@@ -9,8 +15,11 @@ import bridge, {
 
 interface MultiplayerHubDrawerProps {
   homeTile?: { x: number; y: number };
+  resources?: ResourceStock;
   onJumpToTile?: (tileX: number, tileY: number) => void;
   onVisitSettlement?: (target: VisitSettlementTarget) => void;
+  onTradeResources?: (req: NeighborTradeRequest) => NeighborActionResult;
+  onSupportBonfire?: (target: VisitSettlementTarget) => NeighborActionResult;
   onForceSave?: () => void;
 }
 
@@ -116,11 +125,23 @@ function getSettlementStatusMeta(
 }
 
 const NEARBY_RADIUS_TILES = 15;
+const BONFIRE_SUPPORT_WOOD_COST = 20;
+const BONFIRE_SUPPORT_COOLDOWN_MS = 60_000;
+const TRADE_AMOUNTS = [25, 50, 100] as const;
+const RESOURCE_OPTIONS: Array<{ key: ResourceKey; label: string }> = [
+  { key: 'wood', label: 'Holz' },
+  { key: 'meat', label: 'Fleisch' },
+  { key: 'stone', label: 'Stein' },
+  { key: 'fur', label: 'Fell' },
+];
 
 export const MultiplayerHubDrawer: React.FC<MultiplayerHubDrawerProps> = ({
   homeTile,
+  resources,
   onJumpToTile,
   onVisitSettlement,
+  onTradeResources,
+  onSupportBonfire,
   onForceSave,
 }) => {
   const {
@@ -144,7 +165,22 @@ export const MultiplayerHubDrawer: React.FC<MultiplayerHubDrawerProps> = ({
   const [logsExpanded, setLogsExpanded] = useState(false);
   const [onlyCloseNeighbors, setOnlyCloseNeighbors] = useState(false);
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
+  const [tradeTargetUid, setTradeTargetUid] = useState<string | null>(null);
+  const [offerResource, setOfferResource] = useState<ResourceKey>('wood');
+  const [requestResource, setRequestResource] = useState<ResourceKey>('stone');
+  const [offerAmount, setOfferAmount] = useState<number>(25);
+  const [supportCooldowns, setSupportCooldowns] = useState<Record<string, number>>({});
+  const [nearbyNotice, setNearbyNotice] = useState<{ ok: boolean; text: string } | null>(null);
+  const [nowTick, setNowTick] = useState<number>(() => Date.now());
   const logListRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const hasActiveCooldown = Object.values(supportCooldowns).some((until) => until > Date.now());
+    if (!hasActiveCooldown) return;
+    const timer = window.setInterval(() => setNowTick(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [open, supportCooldowns]);
 
   useEffect(() => {
     setNameInput(session.tribeName);
@@ -304,6 +340,72 @@ export const MultiplayerHubDrawer: React.FC<MultiplayerHubDrawerProps> = ({
       onJumpToTile?.(s.tileX, s.tileY);
     }
     setOpen(false);
+  };
+
+  const handleToggleTrade = (uid: string) => {
+    setNearbyNotice(null);
+    setTradeTargetUid((prev) => (prev === uid ? null : uid));
+  };
+
+  const handleOfferResourceChange = (nextOffer: ResourceKey) => {
+    setOfferResource(nextOffer);
+    if (nextOffer === requestResource) {
+      const fallback = RESOURCE_OPTIONS.find((r) => r.key !== nextOffer)?.key || 'stone';
+      setRequestResource(fallback);
+    }
+  };
+
+  const handleExecuteTrade = (s: WorldSettlementDTO, isClose: boolean) => {
+    if (!onTradeResources) return;
+    const requestAmount = isClose ? offerAmount : Math.max(1, Math.round(offerAmount * 0.8));
+    const res = onTradeResources({
+      target: {
+        uid: s.uid,
+        tribeName: s.tribeName,
+        bonfireLevel: s.bonfireLevel,
+        power: s.power,
+        tileX: s.tileX,
+        tileY: s.tileY,
+      },
+      offerResource,
+      offerAmount,
+      requestResource,
+      requestAmount,
+    });
+    setNearbyNotice({ ok: res.ok, text: res.message });
+    if (res.ok) {
+      setTradeTargetUid(null);
+    }
+  };
+
+  const handleSupportBonfireClick = (s: WorldSettlementDTO) => {
+    if (!onSupportBonfire) return;
+    const now = Date.now();
+    const until = supportCooldowns[s.uid] || 0;
+    if (until > now) {
+      const remSec = Math.ceil((until - now) / 1000);
+      setNearbyNotice({
+        ok: false,
+        text: `Signalfeuer von ${s.tribeName} wurde gerade erst unterstützt (${remSec}s).`,
+      });
+      return;
+    }
+    const res = onSupportBonfire({
+      uid: s.uid,
+      tribeName: s.tribeName,
+      bonfireLevel: s.bonfireLevel,
+      power: s.power,
+      tileX: s.tileX,
+      tileY: s.tileY,
+    });
+    setNearbyNotice({ ok: res.ok, text: res.message });
+    if (res.ok) {
+      setNowTick(now);
+      setSupportCooldowns((prev) => ({
+        ...prev,
+        [s.uid]: now + BONFIRE_SUPPORT_COOLDOWN_MS,
+      }));
+    }
   };
 
   const isCloudLive = !session.isGuest && session.cloudSynced;
@@ -675,6 +777,12 @@ export const MultiplayerHubDrawer: React.FC<MultiplayerHubDrawerProps> = ({
               </button>
             </div>
 
+            {nearbyNotice && (
+              <div className={`mp-nearby-notice${nearbyNotice.ok ? ' is-ok' : ' is-err'}`}>
+                {nearbyNotice.text}
+              </div>
+            )}
+
             {visibleNearbyPlayers.length === 0 ? (
               <div className="mp-nearby-empty">
                 {nearbyPlayers.length > 0 ? (
@@ -697,42 +805,159 @@ export const MultiplayerHubDrawer: React.FC<MultiplayerHubDrawerProps> = ({
               </div>
             ) : (
               <div className="mp-nearby-list">
-                {visibleNearbyPlayers.slice(0, 15).map(({ settlement: s, distance, isClose, tier, status }) => (
-                  <div key={s.uid} className={`mp-nearby-card${isClose ? ' is-close' : ''}`}>
-                    <div className="mp-nearby-info">
-                      <div className="mp-nearby-top">
-                        <span className="mp-world-row-name">{s.tribeName}</span>
-                        <span
-                          className="mp-status-badge"
-                          style={{ color: status.color, background: status.bg }}
+                {visibleNearbyPlayers.slice(0, 15).map(({ settlement: s, distance, isClose, tier, status }) => {
+                  const isTradeOpen = tradeTargetUid === s.uid;
+                  const cooldownUntil = supportCooldowns[s.uid] || 0;
+                  const cooldownSec = Math.max(0, Math.ceil((cooldownUntil - nowTick) / 1000));
+                  const woodStock = resources?.wood ?? 0;
+                  const offerStock = resources?.[offerResource] ?? 0;
+                  const receiveAmount = isClose
+                    ? offerAmount
+                    : Math.max(1, Math.round(offerAmount * 0.8));
+                  const offerLabel =
+                    RESOURCE_OPTIONS.find((r) => r.key === offerResource)?.label || offerResource;
+                  const requestLabel =
+                    RESOURCE_OPTIONS.find((r) => r.key === requestResource)?.label ||
+                    requestResource;
+
+                  return (
+                    <div key={s.uid} className={`mp-nearby-card${isClose ? ' is-close' : ''}`}>
+                      <div className="mp-nearby-card-head">
+                        <div className="mp-nearby-info">
+                          <div className="mp-nearby-top">
+                            <span className="mp-world-row-name">{s.tribeName}</span>
+                            <span
+                              className="mp-status-badge"
+                              style={{ color: status.color, background: status.bg }}
+                            >
+                              <span
+                                className="mp-diag-dot"
+                                style={{ background: status.color, width: 6, height: 6 }}
+                              />
+                              {status.label}
+                            </span>
+                          </div>
+                          <div className="mp-nearby-meta mono">
+                            <span>{tier} (St.{s.bonfireLevel})</span>
+                            <span>·</span>
+                            <span>Macht {s.power}</span>
+                          </div>
+                          <div className="mp-nearby-dist mono">
+                            {distance < 1 ? '< 1 Feld' : `${distance.toFixed(1)} Felder`}
+                            {isClose ? ' · Nachbar' : ''} · Grid [{s.tileX},{s.tileY}]
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className="mp-visit-btn"
+                          aria-label={`${s.tribeName} besuchen`}
+                          onClick={() => handleVisit(s)}
                         >
-                          <span
-                            className="mp-diag-dot"
-                            style={{ background: status.color, width: 6, height: 6 }}
-                          />
-                          {status.label}
-                        </span>
+                          Besuchen
+                        </button>
                       </div>
-                      <div className="mp-nearby-meta mono">
-                        <span>{tier} (St.{s.bonfireLevel})</span>
-                        <span>·</span>
-                        <span>Macht {s.power}</span>
+
+                      <div className="mp-nearby-actions">
+                        <button
+                          type="button"
+                          className={`mp-action-btn is-trade${isTradeOpen ? ' is-active' : ''}`}
+                          aria-expanded={isTradeOpen}
+                          onClick={() => handleToggleTrade(s.uid)}
+                        >
+                          Ressourcen-Handel
+                        </button>
+                        <button
+                          type="button"
+                          className="mp-action-btn is-fire"
+                          disabled={cooldownSec > 0 || woodStock < BONFIRE_SUPPORT_WOOD_COST}
+                          title={`Sendet ${BONFIRE_SUPPORT_WOOD_COST} Holz (+8% eigene Glut, +3 Moral)`}
+                          onClick={() => handleSupportBonfireClick(s)}
+                        >
+                          {cooldownSec > 0
+                            ? `Signalfeuer (${cooldownSec}s)`
+                            : `Signalfeuer-Unterstützung (${BONFIRE_SUPPORT_WOOD_COST} Holz)`}
+                        </button>
                       </div>
-                      <div className="mp-nearby-dist mono">
-                        {distance < 1 ? '< 1 Feld' : `${distance.toFixed(1)} Felder`}
-                        {isClose ? ' · Nachbar' : ''} · Grid [{s.tileX},{s.tileY}]
-                      </div>
+
+                      {isTradeOpen && (
+                        <div className="mp-trade-panel">
+                          <div className="mp-trade-row">
+                            <label className="mp-trade-field">
+                              <span>Geben (Bestand: {offerStock})</span>
+                              <select
+                                className="mp-trade-select"
+                                value={offerResource}
+                                onChange={(e) =>
+                                  handleOfferResourceChange(e.target.value as ResourceKey)
+                                }
+                              >
+                                {RESOURCE_OPTIONS.map((opt) => (
+                                  <option key={opt.key} value={opt.key}>
+                                    {opt.label} ({resources?.[opt.key] ?? 0})
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+
+                            <label className="mp-trade-field">
+                              <span>Erhalten</span>
+                              <select
+                                className="mp-trade-select"
+                                value={requestResource}
+                                onChange={(e) => setRequestResource(e.target.value as ResourceKey)}
+                              >
+                                {RESOURCE_OPTIONS.filter((opt) => opt.key !== offerResource).map(
+                                  (opt) => (
+                                    <option key={opt.key} value={opt.key}>
+                                      {opt.label}
+                                    </option>
+                                  )
+                                )}
+                              </select>
+                            </label>
+                          </div>
+
+                          <div className="mp-trade-amounts">
+                            {TRADE_AMOUNTS.map((amt) => (
+                              <button
+                                key={amt}
+                                type="button"
+                                className={`mp-diag-btn${offerAmount === amt ? ' is-active' : ''}`}
+                                onClick={() => setOfferAmount(amt)}
+                              >
+                                {amt}
+                              </button>
+                            ))}
+                            <span className="mp-trade-rate mono">
+                              {offerAmount} {offerLabel} → {receiveAmount} {requestLabel}
+                              {isClose ? ' (1:1)' : ' (5:4)'}
+                            </span>
+                          </div>
+
+                          <div className="mp-trade-footer">
+                            <button
+                              type="button"
+                              className="mp-trade-submit"
+                              disabled={offerStock < offerAmount}
+                              onClick={() => handleExecuteTrade(s, isClose)}
+                            >
+                              {offerStock < offerAmount
+                                ? `Zu wenig ${offerLabel}`
+                                : 'Karawane senden'}
+                            </button>
+                            <button
+                              type="button"
+                              className="mp-diag-btn"
+                              onClick={() => setTradeTargetUid(null)}
+                            >
+                              Abbrechen
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    <button
-                      type="button"
-                      className="mp-visit-btn"
-                      aria-label={`${s.tribeName} besuchen`}
-                      onClick={() => handleVisit(s)}
-                    >
-                      Besuchen
-                    </button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
