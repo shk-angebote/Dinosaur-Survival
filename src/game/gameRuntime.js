@@ -427,7 +427,8 @@ export function initGameRuntime(hooks = {}) {
             id: 'slinger',
             name: 'Steinschleuderer',
             role: 'Fernkampf',
-            batchSize: 5,
+            batchSize: 15,
+            batchPerLevel: 5,
             powerPerUnit: 14,
             durationSec: 28,
             cost: { meat: 18, wood: 14, stone: 12 }
@@ -436,7 +437,8 @@ export function initGameRuntime(hooks = {}) {
             id: 'clubman',
             name: 'Keulenschwinger',
             role: 'Nahkampf',
-            batchSize: 5,
+            batchSize: 15,
+            batchPerLevel: 5,
             powerPerUnit: 16,
             durationSec: 32,
             cost: { meat: 20, wood: 18, fur: 6 }
@@ -445,7 +447,8 @@ export function initGameRuntime(hooks = {}) {
             id: 'dinorider',
             name: 'Dinoreiter',
             role: 'Tank',
-            batchSize: 3,
+            batchSize: 10,
+            batchPerLevel: 3,
             powerPerUnit: 42,
             durationSec: 50,
             cost: { meat: 34, wood: 22, stone: 16, fur: 14 }
@@ -1657,7 +1660,11 @@ export function initGameRuntime(hooks = {}) {
             },
             activeBuild: null,       // { buildingId, targetLevel, startedAt, endsAt }
             activeResearch: null,    // { techId, startedAt, endsAt }
-            activeTraining: null,    // { troopType, count, startedAt, endsAt }
+            activeTrainings: {       // Parallel-Ausbildung für alle 3 Truppentypen gleichzeitig
+              slinger: null,
+              clubman: null,
+              dinorider: null
+            },
             activeHealing: null,     // { troops, totalCount, startedAt, endsAt }
             completedTechs: [],
             activeExpeditions: [],   // [{ id, targetId, scouts, startedAt, endsAt, completed, loot, injured }]
@@ -2148,6 +2155,25 @@ export function initGameRuntime(hooks = {}) {
               injuredTroops: { ...fresh.injuredTroops, ...(parsed.injuredTroops || {}) },
               volcanoInjuredTroops: { ...fresh.volcanoInjuredTroops, ...(parsed.volcanoInjuredTroops || {}) },
               fallenTroops: { ...fresh.fallenTroops, ...(parsed.fallenTroops || {}) },
+              activeTrainings: (() => {
+                const slots = { slinger: null, clubman: null, dinorider: null };
+                if (parsed.activeTrainings && typeof parsed.activeTrainings === 'object') {
+                  for (const tk of ['slinger', 'clubman', 'dinorider']) {
+                    const job = parsed.activeTrainings[tk];
+                    if (job && typeof job === 'object' && job.troopType === tk && Number(job.count) > 0) {
+                      slots[tk] = job;
+                    }
+                  }
+                }
+                if (parsed.activeTraining && typeof parsed.activeTraining === 'object') {
+                  const legacyTk = parsed.activeTraining.troopType;
+                  if (legacyTk && legacyTk in slots && !slots[legacyTk] && Number(parsed.activeTraining.count) > 0) {
+                    slots[legacyTk] = parsed.activeTraining;
+                  }
+                }
+                return slots;
+              })(),
+              activeTraining: null,
               activeHealing: parsed.activeHealing && typeof parsed.activeHealing === 'object' ? parsed.activeHealing : null,
               volcanoGarrison:
                 parsed.volcanoGarrison && typeof parsed.volcanoGarrison === 'object'
@@ -3116,9 +3142,10 @@ export function initGameRuntime(hooks = {}) {
             } else if (state.activeResearch) {
               state.activeResearch.endsAt -= ms;
               targetLabel = 'Forschung';
-            } else if (state.activeTraining) {
-              state.activeTraining.endsAt -= ms;
-              targetLabel = TROOP_DEFS[state.activeTraining.troopType].name;
+            } else if (hasAnyActiveTraining()) {
+              const soonest = getAllActiveTrainings().sort((a, b) => a.endsAt - b.endsAt)[0];
+              soonest.endsAt -= ms;
+              targetLabel = TROOP_DEFS[soonest.troopType].name;
             } else if (state.activeHealing) {
               state.activeHealing.endsAt -= ms;
               targetLabel = 'Krankenzelt-Heilung';
@@ -3135,13 +3162,50 @@ export function initGameRuntime(hooks = {}) {
           }
         }
 
+        function ensureActiveTrainings() {
+          if (!state.activeTrainings || typeof state.activeTrainings !== 'object') {
+            state.activeTrainings = { slinger: null, clubman: null, dinorider: null };
+          }
+          if (state.activeTraining && typeof state.activeTraining === 'object') {
+            const legacyTk = state.activeTraining.troopType;
+            if (legacyTk && !state.activeTrainings[legacyTk]) {
+              state.activeTrainings[legacyTk] = state.activeTraining;
+            }
+            state.activeTraining = null;
+          }
+          return state.activeTrainings;
+        }
+
+        function getActiveTraining(troopType) {
+          const slots = ensureActiveTrainings();
+          return slots[troopType] || null;
+        }
+
+        function getAllActiveTrainings() {
+          const slots = ensureActiveTrainings();
+          return ['slinger', 'clubman', 'dinorider'].map((tk) => slots[tk]).filter(Boolean);
+        }
+
+        function hasAnyActiveTraining() {
+          return getAllActiveTrainings().length > 0;
+        }
+
+        function getTroopBatchSize(troopType, bLvl) {
+          const def = TROOP_DEFS[troopType];
+          if (!def) return 0;
+          const level = Math.max(1, Math.floor(Number(bLvl || 1)));
+          const perLvl = typeof def.batchPerLevel === 'number' ? def.batchPerLevel : 4;
+          return def.batchSize + (level - 1) * perLvl;
+        }
+
         function startTroopTraining(troopType) {
           const def = TROOP_DEFS[troopType];
           const bLvl = state.buildings[troopType] ? state.buildings[troopType].level : 0;
           if (!def || bLvl <= 0) return;
-          if (state.activeTraining) {
+          const slots = ensureActiveTrainings();
+          if (slots[troopType]) {
             SoundFX.play('error');
-            showToast('Es läuft bereits eine Truppen-Ausbildung.', 'warn');
+            showToast(`In der ${BUILDINGS[troopType].shortName}-Kaserne läuft bereits eine Ausbildung.`, 'warn');
             return;
           }
           if (!canAfford(def.cost)) {
@@ -3150,10 +3214,10 @@ export function initGameRuntime(hooks = {}) {
             return;
           }
           payCost(def.cost);
-          const count = def.batchSize + Math.floor((bLvl - 1) * 1.5);
+          const count = getTroopBatchSize(troopType, bLvl);
           const dur = Math.max(12, Math.round(def.durationSec / (1 + (bLvl - 1) * 0.08)));
           const now = Date.now();
-          state.activeTraining = {
+          slots[troopType] = {
             troopType,
             count,
             startedAt: now,
@@ -3165,13 +3229,28 @@ export function initGameRuntime(hooks = {}) {
           renderAll();
         }
 
-        function finishActiveTraining() {
-          if (!state.activeTraining) return null;
-          const { troopType, count } = state.activeTraining;
+        function finishActiveTraining(troopType) {
+          const slots = ensureActiveTrainings();
+          const job = slots[troopType];
+          if (!job) return null;
+          const { count } = job;
           if (!state.troops) state.troops = { slinger: 0, clubman: 0, dinorider: 0 };
           state.troops[troopType] = (state.troops[troopType] || 0) + count;
-          state.activeTraining = null;
-          return { name: TROOP_DEFS[troopType].name, count };
+          slots[troopType] = null;
+          return { troopType, name: TROOP_DEFS[troopType].name, count };
+        }
+
+        function finishReadyTrainings(now) {
+          const slots = ensureActiveTrainings();
+          const finished = [];
+          for (const tk of ['slinger', 'clubman', 'dinorider']) {
+            const job = slots[tk];
+            if (job && now >= job.endsAt) {
+              const res = finishActiveTraining(tk);
+              if (res) finished.push(res);
+            }
+          }
+          return finished;
         }
 
         /* --- KRANKENZELT, FRIEDHOF, MARKTPLATZ & LAGERHAUS LOGIK --- */
@@ -6258,9 +6337,7 @@ export function initGameRuntime(hooks = {}) {
             const name = finishActiveResearch();
             if (name) report.completedResearch.push(name);
           }
-          if (state.activeTraining && now >= state.activeTraining.endsAt) {
-            finishActiveTraining();
-          }
+          finishReadyTrainings(now);
           if (state.activeHealing && now >= state.activeHealing.endsAt) {
             finishActiveHealing();
           }
@@ -6386,14 +6463,14 @@ export function initGameRuntime(hooks = {}) {
             }
           }
 
-          // Aktive Truppen-Ausbildung fertig?
-          if (state.activeTraining && now >= state.activeTraining.endsAt) {
-            const tr = finishActiveTraining();
-            if (tr) {
-              SoundFX.play('horn');
+          // Aktive Truppen-Ausbildungen fertig? (alle 3 Kasernen parallel)
+          const finishedTrainings = finishReadyTrainings(now);
+          if (finishedTrainings.length > 0) {
+            SoundFX.play('horn');
+            for (const tr of finishedTrainings) {
               showToast(`Ausbildung fertig: +${tr.count} ${tr.name}!`, 'ok');
-              if (openSheet && openSheet.type === 'building') renderSheet();
             }
+            if (openSheet && openSheet.type === 'building') renderSheet();
           }
 
           // Aktive Krankenzelt-Heilung fertig?
@@ -6957,34 +7034,11 @@ export function initGameRuntime(hooks = {}) {
         }
 
         function renderVillageMap() {
-          const emberLabelEl = document.getElementById('emberLabel');
-          if (!emberLabelEl) return;
+          if (!isShellMounted()) return;
 
           const now = Date.now();
           const rates = computeEconomyRates();
-          const emberPct = Math.round(state.ember);
-          const emberSt = getEmberStatus(emberPct);
           const overheat = isOverheatMode();
-
-          emberLabelEl.textContent = `Glut ${emberPct}%`;
-          const emberFillEl = document.getElementById('emberMiniFill');
-          if (emberFillEl) emberFillEl.style.width = `${emberPct}%`;
-          const stEl = document.getElementById('emberStateText');
-          if (stEl) {
-            if (!rates.autoFeedActive) {
-              stEl.textContent = 'Kein Holz!';
-              stEl.style.color = '#ef4444';
-            } else {
-              stEl.textContent = overheat ? 'Auto · Überheizt' : `Auto · ${emberSt.label}`;
-              stEl.style.color = overheat ? '#fb923c' : emberSt.color;
-            }
-          }
-
-          // Dauerhafter Normal / Überheizen Umschalter
-          const btnModeNormal = document.getElementById('btnModeNormal');
-          const btnModeOverheat = document.getElementById('btnModeOverheat');
-          if (btnModeNormal) btnModeNormal.className = 'mode-switch-btn' + (!overheat ? ' active-normal' : '');
-          if (btnModeOverheat) btnModeOverheat.className = 'mode-switch-btn' + (overheat ? ' active-overheat' : '');
 
           // Wetter-Banner & Vignetten
           const wEl = document.getElementById('weatherBannerText');
@@ -7029,7 +7083,8 @@ export function initGameRuntime(hooks = {}) {
             const isVisibleInUI = BuildingRegistry.isVisibleInUI(id, state);
             const isBuilding = Boolean(state.activeBuild && state.activeBuild.buildingId === id);
             const isResearchingHere = id === 'workshop' && Boolean(state.activeResearch);
-            const isTrainingHere = Boolean(def.troopType && state.activeTraining && state.activeTraining.troopType === def.troopType);
+            const trainingJobHere = def.troopType ? getActiveTraining(def.troopType) : null;
+            const isTrainingHere = Boolean(trainingJobHere);
             const isHealingHere = id === 'infirmary' && Boolean(state.activeHealing);
             const evalReq = evaluateBuildingRequirements(id);
             const nextCost = evalReq.isMax ? null : getBuildingCost(id, evalReq.targetLevel);
@@ -7052,9 +7107,9 @@ export function initGameRuntime(hooks = {}) {
               progressPct = Math.min(100, Math.max(0, ((total - rem) / total) * 100));
               metaText = `Forschen ${fmtClock(rem)}`;
               metaClass = 'is-building';
-            } else if (isTrainingHere) {
-              const total = Math.max(1, (state.activeTraining.endsAt - state.activeTraining.startedAt) / 1000);
-              const rem = Math.max(0, (state.activeTraining.endsAt - now) / 1000);
+            } else if (isTrainingHere && trainingJobHere) {
+              const total = Math.max(1, (trainingJobHere.endsAt - trainingJobHere.startedAt) / 1000);
+              const rem = Math.max(0, (trainingJobHere.endsAt - now) / 1000);
               progressPct = Math.min(100, Math.max(0, ((total - rem) / total) * 100));
               metaText = `Ausb. ${fmtClock(rem)}`;
               metaClass = 'is-building';
@@ -7168,13 +7223,18 @@ export function initGameRuntime(hooks = {}) {
               qTimeEl.textContent = fmtClock(rem);
               qFillEl.style.width = `${pct.toFixed(1)}%`;
               freeBtn.style.display = rem <= FREE_FINISH_SEC ? 'inline-flex' : 'none';
-            } else if (state.activeTraining) {
-              const tDef = TROOP_DEFS[state.activeTraining.troopType];
-              const total = Math.max(1, (state.activeTraining.endsAt - state.activeTraining.startedAt) / 1000);
-              const rem = Math.max(0, (state.activeTraining.endsAt - now) / 1000);
+            } else if (hasAnyActiveTraining()) {
+              const allJobs = getAllActiveTrainings().sort((a, b) => a.endsAt - b.endsAt);
+              const soonest = allJobs[0];
+              const tDef = TROOP_DEFS[soonest.troopType];
+              const total = Math.max(1, (soonest.endsAt - soonest.startedAt) / 1000);
+              const rem = Math.max(0, (soonest.endsAt - now) / 1000);
               const pct = Math.min(100, Math.max(0, ((total - rem) / total) * 100));
               qBar.classList.add('visible');
-              qNameEl.textContent = `Ausbildung: ${state.activeTraining.count}× ${tDef.name}`;
+              qNameEl.textContent =
+                allJobs.length > 1
+                  ? `Ausbildung (${allJobs.length}/3): ${soonest.count}× ${tDef.name}`
+                  : `Ausbildung: ${soonest.count}× ${tDef.name}`;
               qTimeEl.textContent = fmtClock(rem);
               qFillEl.style.width = `${pct.toFixed(1)}%`;
               freeBtn.style.display = 'none';
@@ -7809,7 +7869,7 @@ export function initGameRuntime(hooks = {}) {
                 ${qty > 1 ? `<button class="inv-use-btn secondary" data-inv-use-all="${item.id}">Alle (${qty})</button>` : ''}
               `;
             } else if (item.actionType === 'speedup') {
-              const hasActiveTimer = Boolean(state.activeBuild || state.activeResearch || state.activeTraining || state.activeHealing);
+              const hasActiveTimer = Boolean(state.activeBuild || state.activeResearch || hasAnyActiveTraining() || state.activeHealing);
               btnHtml = `
                 <button class="inv-use-btn" data-inv-use="${item.id}" ${qty > 0 && hasActiveTimer ? '' : 'disabled'}>
                   ${hasActiveTimer ? 'Einsetzen' : 'Kein Timer'}
@@ -8004,10 +8064,11 @@ export function initGameRuntime(hooks = {}) {
           const bState = state.buildings[troopType];
           const count = (state.troops && state.troops[troopType]) || 0;
           const bLvl = bState ? bState.level : 0;
-          const batch = def.batchSize + Math.floor(Math.max(0, bLvl - 1) * 1.5);
+          const batch = getTroopBatchSize(troopType, bLvl);
           const dur = Math.max(12, Math.round(def.durationSec / (1 + Math.max(0, bLvl - 1) * 0.08)));
           const now = Date.now();
-          const isThisTraining = state.activeTraining && state.activeTraining.troopType === troopType;
+          const activeJob = getActiveTraining(troopType);
+          const activeTotalCount = getAllActiveTrainings().length;
 
           let html = `
             <p class="info-line">${BUILDINGS[troopType].desc}</p>
@@ -8039,29 +8100,34 @@ export function initGameRuntime(hooks = {}) {
             </div>
           `;
 
-          if (isThisTraining) {
-            const total = Math.max(1, (state.activeTraining.endsAt - state.activeTraining.startedAt) / 1000);
-            const rem = Math.max(0, (state.activeTraining.endsAt - now) / 1000);
+          if (activeJob) {
+            const total = Math.max(1, (activeJob.endsAt - activeJob.startedAt) / 1000);
+            const rem = Math.max(0, (activeJob.endsAt - now) / 1000);
             const pct = Math.min(100, Math.max(0, ((total - rem) / total) * 100));
             html += `
               <div>
-                <div class="queue-title"><span>Ausbildung (${state.activeTraining.count}× ${def.name}) läuft...</span><span class="mono">${fmtClock(rem)}</span></div>
+                <div class="queue-title"><span>Ausbildung (${activeJob.count}× ${def.name}) läuft...</span><span class="mono">${fmtClock(rem)}</span></div>
                 <div class="prog-bar"><div class="prog-fill" style="width:${pct.toFixed(1)}%"></div></div>
+                ${
+                  activeTotalCount > 1
+                    ? `<p class="info-line" style="font-size:11.5px; color:var(--text-muted); margin-top:6px;">Parallel-Ausbildung aktiv (${activeTotalCount} / 3 Kasernen arbeiten gleichzeitig).</p>`
+                    : ''
+                }
               </div>
             `;
           } else {
-            const busyOther = Boolean(state.activeTraining);
             const affordable = canAfford(def.cost);
-            const enabled = bLvl > 0 && !busyOther && affordable;
+            const enabled = bLvl > 0 && affordable;
             const btnLabel =
               bLvl <= 0
                 ? 'Gebäude zuerst errichten'
-                : busyOther
-                ? 'Andere Ausbildung aktiv'
                 : !affordable
                 ? 'Ressourcen fehlen'
                 : `${batch}× ${def.name} ausbilden (${fmtDuration(dur)})`;
             html += `<button class="btn-primary" data-train-troop="${troopType}" ${enabled ? '' : 'disabled'}>${btnLabel}</button>`;
+            if (activeTotalCount > 0) {
+              html += `<p class="info-line" style="font-size:11.5px; color:var(--text-muted); margin-top:6px;">Du kannst alle 3 Truppentypen gleichzeitig ausbilden (${activeTotalCount} / 3 Kasernen aktiv).</p>`;
+            }
           }
 
           return html;
@@ -11166,18 +11232,34 @@ export function initGameRuntime(hooks = {}) {
 
           // Leistungs-Übersicht
           if (buildingId === 'bonfire') {
-            const eSt = getEmberStatus(state.ember);
+            const emberPct = Math.round(state.ember);
+            const eSt = getEmberStatus(emberPct);
             const overheat = isOverheatMode();
             const curQueues = getMaxWorldMarches();
             const nextQueueLvl = getNextMarchQueueUnlockLevel();
+            const emberStatusLabel = !rates.autoFeedActive
+              ? 'Kein Holz!'
+              : overheat
+              ? 'Auto · Überheizt'
+              : `Auto · ${eSt.label}`;
+            const emberStatusColor = !rates.autoFeedActive
+              ? '#ef4444'
+              : overheat
+              ? '#fb923c'
+              : eSt.color;
             html += `
               <div>
-                <p class="sheet-section-title">Signalfeuer, Marschwarteschlangen &amp; Heizmodus</p>
-                <div class="stat-grid">
-                  <div class="stat-box">
-                    <div class="stat-label">Feuer-Glut · Holz-Zufuhr</div>
-                    <div class="stat-value" style="color:${rates.autoFeedActive ? eSt.color : '#ef4444'}">${Math.round(state.ember)}% · ${rates.autoFeedActive ? 'Auto aktiv' : 'Holz leer'}</div>
+                <p class="sheet-section-title">Glut-Anzeige, Signalfeuer &amp; Heizmodus</p>
+                <div class="bonfire-ember-card">
+                  <div class="bonfire-ember-head">
+                    <span class="mono">Glut ${emberPct}%</span>
+                    <span style="color:${emberStatusColor};">${emberStatusLabel}</span>
                   </div>
+                  <div class="bonfire-ember-track">
+                    <div class="ember-bar-fill" style="width:${emberPct}%;"></div>
+                  </div>
+                </div>
+                <div class="stat-grid">
                   <div class="stat-box">
                     <div class="stat-label">Auto-Verbrauch</div>
                     <div class="stat-value">-${Math.round(rates.woodBurn)} Holz/Min.</div>
@@ -11189,6 +11271,10 @@ export function initGameRuntime(hooks = {}) {
                   <div class="stat-box">
                     <div class="stat-label">Nächste Warteschlange</div>
                     <div class="stat-value mono">${nextQueueLvl ? `Ab Signalfeuer St. ${nextQueueLvl}` : 'Alle 5 freigeschaltet'}</div>
+                  </div>
+                  <div class="stat-box">
+                    <div class="stat-label">Heizmodus</div>
+                    <div class="stat-value" style="color:${overheat ? '#fb923c' : '#fde68a'};">${overheat ? 'Überheizt (1,8× Holz)' : 'Normalmodus'}</div>
                   </div>
                 </div>
                 <div class="mode-switch-lg" style="margin-top:10px;" role="group" aria-label="Dauerhafter Signalfeuer-Modus">
@@ -12429,10 +12515,8 @@ export function initGameRuntime(hooks = {}) {
             btn.addEventListener('click', () => switchTab(btn.dataset.tab));
           });
 
-          // Dauerhafter Signalfeuer-Modus im Dorf-Banner
-          document.getElementById('btnModeNormal').addEventListener('click', () => setFireMode('normal'));
-          document.getElementById('btnModeOverheat').addEventListener('click', () => setFireMode('overheat'));
-          document.getElementById('btnQueueFreeFinish').addEventListener('click', tryFreeFinishBuild);
+          // Signalfeuer-Modus wird jetzt ausschließlich über das Signalfeuer-Menü umgestellt
+          document.getElementById('btnQueueFreeFinish')?.addEventListener('click', tryFreeFinishBuild);
           document.getElementById('btnSettings').addEventListener('click', () => {
             SoundFX.play('tap');
             openSettingsModal();
