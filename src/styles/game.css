@@ -6286,6 +6286,435 @@
   color: var(--text-muted);
 }
 
+/* ==================== KRANKENZELT HEILUNGS-ANIMATION ==================== */
+.inf-heal-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(74, 222, 128, 0.24);
+  background: linear-gradient(160deg, rgba(16, 26, 20, 0.94) 0%, rgba(16, 14, 13, 0.98) 100%);
+}
+
+.inf-heal-stage.is-volcano {
+  border-color: rgba(251, 146, 60, 0.32);
+  background: linear-gradient(155deg, rgba(32, 18, 13, 0.94) 0%, rgba(15, 24, 19, 0.96) 58%, rgba(14, 13, 12, 0.98) 100%);
+}
+
+.inf-heal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.inf-heal-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.inf-heal-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.inf-heal-sub {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.inf-heal-volc-note {
+  color: #fdba74;
+}
+
+.inf-heal-timer-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex-shrink: 0;
+}
+
+.inf-heal-clock {
+  font-size: 14px;
+  font-weight: 700;
+  color: #4ade80;
+  white-space: nowrap;
+}
+
+.inf-heal-pct {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.inf-heal-canvas {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  min-height: 82px;
+  padding: 14px 12px 10px;
+  border-radius: 9px;
+  border: 1px solid rgba(245, 239, 230, 0.08);
+  background: radial-gradient(circle at 18% 85%, rgba(74, 222, 128, 0.12), transparent 55%),
+    rgba(10, 9, 8, 0.72);
+  overflow: hidden;
+}
+
+.inf-heal-stage.is-volcano .inf-heal-canvas {
+  background: radial-gradient(circle at 16% 85%, rgba(74, 222, 128, 0.14), transparent 52%),
+    radial-gradient(circle at 86% 22%, rgba(249, 115, 22, 0.14), transparent 52%),
+    rgba(10, 9, 8, 0.78);
+}
+
+.inf-heal-wave {
+  position: absolute;
+  inset: 0;
+  width: 44%;
+  background: linear-gradient(90deg, transparent 0%, rgba(74, 222, 128, 0.14) 50%, transparent 100%);
+  transform: translateX(-110%);
+  animation: infHealWave 3.2s cubic-bezier(0.37, 0, 0.63, 1) infinite;
+  pointer-events: none;
+}
+
+@keyframes infHealWave {
+  0% {
+    transform: translateX(-110%);
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(260%);
+    opacity: 0;
+  }
+}
+
+.inf-heal-cauldron {
+  position: relative;
+  width: 38px;
+  height: 44px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  flex-shrink: 0;
+  z-index: 2;
+}
+
+.inf-heal-spark {
+  position: absolute;
+  bottom: 24px;
+  font-size: 11px;
+  font-weight: 800;
+  color: #4ade80;
+  opacity: 0;
+  pointer-events: none;
+  animation: infHealSparkRise 2.2s ease-out infinite;
+}
+
+.inf-heal-spark.s1 {
+  left: 8px;
+  animation-delay: 0s;
+}
+
+.inf-heal-spark.s2 {
+  left: 20px;
+  animation-delay: 0.55s;
+}
+
+.inf-heal-spark.s3 {
+  left: 13px;
+  animation-delay: 1.1s;
+}
+
+.inf-heal-spark.s4 {
+  left: 24px;
+  animation-delay: 1.65s;
+}
+
+@keyframes infHealSparkRise {
+  0% {
+    transform: translateY(0) scale(0.7);
+    opacity: 0;
+  }
+  25% {
+    opacity: 0.95;
+  }
+  100% {
+    transform: translateY(-30px) scale(1.1);
+    opacity: 0;
+  }
+}
+
+.inf-heal-ash-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.inf-ash-mote {
+  position: absolute;
+  bottom: 14px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #fb923c;
+  opacity: 0;
+  animation: infAshDissipate 2.8s ease-out infinite;
+}
+
+.inf-ash-mote.a1 {
+  left: 34%;
+  animation-delay: 0.2s;
+}
+
+.inf-ash-mote.a2 {
+  left: 56%;
+  animation-delay: 0.95s;
+}
+
+.inf-ash-mote.a3 {
+  left: 74%;
+  animation-delay: 1.65s;
+}
+
+.inf-ash-mote.a4 {
+  left: 88%;
+  animation-delay: 2.2s;
+}
+
+@keyframes infAshDissipate {
+  0% {
+    transform: translate(0, 0) scale(1);
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.85;
+  }
+  100% {
+    transform: translate(12px, -44px) scale(0.35);
+    opacity: 0;
+  }
+}
+
+.inf-heal-cots {
+  position: relative;
+  z-index: 2;
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(36px, 1fr));
+  gap: 8px;
+  align-items: end;
+}
+
+.inf-heal-cot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding-top: 8px;
+}
+
+.inf-heal-cot-aura {
+  position: absolute;
+  bottom: 4px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.inf-heal-cot-icon {
+  position: relative;
+  z-index: 2;
+  transition: color 200ms var(--ease-out), transform 200ms var(--ease-out), opacity 200ms var(--ease-out);
+}
+
+.inf-heal-cot-pulse {
+  position: absolute;
+  top: -2px;
+  right: 2px;
+  font-size: 11px;
+  font-weight: 800;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.inf-heal-cot-bed {
+  width: 28px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(245, 239, 230, 0.16);
+  transition: background 200ms var(--ease-out);
+}
+
+.inf-heal-cot.is-wounded .inf-heal-cot-icon {
+  color: #fb923c;
+  opacity: 0.78;
+}
+
+.inf-heal-cot.is-wounded .inf-heal-cot-bed {
+  background: rgba(251, 146, 60, 0.38);
+}
+
+.inf-heal-cot.is-healing .inf-heal-cot-icon {
+  color: #86efac;
+  animation: infCotBreathe 1.6s ease-in-out infinite;
+}
+
+.inf-heal-cot.is-healing .inf-heal-cot-aura {
+  background: radial-gradient(circle, rgba(74, 222, 128, 0.34) 0%, transparent 72%);
+  opacity: 1;
+  animation: infCotAura 1.6s ease-in-out infinite;
+}
+
+.inf-heal-cot.is-healing .inf-heal-cot-pulse {
+  color: #4ade80;
+  animation: infHealSparkRise 1.7s ease-out infinite;
+}
+
+.inf-heal-cot.is-healing .inf-heal-cot-bed {
+  background: rgba(74, 222, 128, 0.65);
+}
+
+.inf-heal-cot.is-recovered .inf-heal-cot-icon {
+  color: #4ade80;
+  transform: translateY(-2px);
+}
+
+.inf-heal-cot.is-recovered .inf-heal-cot-bed {
+  background: #4ade80;
+}
+
+@keyframes infCotBreathe {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.85;
+  }
+  50% {
+    transform: translateY(-2.5px);
+    opacity: 1;
+  }
+}
+
+@keyframes infCotAura {
+  0%,
+  100% {
+    transform: scale(0.88);
+    opacity: 0.45;
+  }
+  50% {
+    transform: scale(1.14);
+    opacity: 0.95;
+  }
+}
+
+.inf-heal-progress-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.inf-heal-track {
+  position: relative;
+  width: 100%;
+  height: 7px;
+  border-radius: 4px;
+  background: rgba(245, 239, 230, 0.08);
+  overflow: hidden;
+}
+
+.inf-heal-fill {
+  position: relative;
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #16a34a 0%, #4ade80 65%, #86efac 100%);
+  transition: width 320ms var(--ease-out);
+  overflow: hidden;
+}
+
+.inf-heal-fill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+  transform: translateX(-120%);
+  animation: infBarSheen 2.1s linear infinite;
+}
+
+@keyframes infBarSheen {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+.inf-heal-stage-text {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  line-height: 1.35;
+}
+
+.inf-volcano-triage {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(251, 146, 60, 0.28);
+  background: rgba(251, 146, 60, 0.07);
+}
+
+.inf-volcano-triage-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: rgba(251, 146, 60, 0.14);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.inf-volcano-triage-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.inf-volcano-triage-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #fdba74;
+}
+
+.inf-volcano-triage-desc {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  line-height: 1.35;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .volc-hud-trigger,
   .volc-hud-panel.open,
@@ -6293,7 +6722,15 @@
   .volc-btn-primary,
   .volc-btn-secondary,
   .volc-mob-step-btn,
-  .volc-mob-quick-btn {
+  .volc-mob-quick-btn,
+  .inf-heal-wave,
+  .inf-heal-spark,
+  .inf-ash-mote,
+  .inf-heal-cot.is-healing .inf-heal-cot-icon,
+  .inf-heal-cot.is-healing .inf-heal-cot-aura,
+  .inf-heal-cot.is-healing .inf-heal-cot-pulse,
+  .inf-heal-fill,
+  .inf-heal-fill::after {
     animation: none;
     transition: none;
   }

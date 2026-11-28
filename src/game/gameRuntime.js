@@ -1645,6 +1645,11 @@ export function initGameRuntime(hooks = {}) {
               clubman: 0,
               dinorider: 0
             },
+            volcanoInjuredTroops: {
+              slinger: 0,
+              clubman: 0,
+              dinorider: 0
+            },
             fallenTroops: {
               slinger: 0,
               clubman: 0,
@@ -2136,6 +2141,7 @@ export function initGameRuntime(hooks = {}) {
               weather: { ...fresh.weather, ...(parsed.weather || {}) },
               troops: { ...fresh.troops, ...(parsed.troops || {}) },
               injuredTroops: { ...fresh.injuredTroops, ...(parsed.injuredTroops || {}) },
+              volcanoInjuredTroops: { ...fresh.volcanoInjuredTroops, ...(parsed.volcanoInjuredTroops || {}) },
               fallenTroops: { ...fresh.fallenTroops, ...(parsed.fallenTroops || {}) },
               activeHealing: parsed.activeHealing && typeof parsed.activeHealing === 'object' ? parsed.activeHealing : null,
               volcanoGarrison:
@@ -3175,6 +3181,16 @@ export function initGameRuntime(hooks = {}) {
           return (inj.slinger || 0) + (inj.clubman || 0) + (inj.dinorider || 0);
         }
 
+        function getTotalVolcanoInjuredTroops() {
+          const vinj = state.volcanoInjuredTroops || {};
+          const inj = state.injuredTroops || {};
+          return (
+            Math.min(inj.slinger || 0, vinj.slinger || 0) +
+            Math.min(inj.clubman || 0, vinj.clubman || 0) +
+            Math.min(inj.dinorider || 0, vinj.dinorider || 0)
+          );
+        }
+
         function getTotalFallenTroops() {
           const fal = state.fallenTroops || {};
           return (fal.slinger || 0) + (fal.clubman || 0) + (fal.dinorider || 0);
@@ -3222,16 +3238,31 @@ export function initGameRuntime(hooks = {}) {
             return;
           }
           payCost(plan.cost);
+          const vinj = state.volcanoInjuredTroops || { slinger: 0, clubman: 0, dinorider: 0 };
+          const volcanoTroops = {
+            slinger: Math.min(plan.troops.slinger || 0, Math.max(0, Math.floor(Number(vinj.slinger || 0)))),
+            clubman: Math.min(plan.troops.clubman || 0, Math.max(0, Math.floor(Number(vinj.clubman || 0)))),
+            dinorider: Math.min(plan.troops.dinorider || 0, Math.max(0, Math.floor(Number(vinj.dinorider || 0))))
+          };
+          const volcanoCount = volcanoTroops.slinger + volcanoTroops.clubman + volcanoTroops.dinorider;
           state.injuredTroops = { slinger: 0, clubman: 0, dinorider: 0 };
+          state.volcanoInjuredTroops = { slinger: 0, clubman: 0, dinorider: 0 };
           const now = Date.now();
           state.activeHealing = {
             troops: plan.troops,
             totalCount: plan.total,
+            volcanoTroops,
+            volcanoCount,
             startedAt: now,
             endsAt: now + plan.durationSec * 1000
           };
           SoundFX.play('build');
-          showToast(`Heilung für ${plan.total} verletzte Einheiten gestartet (${fmtDuration(plan.durationSec)})!`, 'ok');
+          showToast(
+            volcanoCount > 0
+              ? `Heilung für ${plan.total} Einheiten (davon ${volcanoCount} aus dem Vulkan-Kampf) gestartet (${fmtDuration(plan.durationSec)})!`
+              : `Heilung für ${plan.total} verletzte Einheiten gestartet (${fmtDuration(plan.durationSec)})!`,
+            'ok'
+          );
           saveState();
           renderAll();
           if (openSheet) renderSheet();
@@ -4894,10 +4925,11 @@ export function initGameRuntime(hooks = {}) {
           renderSheet();
         }
 
-        function applyPvpCasualtiesToMarch(march, lossRate) {
+        function applyPvpCasualtiesToMarch(march, lossRate, fromVolcano = false) {
           const result = { lostTotal: 0, injuredTotal: 0, fallenTotal: 0 };
           if (!march || !march.troops || !lossRate || lossRate <= 0) return result;
           if (!state.injuredTroops) state.injuredTroops = { slinger: 0, clubman: 0, dinorider: 0 };
+          if (!state.volcanoInjuredTroops) state.volcanoInjuredTroops = { slinger: 0, clubman: 0, dinorider: 0 };
           if (!state.fallenTroops) state.fallenTroops = { slinger: 0, clubman: 0, dinorider: 0 };
 
           const totalSent = Object.keys(TROOP_DEFS).reduce((sum, k) => sum + (march.troops[k] || 0), 0);
@@ -4918,6 +4950,9 @@ export function initGameRuntime(hooks = {}) {
             const toGraveyard = lost - toInfirmary;
             if (toInfirmary > 0) {
               state.injuredTroops[key] = (state.injuredTroops[key] || 0) + toInfirmary;
+              if (fromVolcano) {
+                state.volcanoInjuredTroops[key] = (state.volcanoInjuredTroops[key] || 0) + toInfirmary;
+              }
               result.injuredTotal += toInfirmary;
             }
             if (toGraveyard > 0) {
@@ -5326,11 +5361,12 @@ export function initGameRuntime(hooks = {}) {
           };
         }
 
-        function applyExactCasualtiesToTroops(losses, routeAllToInfirmary) {
+        function applyExactCasualtiesToTroops(losses, routeAllToInfirmary, fromVolcano = false) {
           const result = { lostTotal: 0, injuredTotal: 0, fallenTotal: 0 };
           if (!losses || typeof losses !== 'object') return result;
           if (!state.troops) state.troops = { slinger: 0, clubman: 0, dinorider: 0 };
           if (!state.injuredTroops) state.injuredTroops = { slinger: 0, clubman: 0, dinorider: 0 };
+          if (!state.volcanoInjuredTroops) state.volcanoInjuredTroops = { slinger: 0, clubman: 0, dinorider: 0 };
           if (!state.fallenTroops) state.fallenTroops = { slinger: 0, clubman: 0, dinorider: 0 };
 
           for (const key of Object.keys(TROOP_DEFS)) {
@@ -5346,6 +5382,9 @@ export function initGameRuntime(hooks = {}) {
               // Bei abgewehrten Angriffen auf den Vulkan landen die verletzten Verteidiger
               // direkt im Krankenhaus (Krankenzelt) des Besetzers.
               state.injuredTroops[key] = (state.injuredTroops[key] || 0) + actualLost;
+              if (fromVolcano) {
+                state.volcanoInjuredTroops[key] = (state.volcanoInjuredTroops[key] || 0) + actualLost;
+              }
               result.injuredTotal += actualLost;
             } else {
               const freeBeds = getInfirmaryFreeBeds();
@@ -5353,6 +5392,9 @@ export function initGameRuntime(hooks = {}) {
               const toGraveyard = actualLost - toInfirmary;
               if (toInfirmary > 0) {
                 state.injuredTroops[key] = (state.injuredTroops[key] || 0) + toInfirmary;
+                if (fromVolcano) {
+                  state.volcanoInjuredTroops[key] = (state.volcanoInjuredTroops[key] || 0) + toInfirmary;
+                }
                 result.injuredTotal += toInfirmary;
               }
               if (toGraveyard > 0) {
@@ -5389,7 +5431,7 @@ export function initGameRuntime(hooks = {}) {
             if (!b.attackerWon) {
               // Nicht siegreicher Angriff: Ein Teil der stationierten Besetzer-Soldaten wird verletzt
               // und landet direkt im Krankenhaus (Krankenzelt) des Besetzers; Rest bleibt im Vulkan.
-              const cas = applyExactCasualtiesToTroops(clampedWounded, true);
+              const cas = applyExactCasualtiesToTroops(clampedWounded, true, true);
               if (g.active) {
                 g.troops.slinger = Math.max(0, (g.troops.slinger || 0) - clampedWounded.slinger);
                 g.troops.clubman = Math.max(0, (g.troops.clubman || 0) - clampedWounded.clubman);
@@ -5405,7 +5447,7 @@ export function initGameRuntime(hooks = {}) {
               );
             } else {
               // Besetzer wurde herausgeworfen: Verletzte ins Krankenzelt/Friedhof, Überlebende & Helden kehren heim
-              const cas = applyExactCasualtiesToTroops(clampedWounded, false);
+              const cas = applyExactCasualtiesToTroops(clampedWounded, false, true);
               const casNote = formatCasualtyNote(cas);
               clearVolcanoGarrisonState();
               SoundFX.play('error');
@@ -5827,9 +5869,9 @@ export function initGameRuntime(hooks = {}) {
                       clubman: Math.max(0, sent.clubman - surviving.clubman),
                       dinorider: Math.max(0, sent.dinorider - surviving.dinorider)
                     };
-                    cas = applyExactCasualtiesToTroops(exactLosses, false);
+                    cas = applyExactCasualtiesToTroops(exactLosses, false, true);
                   } else {
-                    cas = applyPvpCasualtiesToMarch(march, resp.attackerLossRate || 0);
+                    cas = applyPvpCasualtiesToMarch(march, resp.attackerLossRate || 0, true);
                     surviving = {
                       slinger: Math.max(0, Math.floor(Number(march.troops?.slinger || 0))),
                       clubman: Math.max(0, Math.floor(Number(march.troops?.clubman || 0))),
@@ -5866,7 +5908,7 @@ export function initGameRuntime(hooks = {}) {
                     'ok'
                   );
                 } else {
-                  const cas = applyPvpCasualtiesToMarch(march, resp.attackerLossRate || 0);
+                  const cas = applyPvpCasualtiesToMarch(march, resp.attackerLossRate || 0, true);
                   const casNote = formatCasualtyNote(cas);
                   SoundFX.play('error');
                   showToast(
@@ -7062,7 +7104,11 @@ export function initGameRuntime(hooks = {}) {
               freeBoneReady: def.isHeroCave ? freeBoneReady : false,
               hasMarketClaim: id === 'marketplace' && bState.level > 0 ? marketClaimReady : false,
               fallenCount: id === 'graveyard' ? fallenCountTotal : 0,
-              injuredCount: id === 'infirmary' ? injuredCountTotal : 0
+              injuredCount: id === 'infirmary' ? injuredCountTotal : 0,
+              volcanoInjuredCount:
+                id === 'infirmary'
+                  ? (state.activeHealing ? state.activeHealing.volcanoCount || 0 : 0) + getTotalVolcanoInjuredTroops()
+                  : 0
             });
           }
 
@@ -7989,6 +8035,139 @@ export function initGameRuntime(hooks = {}) {
           return html;
         }
 
+        function buildInfirmaryUnitSvg(troopKey) {
+          if (troopKey === 'dinorider') {
+            return `
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M5 17c1-4 4-6 8-6 2.5 0 4.5-1.5 5.5-4 1.2 1 1.5 2.5 1 4-.8 2.2-2.5 3.5-2.5 6" />
+                <path d="M8 17v3M14 17v3M11 7.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" />
+                <path d="M9.5 11 11 8.5l2.5 1.5" />
+              </svg>
+            `;
+          }
+          if (troopKey === 'clubman') {
+            return `
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="10" cy="6.5" r="2.2" />
+                <path d="M6.5 19v-5.5a3.5 3.5 0 0 1 7 0V19" />
+                <path d="M16 14 19.2 6.5c.4-.9 1.6-.6 1.5.4l-.8 7.5-3.9-.4Z" />
+              </svg>
+            `;
+          }
+          return `
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="10" cy="6.5" r="2.2" />
+              <path d="M6.5 19v-5.5a3.5 3.5 0 0 1 7 0V19" />
+              <path d="M13.5 11.5c2.2-1 4-2.5 5-4.5" />
+              <circle cx="19" cy="6.5" r="1.4" />
+            </svg>
+          `;
+        }
+
+        function buildInfirmaryHealingSlots(troops, totalCount) {
+          const safeTotal = Math.max(1, totalCount || 0);
+          const maxSlots = Math.min(6, safeTotal);
+          const entries = [
+            { key: 'slinger', label: 'Schleuderer', count: Math.max(0, Math.floor(Number(troops?.slinger || 0))) },
+            { key: 'clubman', label: 'Keulenkämpfer', count: Math.max(0, Math.floor(Number(troops?.clubman || 0))) },
+            { key: 'dinorider', label: 'Dino-Reiter', count: Math.max(0, Math.floor(Number(troops?.dinorider || 0))) }
+          ].filter((e) => e.count > 0);
+          if (entries.length === 0) {
+            return [{ key: 'clubman', label: 'Krieger' }];
+          }
+          const slots = [];
+          for (const e of entries) {
+            if (slots.length < maxSlots) slots.push({ key: e.key, label: e.label });
+          }
+          let cursor = 0;
+          const weighted = [];
+          for (const e of entries) {
+            const share = Math.max(1, Math.round((e.count / safeTotal) * maxSlots));
+            for (let i = 0; i < share; i++) weighted.push({ key: e.key, label: e.label });
+          }
+          while (slots.length < maxSlots && weighted.length > 0) {
+            slots.push(weighted[cursor % weighted.length]);
+            cursor++;
+          }
+          return slots.slice(0, maxSlots);
+        }
+
+        function getInfirmaryHealingStageText(pct, isVolcano) {
+          if (pct < 35) {
+            return isVolcano
+              ? 'Phase 1/3 · Vulkanasche reinigen & Verbrennungen kühlen'
+              : 'Phase 1/3 · Wunden reinigen & verbinden';
+          }
+          if (pct < 75) {
+            return isVolcano
+              ? 'Phase 2/3 · Heilsud & Basaltkräuter regenerieren die Truppe'
+              : 'Phase 2/3 · Kräutersud & Ruhe wirken';
+          }
+          return 'Phase 3/3 · Kraft & Kampfbereitschaft wiederherstellen';
+        }
+
+        function getInfirmaryHealRenderSignature() {
+          const bState = state.buildings.infirmary;
+          const lvl = bState ? bState.level : 0;
+          const inj = state.injuredTroops || { slinger: 0, clubman: 0, dinorider: 0 };
+          const vinj = state.volcanoInjuredTroops || { slinger: 0, clubman: 0, dinorider: 0 };
+          const ah = state.activeHealing;
+          const ahSig = ah
+            ? `on:${ah.startedAt}:${ah.totalCount}:${ah.volcanoCount || 0}:${ah.troops?.slinger || 0}:${ah.troops?.clubman || 0}:${ah.troops?.dinorider || 0}`
+            : 'off';
+          const canAffordSig = ah ? 'n' : canAfford(getHealingCostAndDuration().cost) ? 'y' : 'n';
+          return `inf:${lvl}:${bState?.workers || 0}:${inj.slinger || 0}:${inj.clubman || 0}:${inj.dinorider || 0}:${vinj.slinger || 0}:${vinj.clubman || 0}:${vinj.dinorider || 0}:${ahSig}:${canAffordSig}`;
+        }
+
+        function updateInfirmaryHealDOM(bodyEl) {
+          if (!bodyEl || !state.activeHealing) return;
+          const now = Date.now();
+          const ah = state.activeHealing;
+          const total = Math.max(1, (ah.endsAt - ah.startedAt) / 1000);
+          const rem = Math.max(0, (ah.endsAt - now) / 1000);
+          const pct = Math.min(100, Math.max(0, ((total - rem) / total) * 100));
+          const isVolcano = (ah.volcanoCount || 0) > 0;
+          const recoveredSoFar = Math.min(ah.totalCount || 0, Math.floor((pct / 100) * (ah.totalCount || 0)));
+
+          const clockEl = bodyEl.querySelector('[data-heal-clock]');
+          if (clockEl) clockEl.textContent = fmtClock(rem);
+
+          const pctEl = bodyEl.querySelector('[data-heal-pct]');
+          if (pctEl) pctEl.textContent = `${Math.round(pct)} %`;
+
+          const fillEl = bodyEl.querySelector('[data-heal-prog-fill]');
+          if (fillEl) fillEl.style.width = `${pct.toFixed(1)}%`;
+
+          const stageTextEl = bodyEl.querySelector('[data-heal-stage-text]');
+          if (stageTextEl) stageTextEl.textContent = getInfirmaryHealingStageText(pct, isVolcano);
+
+          const recEl = bodyEl.querySelector('[data-heal-recovered]');
+          if (recEl) {
+            recEl.textContent = `${recoveredSoFar} / ${ah.totalCount || 0} genesen`;
+          }
+
+          const unitNodes = bodyEl.querySelectorAll('[data-heal-unit-idx]');
+          const slotCount = Math.max(1, unitNodes.length);
+          unitNodes.forEach((node) => {
+            const idx = Number(node.getAttribute('data-heal-unit-idx') || 0);
+            const startPct = (idx / slotCount) * 100;
+            const endPct = ((idx + 1) / slotCount) * 100;
+            node.classList.remove('is-wounded', 'is-healing', 'is-recovered');
+            if (pct >= endPct) {
+              node.classList.add('is-recovered');
+            } else if (pct >= startPct) {
+              node.classList.add('is-healing');
+            } else {
+              node.classList.add('is-wounded');
+            }
+          });
+
+          const freeWrap = bodyEl.querySelector('[data-heal-free-wrap]');
+          if (freeWrap) {
+            freeWrap.style.display = rem <= FREE_FINISH_SEC ? 'block' : 'none';
+          }
+        }
+
         function buildInfirmaryHTML() {
           const bState = state.buildings.infirmary;
           const lvl = bState ? bState.level : 0;
@@ -8003,13 +8182,14 @@ export function initGameRuntime(hooks = {}) {
           const now = Date.now();
           const cap = getInfirmaryCapacity(lvl);
           const injured = state.injuredTroops || { slinger: 0, clubman: 0, dinorider: 0 };
+          const volcanoWaiting = getTotalVolcanoInjuredTroops();
           const plan = getHealingCostAndDuration();
           const healingCnt = state.activeHealing ? state.activeHealing.totalCount || 0 : 0;
           const usedBeds = plan.total + healingCnt;
           const speedBonusPct = Math.round((lvl - 1) * 10 + (bState.workers || 0) * 15);
 
           let html = `
-            <p class="info-line">Verletzte Einheiten aus Dinojagden und Gefechten werden automatisch im Krankenzelt aufgenommen, solange freie Betten vorhanden sind. Einheiten über dem Limit landen auf dem Friedhof.</p>
+            <p class="info-line">Verletzte Einheiten aus Vulkan-Kämpfen, Dinojagden und Gefechten werden im Krankenzelt versorgt. Starte die Heilung, um deine Krieger wieder kampfbereit zu machen.</p>
             <div class="stat-grid">
               <div class="stat-box">
                 <div class="stat-label">Belegte Betten</div>
@@ -8023,18 +8203,104 @@ export function initGameRuntime(hooks = {}) {
           `;
 
           if (state.activeHealing) {
-            const total = Math.max(1, (state.activeHealing.endsAt - state.activeHealing.startedAt) / 1000);
-            const rem = Math.max(0, (state.activeHealing.endsAt - now) / 1000);
+            const ah = state.activeHealing;
+            const total = Math.max(1, (ah.endsAt - ah.startedAt) / 1000);
+            const rem = Math.max(0, (ah.endsAt - now) / 1000);
             const pct = Math.min(100, Math.max(0, ((total - rem) / total) * 100));
+            const isVolcanoHeal = (ah.volcanoCount || 0) > 0;
+            const recoveredSoFar = Math.min(ah.totalCount || 0, Math.floor((pct / 100) * (ah.totalCount || 0)));
+            const slots = buildInfirmaryHealingSlots(ah.troops, ah.totalCount || 1);
+            const slotCount = Math.max(1, slots.length);
+
             html += `
-              <div class="stat-box">
-                <div class="queue-title"><span>Heilung von ${state.activeHealing.totalCount} Einheiten läuft...</span><span class="mono">${fmtClock(rem)}</span></div>
-                <div class="prog-bar"><div class="prog-fill done" style="width:${pct.toFixed(1)}%"></div></div>
-                ${
-                  rem <= FREE_FINISH_SEC
-                    ? `<button class="btn-primary" style="margin-top:10px; background:var(--state-ok); color:#052e16;" data-free-heal="1">Gratis sofort heilen</button>`
-                    : ''
-                }
+              <section class="inf-heal-stage ${isVolcanoHeal ? 'is-volcano' : ''}" data-infirmary-heal-stage="1" aria-label="Visueller Heilungsprozess">
+                <div class="inf-heal-head">
+                  <div class="inf-heal-title-group">
+                    <span class="inf-heal-title">${isVolcanoHeal ? 'Vulkan-Lazarett · Heilung läuft' : 'Heilungsprozess aktiv'}</span>
+                    <span class="inf-heal-sub">
+                      <span class="mono" data-heal-recovered="1">${recoveredSoFar} / ${ah.totalCount || 0} genesen</span>
+                      ${isVolcanoHeal ? `<span aria-hidden="true">·</span><span class="inf-heal-volc-note">davon ${ah.volcanoCount} aus dem Vulkan-Kampf</span>` : ''}
+                    </span>
+                  </div>
+                  <div class="inf-heal-timer-col">
+                    <span class="inf-heal-clock mono" data-heal-clock="1">${fmtClock(rem)}</span>
+                    <span class="inf-heal-pct mono" data-heal-pct="1">${Math.round(pct)} %</span>
+                  </div>
+                </div>
+
+                <div class="inf-heal-canvas" aria-hidden="true">
+                  <div class="inf-heal-wave"></div>
+                  <div class="inf-heal-cauldron">
+                    <svg width="34" height="34" viewBox="0 0 36 36" fill="none">
+                      <ellipse cx="18" cy="14" rx="10" ry="3.2" fill="#4ade80" fill-opacity="0.35" stroke="#4ade80" stroke-width="1.4" />
+                      <path d="M8 14c0 7.5 3.6 12.5 10 12.5S28 21.5 28 14" fill="#1c1917" stroke="#a8a29e" stroke-width="1.6" />
+                      <path d="M11 28.5 9.5 32M25 28.5 26.5 32" stroke="#78716c" stroke-width="1.8" stroke-linecap="round" />
+                      <path d="M14 29.5c1.6-1.4 2.6-2 4-2s2.4.6 4 2" stroke="#f97316" stroke-width="1.6" stroke-linecap="round" />
+                    </svg>
+                    <span class="inf-heal-spark s1">+</span>
+                    <span class="inf-heal-spark s2">+</span>
+                    <span class="inf-heal-spark s3">+</span>
+                    <span class="inf-heal-spark s4">+</span>
+                  </div>
+
+                  ${
+                    isVolcanoHeal
+                      ? `
+                        <div class="inf-heal-ash-layer">
+                          <span class="inf-ash-mote a1"></span>
+                          <span class="inf-ash-mote a2"></span>
+                          <span class="inf-ash-mote a3"></span>
+                          <span class="inf-ash-mote a4"></span>
+                        </div>
+                      `
+                      : ''
+                  }
+
+                  <div class="inf-heal-cots">
+                    ${slots
+                      .map((slot, idx) => {
+                        const startPct = (idx / slotCount) * 100;
+                        const endPct = ((idx + 1) / slotCount) * 100;
+                        const cls = pct >= endPct ? 'is-recovered' : pct >= startPct ? 'is-healing' : 'is-wounded';
+                        return `
+                          <div class="inf-heal-cot ${cls}" data-heal-unit-idx="${idx}" title="${slot.label}">
+                            <div class="inf-heal-cot-aura"></div>
+                            <div class="inf-heal-cot-icon">${buildInfirmaryUnitSvg(slot.key)}</div>
+                            <span class="inf-heal-cot-pulse">+</span>
+                            <div class="inf-heal-cot-bed"></div>
+                          </div>
+                        `;
+                      })
+                      .join('')}
+                  </div>
+                </div>
+
+                <div class="inf-heal-progress-wrap">
+                  <div class="inf-heal-track">
+                    <div class="inf-heal-fill" data-heal-prog-fill="1" style="width:${pct.toFixed(1)}%"></div>
+                  </div>
+                  <div class="inf-heal-stage-text" data-heal-stage-text="1">${getInfirmaryHealingStageText(pct, isVolcanoHeal)}</div>
+                </div>
+
+                <div data-heal-free-wrap="1" style="display:${rem <= FREE_FINISH_SEC ? 'block' : 'none'}; margin-top:10px;">
+                  <button class="btn-primary" style="background:var(--state-ok); color:#052e16;" data-free-heal="1">Gratis sofort heilen</button>
+                </div>
+              </section>
+            `;
+          } else if (volcanoWaiting > 0) {
+            html += `
+              <div class="inf-volcano-triage" data-infirmary-heal-stage="1">
+                <div class="inf-volcano-triage-icon" aria-hidden="true">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fb923c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 2c.9 3.2 4 5.2 4 9a4 4 0 0 1-8 0c0-1.9.9-3.6 2-5-.2 1.8.8 2.8 2 3 .4-2.2-.2-4.6 0-7ZM4 20l4.5-9h7L20 20H4Z" />
+                  </svg>
+                </div>
+                <div class="inf-volcano-triage-copy">
+                  <div class="inf-volcano-triage-title">Verletzte aus dem Vulkan-Kampf</div>
+                  <div class="inf-volcano-triage-desc">
+                    <strong class="mono">${volcanoWaiting}</strong> ${volcanoWaiting === 1 ? 'Soldat wurde' : 'Soldaten wurden'} beim Gefecht an der Vulkan-Zitadelle verletzt und ${volcanoWaiting === 1 ? 'wartet' : 'warten'} auf Behandlung.
+                  </div>
+                </div>
               </div>
             `;
           }
@@ -8046,11 +8312,12 @@ export function initGameRuntime(hooks = {}) {
                 ${Object.values(TROOP_DEFS)
                   .map((td) => {
                     const cnt = injured[td.id] || 0;
+                    const vCnt = Math.min(cnt, (state.volcanoInjuredTroops && state.volcanoInjuredTroops[td.id]) || 0);
                     return `
                       <div class="hunt-troop-row">
                         <div>
                           <div style="font-size:12px; font-weight:700; color:var(--text-primary);">${td.name}</div>
-                          <div style="font-size:10.5px; color:var(--text-muted);">${td.role}</div>
+                          <div style="font-size:10.5px; color:var(--text-muted);">${td.role}${vCnt > 0 ? ` · ${vCnt} vom Vulkan` : ''}</div>
                         </div>
                         <span class="mono" style="font-size:12.5px; font-weight:700; color:${cnt > 0 ? '#fbbf24' : 'var(--text-muted)'};">${cnt} verletzt</span>
                       </div>
@@ -10793,6 +11060,14 @@ export function initGameRuntime(hooks = {}) {
           // Für Krankenzelt: Heilung <-> Gebäude & Ausbau
           if (buildingId === 'infirmary') {
             const injCnt = getTotalInjuredTroops();
+            const bodyEl = document.getElementById('sheetBody');
+            if (subTab === 'heal' && bodyEl) {
+              const nextSig = getInfirmaryHealRenderSignature();
+              if (bodyEl.dataset.infirmaryHealSig === nextSig && bodyEl.querySelector('[data-infirmary-heal-stage]')) {
+                updateInfirmaryHealDOM(bodyEl);
+                return;
+              }
+            }
             html += `
               <div class="sheet-tabs" role="tablist">
                 <button class="sheet-tab-btn ${subTab === 'heal' ? 'active' : ''}" data-infirmary-tab="heal">Lazarett (${injCnt})</button>
@@ -10801,7 +11076,10 @@ export function initGameRuntime(hooks = {}) {
             `;
             if (subTab === 'heal') {
               html += buildInfirmaryHTML();
-              document.getElementById('sheetBody').innerHTML = html;
+              if (bodyEl) {
+                bodyEl.innerHTML = html;
+                bodyEl.dataset.infirmaryHealSig = getInfirmaryHealRenderSignature();
+              }
               return;
             }
           }

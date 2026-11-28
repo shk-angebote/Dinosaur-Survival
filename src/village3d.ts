@@ -40,6 +40,7 @@ export interface BuildingSnapshot {
   hasMarketClaim?: boolean;
   fallenCount?: number;
   injuredCount?: number;
+  volcanoInjuredCount?: number;
 }
 
 export interface VillageSnapshot {
@@ -1741,18 +1742,126 @@ function buildInfirmary(mats: SharedMaterials): {
     steamPuffs.push(puff);
   }
 
+  // Soft herbal-emerald healing aura ring around the pavilion floor (visible while healing is active)
+  const healAuraMat = new THREE.MeshBasicMaterial({
+    color: 0x4ade80,
+    transparent: true,
+    opacity: 0,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending
+  });
+  const healAuraRing = new THREE.Mesh(new THREE.RingGeometry(1.55, 1.92, 24), healAuraMat);
+  healAuraRing.rotation.x = -Math.PI / 2;
+  healAuraRing.position.set(0, 0.21, 0);
+  healAuraRing.visible = false;
+  group.add(healAuraRing);
+
+  // Rising emerald healing motes floating above the recovery cots & pavilion during active healing
+  const healMoteMat = new THREE.MeshBasicMaterial({
+    color: 0x6ee7b7,
+    transparent: true,
+    opacity: 0.85,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending
+  });
+  const healMotes: { mesh: THREE.Mesh; baseX: number; baseZ: number; phase: number }[] = [];
+  const moteCoords: [number, number][] = [
+    [-0.72, -0.1],
+    [0.24, -0.2],
+    [-0.22, 0.32],
+    [0.72, 0.28],
+    [1.36, 0.42],
+    [-0.18, -0.58]
+  ];
+  for (let i = 0; i < moteCoords.length; i++) {
+    const [mx, mz] = moteCoords[i];
+    const mote = new THREE.Mesh(new THREE.OctahedronGeometry(0.095, 0), healMoteMat);
+    mote.position.set(mx, 0.65, mz);
+    mote.visible = false;
+    group.add(mote);
+    healMotes.push({ mesh: mote, baseX: mx, baseZ: mz, phase: i / moteCoords.length });
+  }
+
+  // Rising volcanic ash-ember flecks dissipating off the tent when volcano-wounded soldiers are treated
+  const volcAshMat = new THREE.MeshBasicMaterial({
+    color: 0xfb923c,
+    transparent: true,
+    opacity: 0.8,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending
+  });
+  const volcEmbers: { mesh: THREE.Mesh; baseX: number; baseZ: number; phase: number }[] = [];
+  const emberCoords: [number, number][] = [
+    [-0.6, 0.15],
+    [0.25, -0.05],
+    [-0.15, 0.45]
+  ];
+  for (let i = 0; i < emberCoords.length; i++) {
+    const [ex, ez] = emberCoords[i];
+    const ember = new THREE.Mesh(new THREE.DodecahedronGeometry(0.065, 0), volcAshMat);
+    ember.position.set(ex, 0.9, ez);
+    ember.visible = false;
+    group.add(ember);
+    volcEmbers.push({ mesh: ember, baseX: ex, baseZ: ez, phase: i * 0.34 });
+  }
+
   return {
     group,
     update: (t, _dt, snap) => {
-      const healing = Boolean(snap?.isHealing || (snap?.injuredCount || 0) > 0);
-      const speed = healing ? 1.55 : 0.72;
+      const isActiveHeal = Boolean(snap?.isHealing);
+      const hasWaiting = (snap?.injuredCount || 0) > 0;
+      const hasVolcanoWounded = (snap?.volcanoInjuredCount || 0) > 0;
+      const healing = isActiveHeal || hasWaiting;
+      const speed = isActiveHeal ? 1.85 : hasWaiting ? 1.25 : 0.72;
+
       for (let i = 0; i < steamPuffs.length; i++) {
         const u = (t * 0.55 * speed + i * 0.33) % 1;
         steamPuffs[i].position.y = 0.68 + u * 1.15;
         steamPuffs[i].position.x = 1.42 + Math.sin(t * 2.1 + i * 1.9) * 0.1;
         steamPuffs[i].scale.setScalar(0.55 + u * 0.75);
       }
-      mats.herbGlow.emissiveIntensity = healing ? 2.1 + Math.sin(t * 4.5) * 0.45 : 1.15;
+      mats.herbGlow.emissiveIntensity = isActiveHeal
+        ? 2.6 + Math.sin(t * 5.2) * 0.55
+        : hasWaiting
+        ? 1.8 + Math.sin(t * 3.2) * 0.35
+        : 1.15;
+
+      healAuraRing.visible = isActiveHeal;
+      if (isActiveHeal) {
+        const pulse = 0.5 + 0.5 * Math.sin(t * 3.2);
+        healAuraMat.opacity = 0.16 + pulse * 0.2;
+        const s = 0.96 + pulse * 0.08;
+        healAuraRing.scale.set(s, s, 1);
+      }
+
+      for (let i = 0; i < healMotes.length; i++) {
+        const item = healMotes[i];
+        item.mesh.visible = isActiveHeal;
+        if (isActiveHeal) {
+          const u = (t * 0.42 + item.phase) % 1;
+          item.mesh.position.y = 0.65 + u * 2.05;
+          item.mesh.position.x = item.baseX + Math.sin(t * 2.6 + i * 1.5) * 0.14;
+          item.mesh.position.z = item.baseZ + Math.cos(t * 2.1 + i * 1.3) * 0.12;
+          item.mesh.rotation.y = t * 2.2 + i;
+          const sc = Math.sin(u * Math.PI) * 1.15;
+          item.mesh.scale.setScalar(Math.max(0.01, sc));
+        }
+      }
+
+      const showVolcAsh = isActiveHeal && hasVolcanoWounded;
+      for (let i = 0; i < volcEmbers.length; i++) {
+        const item = volcEmbers[i];
+        item.mesh.visible = showVolcAsh;
+        if (showVolcAsh) {
+          const u = (t * 0.55 + item.phase) % 1;
+          item.mesh.position.y = 0.95 + u * 1.85;
+          item.mesh.position.x = item.baseX + Math.cos(t * 3.1 + i * 2.1) * 0.18;
+          item.mesh.position.z = item.baseZ + Math.sin(t * 2.5 + i * 1.7) * 0.14;
+          const sc = (1 - u) * 1.1;
+          item.mesh.scale.setScalar(Math.max(0.01, sc));
+        }
+      }
     }
   };
 }
