@@ -2115,13 +2115,18 @@ export function initGameRuntime(hooks = {}) {
           return state.fireMode === 'overheat';
         }
 
-        function saveState() {
+        function isShellMounted() {
+          return Boolean(document.getElementById('appShell') && document.getElementById('hud-meat'));
+        }
+
+        function saveState(options = null) {
           try {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
           } catch (e) {
             // Ignoriere Quota-Fehler still
           }
-          if (window.DinoMultiplayer) {
+          const localOnly = Boolean(options && options.localOnly);
+          if (!localOnly && window.DinoMultiplayer) {
             window.DinoMultiplayer.saveToCloud(state, false);
           }
         }
@@ -6310,6 +6315,7 @@ export function initGameRuntime(hooks = {}) {
 
         let tickCounter = 0;
         function gameTick() {
+          if (!isShellMounted()) return;
           const now = Date.now();
           const dtSec = Math.min(5, Math.max(0.5, (now - state.lastTick) / 1000));
           const dtMin = dtSec / 60;
@@ -6420,7 +6426,8 @@ export function initGameRuntime(hooks = {}) {
           processWorldMapTick(now);
 
           tickCounter++;
-          if (tickCounter % 5 === 0) saveState();
+          if (tickCounter % 90 === 0) saveState();
+          else if (tickCounter % 5 === 0) saveState({ localOnly: true });
 
           renderAll();
         }
@@ -6878,16 +6885,24 @@ export function initGameRuntime(hooks = {}) {
         }
 
         function renderHUD() {
+          const meatEl = document.getElementById('hud-meat');
+          const woodEl = document.getElementById('hud-wood');
+          const stoneEl = document.getElementById('hud-stone');
+          const furEl = document.getElementById('hud-fur');
+          const popEl = document.getElementById('hud-pop');
+          if (!meatEl || !woodEl || !stoneEl || !furEl || !popEl) return;
+
           const rates = computeEconomyRates();
 
-          document.getElementById('hud-meat').textContent = fmtNum(state.resources.meat);
-          document.getElementById('hud-wood').textContent = fmtNum(state.resources.wood);
-          document.getElementById('hud-stone').textContent = fmtNum(state.resources.stone);
-          document.getElementById('hud-fur').textContent = fmtNum(state.resources.fur);
-          document.getElementById('hud-pop').textContent = `${getFreePop()}/${state.pop.total}`;
+          meatEl.textContent = fmtNum(state.resources.meat);
+          woodEl.textContent = fmtNum(state.resources.wood);
+          stoneEl.textContent = fmtNum(state.resources.stone);
+          furEl.textContent = fmtNum(state.resources.fur);
+          popEl.textContent = `${getFreePop()}/${state.pop.total}`;
 
           const setRate = (id, val) => {
             const el = document.getElementById(id);
+            if (!el) return;
             el.textContent = fmtRate(val);
             el.className = 'res-rate ' + (val > 0.4 ? 'pos' : val < -0.4 ? 'neg' : '');
           };
@@ -6897,8 +6912,10 @@ export function initGameRuntime(hooks = {}) {
           setRate('rate-fur', rates.furNet);
 
           const mEl = document.getElementById('rate-morale');
-          mEl.textContent = `Moral ${state.morale}%`;
-          mEl.className = 'res-rate ' + (state.morale >= 85 ? 'pos' : state.morale < 65 ? 'neg' : '');
+          if (mEl) {
+            mEl.textContent = `Moral ${state.morale}%`;
+            mEl.className = 'res-rate ' + (state.morale >= 85 ? 'pos' : state.morale < 65 ? 'neg' : '');
+          }
 
           const setTabDot = (id, count) => {
             const el = document.getElementById(id);
@@ -6940,26 +6957,34 @@ export function initGameRuntime(hooks = {}) {
         }
 
         function renderVillageMap() {
+          const emberLabelEl = document.getElementById('emberLabel');
+          if (!emberLabelEl) return;
+
           const now = Date.now();
           const rates = computeEconomyRates();
           const emberPct = Math.round(state.ember);
           const emberSt = getEmberStatus(emberPct);
           const overheat = isOverheatMode();
 
-          document.getElementById('emberLabel').textContent = `Glut ${emberPct}%`;
-          document.getElementById('emberMiniFill').style.width = `${emberPct}%`;
+          emberLabelEl.textContent = `Glut ${emberPct}%`;
+          const emberFillEl = document.getElementById('emberMiniFill');
+          if (emberFillEl) emberFillEl.style.width = `${emberPct}%`;
           const stEl = document.getElementById('emberStateText');
-          if (!rates.autoFeedActive) {
-            stEl.textContent = 'Kein Holz!';
-            stEl.style.color = '#ef4444';
-          } else {
-            stEl.textContent = overheat ? 'Auto · Überheizt' : `Auto · ${emberSt.label}`;
-            stEl.style.color = overheat ? '#fb923c' : emberSt.color;
+          if (stEl) {
+            if (!rates.autoFeedActive) {
+              stEl.textContent = 'Kein Holz!';
+              stEl.style.color = '#ef4444';
+            } else {
+              stEl.textContent = overheat ? 'Auto · Überheizt' : `Auto · ${emberSt.label}`;
+              stEl.style.color = overheat ? '#fb923c' : emberSt.color;
+            }
           }
 
           // Dauerhafter Normal / Überheizen Umschalter
-          document.getElementById('btnModeNormal').className = 'mode-switch-btn' + (!overheat ? ' active-normal' : '');
-          document.getElementById('btnModeOverheat').className = 'mode-switch-btn' + (overheat ? ' active-overheat' : '');
+          const btnModeNormal = document.getElementById('btnModeNormal');
+          const btnModeOverheat = document.getElementById('btnModeOverheat');
+          if (btnModeNormal) btnModeNormal.className = 'mode-switch-btn' + (!overheat ? ' active-normal' : '');
+          if (btnModeOverheat) btnModeOverheat.className = 'mode-switch-btn' + (overheat ? ' active-overheat' : '');
 
           // Wetter-Banner & Vignetten
           const wEl = document.getElementById('weatherBannerText');
@@ -6967,25 +6992,27 @@ export function initGameRuntime(hooks = {}) {
           const frostVig = document.getElementById('frostVignette');
           const ashVig = document.getElementById('ashVignette');
 
-          if (state.weather.phase === 'calm') {
-            wEl.textContent = `Ruhige Asche-Nacht · Wechsel in ${fmtClock(wRem)}`;
-            wEl.className = 'weather-line';
-            frostVig.classList.remove('active');
-            ashVig.classList.remove('active');
-          } else if (state.weather.phase === 'warning') {
-            const name = state.weather.type === 'cold' ? 'Kälteeinbruch' : 'Aschesturm';
-            wEl.textContent = `Vorwarnung: ${name} in ${fmtClock(wRem)} · Holz prüfen`;
-            wEl.className = 'weather-line warn';
-            frostVig.classList.remove('active');
-            ashVig.classList.remove('active');
-          } else {
-            const isCold = state.weather.type === 'cold';
-            const name = isCold ? 'Kälteeinbruch aktiv' : 'Aschesturm aktiv';
-            const extra = isCold ? 'Holz +45 %' : 'Holz +55 %';
-            wEl.textContent = `${name} (${fmtClock(wRem)}) · ${extra}`;
-            wEl.className = 'weather-line ' + (isCold ? 'cold' : 'ash');
-            frostVig.classList.toggle('active', isCold);
-            ashVig.classList.toggle('active', !isCold);
+          if (wEl && frostVig && ashVig) {
+            if (state.weather.phase === 'calm') {
+              wEl.textContent = `Ruhige Asche-Nacht · Wechsel in ${fmtClock(wRem)}`;
+              wEl.className = 'weather-line';
+              frostVig.classList.remove('active');
+              ashVig.classList.remove('active');
+            } else if (state.weather.phase === 'warning') {
+              const name = state.weather.type === 'cold' ? 'Kälteeinbruch' : 'Aschesturm';
+              wEl.textContent = `Vorwarnung: ${name} in ${fmtClock(wRem)} · Holz prüfen`;
+              wEl.className = 'weather-line warn';
+              frostVig.classList.remove('active');
+              ashVig.classList.remove('active');
+            } else {
+              const isCold = state.weather.type === 'cold';
+              const name = isCold ? 'Kälteeinbruch aktiv' : 'Aschesturm aktiv';
+              const extra = isCold ? 'Holz +45 %' : 'Holz +55 %';
+              wEl.textContent = `${name} (${fmtClock(wRem)}) · ${extra}`;
+              wEl.className = 'weather-line ' + (isCold ? 'cold' : 'ash');
+              frostVig.classList.toggle('active', isCold);
+              ashVig.classList.toggle('active', !isCold);
+            }
           }
 
           // Alle 15 Gebäude-Zustände an die animierte 3D-Dorfszene synchronisieren
@@ -7127,28 +7154,33 @@ export function initGameRuntime(hooks = {}) {
           // Bau- oder Ausbildungs-Fortschrittsleiste am unteren Rand der Karte
           const qBar = document.getElementById('villageQueueBar');
           const freeBtn = document.getElementById('btnQueueFreeFinish');
-          if (state.activeBuild) {
-            const bDef = BUILDINGS[state.activeBuild.buildingId];
-            const total = Math.max(1, (state.activeBuild.endsAt - state.activeBuild.startedAt) / 1000);
-            const rem = Math.max(0, (state.activeBuild.endsAt - now) / 1000);
-            const pct = Math.min(100, Math.max(0, ((total - rem) / total) * 100));
-            qBar.classList.add('visible');
-            document.getElementById('queueBuildName').textContent = `${bDef.shortName} → St. ${state.activeBuild.targetLevel}`;
-            document.getElementById('queueBuildTime').textContent = fmtClock(rem);
-            document.getElementById('queueBuildFill').style.width = `${pct.toFixed(1)}%`;
-            freeBtn.style.display = rem <= FREE_FINISH_SEC ? 'inline-flex' : 'none';
-          } else if (state.activeTraining) {
-            const tDef = TROOP_DEFS[state.activeTraining.troopType];
-            const total = Math.max(1, (state.activeTraining.endsAt - state.activeTraining.startedAt) / 1000);
-            const rem = Math.max(0, (state.activeTraining.endsAt - now) / 1000);
-            const pct = Math.min(100, Math.max(0, ((total - rem) / total) * 100));
-            qBar.classList.add('visible');
-            document.getElementById('queueBuildName').textContent = `Ausbildung: ${state.activeTraining.count}× ${tDef.name}`;
-            document.getElementById('queueBuildTime').textContent = fmtClock(rem);
-            document.getElementById('queueBuildFill').style.width = `${pct.toFixed(1)}%`;
-            freeBtn.style.display = 'none';
-          } else {
-            qBar.classList.remove('visible');
+          const qNameEl = document.getElementById('queueBuildName');
+          const qTimeEl = document.getElementById('queueBuildTime');
+          const qFillEl = document.getElementById('queueBuildFill');
+          if (qBar && freeBtn && qNameEl && qTimeEl && qFillEl) {
+            if (state.activeBuild) {
+              const bDef = BUILDINGS[state.activeBuild.buildingId];
+              const total = Math.max(1, (state.activeBuild.endsAt - state.activeBuild.startedAt) / 1000);
+              const rem = Math.max(0, (state.activeBuild.endsAt - now) / 1000);
+              const pct = Math.min(100, Math.max(0, ((total - rem) / total) * 100));
+              qBar.classList.add('visible');
+              qNameEl.textContent = `${bDef.shortName} → St. ${state.activeBuild.targetLevel}`;
+              qTimeEl.textContent = fmtClock(rem);
+              qFillEl.style.width = `${pct.toFixed(1)}%`;
+              freeBtn.style.display = rem <= FREE_FINISH_SEC ? 'inline-flex' : 'none';
+            } else if (state.activeTraining) {
+              const tDef = TROOP_DEFS[state.activeTraining.troopType];
+              const total = Math.max(1, (state.activeTraining.endsAt - state.activeTraining.startedAt) / 1000);
+              const rem = Math.max(0, (state.activeTraining.endsAt - now) / 1000);
+              const pct = Math.min(100, Math.max(0, ((total - rem) / total) * 100));
+              qBar.classList.add('visible');
+              qNameEl.textContent = `Ausbildung: ${state.activeTraining.count}× ${tDef.name}`;
+              qTimeEl.textContent = fmtClock(rem);
+              qFillEl.style.width = `${pct.toFixed(1)}%`;
+              freeBtn.style.display = 'none';
+            } else {
+              qBar.classList.remove('visible');
+            }
           }
         }
 
@@ -10000,40 +10032,40 @@ export function initGameRuntime(hooks = {}) {
             }
           }
           openSheet = { type: 'building', id: buildingId, subTab: defaultSub };
-          document.getElementById('detailBackdrop').classList.add('open');
+          document.getElementById('detailBackdrop')?.classList.add('open');
           renderSheet();
         }
 
         function openResearchSheet(techId) {
           openSheet = { type: 'research', id: techId };
-          document.getElementById('detailBackdrop').classList.add('open');
+          document.getElementById('detailBackdrop')?.classList.add('open');
           renderSheet();
         }
 
         function openWorldNodeSheet(nodeId) {
           initGatherDraft(nodeId);
           openSheet = { type: 'worldNode', id: nodeId };
-          document.getElementById('detailBackdrop').classList.add('open');
+          document.getElementById('detailBackdrop')?.classList.add('open');
           renderSheet();
         }
 
         function openWorldDinoSheet(dinoId) {
           initHuntDraft(dinoId);
           openSheet = { type: 'worldDino', id: dinoId };
-          document.getElementById('detailBackdrop').classList.add('open');
+          document.getElementById('detailBackdrop')?.classList.add('open');
           renderSheet();
         }
 
         function openOwnSettlementSheet() {
           openSheet = { type: 'ownSettlement', id: 'home' };
-          document.getElementById('detailBackdrop').classList.add('open');
+          document.getElementById('detailBackdrop')?.classList.add('open');
           renderSheet();
         }
 
         function openVolcanoSheet() {
           initVolcanoDraft();
           openSheet = { type: 'volcano', id: 'central_volcano' };
-          document.getElementById('detailBackdrop').classList.add('open');
+          document.getElementById('detailBackdrop')?.classList.add('open');
           renderSheet();
           if (window.DinoMultiplayer && typeof window.DinoMultiplayer.refreshVolcanoState === 'function') {
             void window.DinoMultiplayer.refreshVolcanoState().then((fresh) => {
@@ -10452,11 +10484,11 @@ export function initGameRuntime(hooks = {}) {
 
         function closeSheet() {
           openSheet = null;
-          document.getElementById('detailBackdrop').classList.remove('open');
+          document.getElementById('detailBackdrop')?.classList.remove('open');
         }
 
         function renderSheet() {
-          if (!openSheet) return;
+          if (!openSheet || !document.getElementById('sheetTitle') || !document.getElementById('sheetBody')) return;
           if (openSheet.type === 'building') {
             renderBuildingSheet(openSheet.id, openSheet.subTab || 'building');
           } else if (openSheet.type === 'research') {
@@ -11452,6 +11484,7 @@ export function initGameRuntime(hooks = {}) {
         }
 
         function renderAll() {
+          if (!isShellMounted()) return;
           renderHUD();
           if (activeTab === 'village') renderVillageMap();
           else if (activeTab === 'worldmap') renderWorldMap();
@@ -11467,7 +11500,8 @@ export function initGameRuntime(hooks = {}) {
           if (!valid.includes(tabName)) tabName = 'village';
           activeTab = tabName;
           document.querySelectorAll('.tab-view').forEach((v) => v.classList.remove('active'));
-          document.getElementById(`tab-${tabName}`).classList.add('active');
+          const nextTabEl = document.getElementById(`tab-${tabName}`);
+          if (nextTabEl) nextTabEl.classList.add('active');
           document.querySelectorAll('.tab-btn').forEach((b) => {
             b.classList.toggle('active', b.dataset.tab === tabName);
           });
@@ -11488,12 +11522,14 @@ export function initGameRuntime(hooks = {}) {
            ===================================================================== */
         function openCenterModal(html) {
           const backdrop = document.getElementById('centerModalBackdrop');
-          document.getElementById('centerModalContent').innerHTML = html;
+          const content = document.getElementById('centerModalContent');
+          if (!backdrop || !content) return;
+          content.innerHTML = html;
           backdrop.classList.add('open');
         }
 
         function closeCenterModal() {
-          document.getElementById('centerModalBackdrop').classList.remove('open');
+          document.getElementById('centerModalBackdrop')?.classList.remove('open');
         }
 
         /* =====================================================================
@@ -11719,7 +11755,7 @@ export function initGameRuntime(hooks = {}) {
 
         function handleLiveDinoBattleTriggered(battle) {
           if (!battle) return;
-          const centerOpen = document.getElementById('centerModalBackdrop').classList.contains('open');
+          const centerOpen = Boolean(document.getElementById('centerModalBackdrop')?.classList.contains('open'));
           if (activeTab === 'heroes' && !centerOpen && !battleAnimState.active) {
             openBattleReplayModal(battle.id, { animate: true });
           } else {
@@ -12071,7 +12107,7 @@ export function initGameRuntime(hooks = {}) {
             </div>
           `;
 
-          document.getElementById('battleModalBackdrop').classList.add('open');
+          document.getElementById('battleModalBackdrop')?.classList.add('open');
 
           if (shouldAnimate) {
             updateBattleArenaHP(battle, battle.squadHpMax, battle.dinoHpMax);
@@ -12368,10 +12404,10 @@ export function initGameRuntime(hooks = {}) {
            ===================================================================== */
         function bindEvents() {
           // Titelbildschirm starten
-          document.getElementById('btnStartGame').addEventListener('click', () => {
+          document.getElementById('btnStartGame')?.addEventListener('click', () => {
             state.started = true;
             SoundFX.play('horn');
-            document.getElementById('titleScreen').classList.add('hidden');
+            document.getElementById('titleScreen')?.classList.add('hidden');
             saveState();
             renderAll();
           });
@@ -12379,9 +12415,9 @@ export function initGameRuntime(hooks = {}) {
           // Tastatur-Start auf Titelbildschirm + Escape schließt Sheet
           window.addEventListener('keydown', (e) => {
             const title = document.getElementById('titleScreen');
-            if (!title.classList.contains('hidden') && (e.key === 'Enter' || e.key === ' ')) {
+            if (title && !title.classList.contains('hidden') && (e.key === 'Enter' || e.key === ' ')) {
               e.preventDefault();
-              document.getElementById('btnStartGame').click();
+              document.getElementById('btnStartGame')?.click();
             } else if (e.key === 'Escape') {
               closeSheet();
               closeCenterModal();
@@ -13409,7 +13445,7 @@ export function initGameRuntime(hooks = {}) {
             }
             if (e.target.id === 'btnShowTitle') {
               closeCenterModal();
-              document.getElementById('titleScreen').classList.remove('hidden');
+              document.getElementById('titleScreen')?.classList.remove('hidden');
               return;
             }
             if (e.target.id === 'btnConfirmResetAsk') {
@@ -13688,9 +13724,9 @@ export function initGameRuntime(hooks = {}) {
             })
           });
 
-          // Alle 25 Sekunden Siedlungsstatus (Stufe/Macht/Position) auf gemeinsamer Weltkarte synchronisieren
+          // Alle 60 Sekunden Siedlungsstatus (Stufe/Macht/Position) auf gemeinsamer Weltkarte synchronisieren (nur bei Änderungen an Firestore)
           setInterval(() => {
-            if (!window.DinoMultiplayer) return;
+            if (!isShellMounted() || !window.DinoMultiplayer) return;
             window.DinoMultiplayer.syncSettlement({
               bonfireLevel: state.buildings.bonfire.level,
               power: computeVillagePowerMp(),
@@ -13698,7 +13734,7 @@ export function initGameRuntime(hooks = {}) {
               tileY: state.homeTile.y,
               autoAssignIfOccupied: true
             });
-          }, 25000);
+          }, 60000);
         }
 
         function bootstrapVillage3D() {
@@ -13733,8 +13769,9 @@ export function initGameRuntime(hooks = {}) {
           if (loaded) {
             offlineReport = runOfflineSimulation(loaded);
             const note = document.getElementById('titleSaveNote');
-            note.textContent = `Gespeichertes Lager · Signalfeuer Stufe ${state.buildings.bonfire.level} · ${state.pop.total} Bewohner`;
-            document.getElementById('btnStartGame').textContent = 'Lager fortsetzen';
+            if (note) note.textContent = `Gespeichertes Lager · Signalfeuer Stufe ${state.buildings.bonfire.level} · ${state.pop.total} Bewohner`;
+            const startBtn = document.getElementById('btnStartGame');
+            if (startBtn) startBtn.textContent = 'Lager fortsetzen';
           }
 
           bindEvents();

@@ -222,6 +222,10 @@ class DinoMultiplayerBridge {
   private saveTimer: number | null = null;
   private initialized = false;
   private listeners = new Set<() => void>();
+  private firestoreWriteQuotaPausedUntil = 0;
+  private lastSyncedFirestoreSettlementKey = '';
+  private lastSyncedFirestoreSettlementAt = 0;
+  private lastCloudFirestoreWriteAt = 0;
 
   private logSeq = 0;
   private logs: DiagnosticLogEntry[] = [];
@@ -272,6 +276,34 @@ class DinoMultiplayerBridge {
       return msg;
     }
     return String(err);
+  }
+
+  private isQuotaExceededError(err: unknown): boolean {
+    const detail = this.formatErrorDetail(err).toLowerCase();
+    return (
+      detail.includes('resource-exhausted') ||
+      detail.includes('quota limit exceeded') ||
+      detail.includes('quota exceeded')
+    );
+  }
+
+  private isFirestoreWritePaused(): boolean {
+    return Date.now() < this.firestoreWriteQuotaPausedUntil;
+  }
+
+  private markFirestoreWriteQuotaHit(source: DiagnosticLogSource, detail: string): void {
+    const wasPaused = this.isFirestoreWritePaused();
+    this.firestoreWriteQuotaPausedUntil = Date.now() + 10 * 60 * 1000;
+    this.diagnostics.firestoreStatus = 'degraded';
+    this.diagnostics.firestoreDetail = 'Tages-Schreibkontingent erreicht (lokale Speicherung aktiv)';
+    if (!wasPaused) {
+      this.pushLog(
+        'warn',
+        source,
+        'Firestore-Tageskontingent für Schreibvorgänge erreicht — Cloud-Sync vorübergehend pausiert',
+        detail
+      );
+    }
   }
 
   private pushLog(
@@ -941,15 +973,21 @@ class DinoMultiplayerBridge {
         this.tribeName = sanitizeTribeName(serverSaveResp.save.tribeName, this.tribeName);
         this.lastServerSaveAt = serverSaveResp.save.updatedAt;
         this.callbacks.onCloudStateLoaded?.(serverSaveResp.save.state, this.tribeName);
-        await saveCloudState(user.uid, this.tribeName, serverSaveResp.save.state, 1);
+        if (!this.isFirestoreWritePaused()) {
+          await saveCloudState(user.uid, this.tribeName, serverSaveResp.save.state, 1);
+          this.lastCloudFirestoreWriteAt = Date.now();
+          this.lastCloudSaveAt = this.lastCloudFirestoreWriteAt;
+        }
         this.cloudSynced = true;
-        this.lastCloudSaveAt = Date.now();
         this.pushLog('success', 'Sync', 'Server-Spielstand geladen & in Firestore gespiegelt');
       } else if (localState) {
-        await saveCloudState(user.uid, this.tribeName, localState, 1);
+        if (!this.isFirestoreWritePaused() && (!cloudSave || localTs > cloudTs + 15000)) {
+          await saveCloudState(user.uid, this.tribeName, localState, 1);
+          this.lastCloudFirestoreWriteAt = Date.now();
+          this.lastCloudSaveAt = this.lastCloudFirestoreWriteAt;
+          this.pushLog('success', 'Sync', 'Lokaler Spielstand erfolgreich in Cloud Firestore gespeichert');
+        }
         this.cloudSynced = true;
-        this.lastCloudSaveAt = Date.now();
-        this.pushLog('success', 'Sync', 'Lokaler Spielstand erfolgreich in Cloud Firestore gespeichert');
         if (fbToken) {
           await this.persistToServer(localState, fbToken);
         }
@@ -963,7 +1001,7 @@ class DinoMultiplayerBridge {
         );
       }
 
-      if (this.getDiagnostics().firestoreStatus !== 'error') {
+      if (this.getDiagnostics().firestoreStatus !== 'error' && !this.isFirestoreWritePaused()) {
         this.diagnostics.firestoreStatus = 'ok';
         this.diagnostics.firestoreDetail = 'Cloud Firestore synchronisiert';
       }
@@ -971,11 +1009,16 @@ class DinoMultiplayerBridge {
       await this.pushCurrentSettlement(true);
     } catch (err) {
       const detail = this.formatErrorDetail(err);
-      console.error('[Cloud Save Sync]', err);
-      this.diagnostics.firestoreStatus = detail.toLowerCase().includes('offline') ? 'offline' : 'error';
-      this.diagnostics.firestoreDetail = detail;
-      this.pushLog('error', 'Sync', 'Cloud-Save-Sync fehlgeschlagen', detail);
-      this.syncState = this.wsConnected ? 'synced' : 'offline';
+      if (this.isQuotaExceededError(err)) {
+        this.markFirestoreWriteQuotaHit('Sync', detail);
+        this.syncState = this.wsConnected ? 'synced' : 'offline';
+      } else {
+        console.error('[Cloud Save Sync]', err);
+        this.diagnostics.firestoreStatus = detail.toLowerCase().includes('offline') ? 'offline' : 'error';
+        this.diagnostics.firestoreDetail = detail;
+        this.pushLog('error', 'Sync', 'Cloud-Save-Sync fehlgeschlagen', detail);
+        this.syncState = this.wsConnected ? 'synced' : 'offline';
+      }
     }
 
     this.refreshRootCauseHint();
@@ -1152,6 +1195,7 @@ class DinoMultiplayerBridge {
 
     if (this.firebaseUser) {
       const fbUid = this.firebaseUser.uid;
+      const now = Date.now();
       const localDto: WorldSettlementDTO = {
         uid: fbUid,
         tribeName: session.tribeName,
@@ -1160,35 +1204,50 @@ class DinoMultiplayerBridge {
         tileX: finalTileX,
         tileY: finalTileY,
         chunkKey: `${Math.floor(finalTileX / 50)}_${Math.floor(finalTileY / 50)}`,
-        updatedAt: Date.now(),
+        updatedAt: now,
       };
       this.settlementsMap.set(fbUid, localDto);
       this.emitWorld();
-      try {
-        await syncPublicProfileAndSettlement({
-          uid: fbUid,
-          tribeName: session.tribeName,
-          bonfireLevel: finalBonfire,
-          power: finalPower,
-          tileX: finalTileX,
-          tileY: finalTileY,
-        });
-        this.cloudSynced = true;
-        this.syncState = 'synced';
-        this.diagnostics.firestoreStatus = 'ok';
-        this.diagnostics.firestoreDetail = `Siedlung synchronisiert [${finalTileX},${finalTileY}]`;
-        this.pushLog(
-          'success',
-          'Firestore',
-          `Siedlung in world_settlements gespeichert [${finalTileX},${finalTileY}]`,
-          `Stamm: ${session.tribeName} · Feuer St.${finalBonfire}`
-        );
-        this.emitSession();
-      } catch (err) {
-        const detail = this.formatErrorDetail(err);
-        this.diagnostics.firestoreStatus = detail.toLowerCase().includes('offline') ? 'offline' : 'error';
-        this.diagnostics.firestoreDetail = detail;
-        this.pushLog('error', 'Firestore', 'Siedlungs-Sync fehlgeschlagen', detail);
+
+      // Nur in Firestore schreiben, wenn sich Siedlungsdaten geändert haben oder 10 Min vergangen sind
+      const syncKey = `${fbUid}|${session.tribeName}|${finalBonfire}|${finalPower}|${finalTileX}|${finalTileY}`;
+      const unchangedRecently =
+        syncKey === this.lastSyncedFirestoreSettlementKey &&
+        now - this.lastSyncedFirestoreSettlementAt < 10 * 60 * 1000;
+
+      if (!unchangedRecently && !this.isFirestoreWritePaused()) {
+        try {
+          await syncPublicProfileAndSettlement({
+            uid: fbUid,
+            tribeName: session.tribeName,
+            bonfireLevel: finalBonfire,
+            power: finalPower,
+            tileX: finalTileX,
+            tileY: finalTileY,
+          });
+          this.lastSyncedFirestoreSettlementKey = syncKey;
+          this.lastSyncedFirestoreSettlementAt = now;
+          this.cloudSynced = true;
+          this.syncState = 'synced';
+          this.diagnostics.firestoreStatus = 'ok';
+          this.diagnostics.firestoreDetail = `Siedlung synchronisiert [${finalTileX},${finalTileY}]`;
+          this.pushLog(
+            'success',
+            'Firestore',
+            `Siedlung in world_settlements gespeichert [${finalTileX},${finalTileY}]`,
+            `Stamm: ${session.tribeName} · Feuer St.${finalBonfire}`
+          );
+          this.emitSession();
+        } catch (err) {
+          const detail = this.formatErrorDetail(err);
+          if (this.isQuotaExceededError(err)) {
+            this.markFirestoreWriteQuotaHit('Firestore', detail);
+          } else {
+            this.diagnostics.firestoreStatus = detail.toLowerCase().includes('offline') ? 'offline' : 'error';
+            this.diagnostics.firestoreDetail = detail;
+            this.pushLog('error', 'Firestore', 'Siedlungs-Sync fehlgeschlagen', detail);
+          }
+        }
       }
     }
 
@@ -1250,14 +1309,20 @@ class DinoMultiplayerBridge {
         updatedAt: Date.now(),
       });
       this.emitWorld();
-      void syncPublicProfileAndSettlement({
-        uid: fbUid,
-        tribeName: session.tribeName,
-        bonfireLevel: finalBonfire,
-        power: finalPower,
-        tileX: finalTileX,
-        tileY: finalTileY,
-      }).catch(() => {});
+      if (!this.isFirestoreWritePaused()) {
+        void syncPublicProfileAndSettlement({
+          uid: fbUid,
+          tribeName: session.tribeName,
+          bonfireLevel: finalBonfire,
+          power: finalPower,
+          tileX: finalTileX,
+          tileY: finalTileY,
+        }).catch((err) => {
+          if (this.isQuotaExceededError(err)) {
+            this.markFirestoreWriteQuotaHit('Firestore', this.formatErrorDetail(err));
+          }
+        });
+      }
     }
 
     return resp;
@@ -1301,7 +1366,7 @@ class DinoMultiplayerBridge {
         }
       }
     }
-    if (this.firebaseUser) {
+    if (this.firebaseUser && !this.isFirestoreWritePaused()) {
       void publishMarchToFirestore({
         marchId,
         uid: this.firebaseUser.uid,
@@ -1312,7 +1377,11 @@ class DinoMultiplayerBridge {
         toX: payload.toX,
         toY: payload.toY,
         targetLabel: payload.targetLabel,
-      }).catch(() => {});
+      }).catch((err) => {
+        if (this.isQuotaExceededError(err)) {
+          this.markFirestoreWriteQuotaHit('Firestore', this.formatErrorDetail(err));
+        }
+      });
     }
   }
 
@@ -1328,8 +1397,12 @@ class DinoMultiplayerBridge {
         void postMarch({ marchId, status: 'completed' }, token).catch(() => {});
       }
     }
-    if (this.firebaseUser) {
-      void completeMarchInFirestore(marchId).catch(() => {});
+    if (this.firebaseUser && !this.isFirestoreWritePaused()) {
+      void completeMarchInFirestore(marchId).catch((err) => {
+        if (this.isQuotaExceededError(err)) {
+          this.markFirestoreWriteQuotaHit('Firestore', this.formatErrorDetail(err));
+        }
+      });
     }
   }
 
@@ -1729,26 +1802,41 @@ class DinoMultiplayerBridge {
 
   saveToCloud(stateObj: Record<string, unknown>, immediate = false): void {
     const runSave = async () => {
+      const now = Date.now();
+      const shouldWriteFirestore =
+        Boolean(this.firebaseUser) &&
+        !this.isFirestoreWritePaused() &&
+        (immediate || now - this.lastCloudFirestoreWriteAt >= 60_000);
+
+      if (!shouldWriteFirestore && !this.serverAvailable && !this.wsConnected) {
+        return;
+      }
+
       this.syncState = 'saving';
       this.emitSession();
       try {
         // 1. Auf dem Spielserver sichern (sofern aktiver Backend-Server erreichbar)
         await this.persistToServer(stateObj);
-        // 2. Bei verknüpftem Google-Konto direkt in Cloud Firestore sichern (funktioniert auch auf GitHub Pages)
-        if (this.firebaseUser) {
+        // 2. Bei verknüpftem Google-Konto gedrosselt in Cloud Firestore sichern (max. 1× pro Minute automatisch, schont Free-Tier-Kontingent)
+        if (this.firebaseUser && shouldWriteFirestore) {
           await saveCloudState(this.firebaseUser.uid, this.tribeName, stateObj, 1);
+          this.lastCloudFirestoreWriteAt = Date.now();
           this.cloudSynced = true;
-          this.lastCloudSaveAt = Date.now();
+          this.lastCloudSaveAt = this.lastCloudFirestoreWriteAt;
           this.diagnostics.firestoreStatus = 'ok';
           this.pushLog('success', 'Sync', 'Cloud-Spielstand gespeichert', `users/${this.firebaseUser.uid}/private/save`);
         }
         this.syncState = this.wsConnected || this.isCloudLive() ? 'synced' : 'offline';
       } catch (err) {
         const detail = this.formatErrorDetail(err);
-        console.error('[Persistenz-Sync Fehler]', err);
-        this.diagnostics.firestoreStatus = detail.toLowerCase().includes('offline') ? 'offline' : 'error';
-        this.diagnostics.firestoreDetail = detail;
-        this.pushLog('error', 'Sync', 'Cloud-Speicherung fehlgeschlagen', detail);
+        if (this.isQuotaExceededError(err)) {
+          this.markFirestoreWriteQuotaHit('Sync', detail);
+        } else {
+          console.error('[Persistenz-Sync Fehler]', err);
+          this.diagnostics.firestoreStatus = detail.toLowerCase().includes('offline') ? 'offline' : 'error';
+          this.diagnostics.firestoreDetail = detail;
+          this.pushLog('error', 'Sync', 'Cloud-Speicherung fehlgeschlagen', detail);
+        }
         this.syncState = this.wsConnected || this.isCloudLive() ? 'synced' : 'offline';
       }
       this.refreshRootCauseHint();
@@ -1766,7 +1854,7 @@ class DinoMultiplayerBridge {
       this.saveTimer = window.setTimeout(() => {
         this.saveTimer = null;
         void runSave();
-      }, 2200);
+      }, 3000);
     }
   }
 
