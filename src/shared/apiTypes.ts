@@ -147,8 +147,10 @@ export interface WorldVolcanoBattleLogDTO {
   defenderPower: number;
   attackerWon: boolean;
   reinforced?: boolean;
+  evicted?: boolean;
   attackerLossRate: number;
   defenderLossRate: number;
+  defenderWounded?: Record<TroopKey, number>;
   timestamp: number;
 }
 
@@ -164,6 +166,7 @@ export interface WorldVolcanoStateDTO {
   holderTribeName: string | null;
   holderSince: number | null;
   garrisonPower: number;
+  garrisonHeroIds?: string[];
   garrisonHeroNames: string[];
   garrisonTroops: Record<TroopKey, number>;
   reignCount: number;
@@ -185,6 +188,8 @@ export interface VolcanoAttackResponse {
   reinforced?: boolean;
   attackerLossRate: number;
   defenderLossRate: number;
+  attackerSurvivingTroops?: Record<TroopKey, number>;
+  defenderWounded?: Record<TroopKey, number>;
   defenderName: string;
   defenderPower: number;
   battle?: WorldVolcanoBattleLogDTO;

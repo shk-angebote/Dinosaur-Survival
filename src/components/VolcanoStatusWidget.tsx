@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useMultiplayer } from '../hooks/useMultiplayer';
 import type { TroopKey, VolcanoMobilizationSnapshot } from '../game/gameRuntime';
 import type { WorldVolcanoStateDTO } from '../shared/apiTypes';
+import { VolcanoStrengthChart } from './VolcanoStrengthChart';
 
 interface VolcanoStatusWidgetProps {
   mobilization: VolcanoMobilizationSnapshot | null;
@@ -202,15 +203,19 @@ export const VolcanoStatusWidget: React.FC<VolcanoStatusWidgetProps> = ({
   const mob = mobilization ?? DEFAULT_MOBILIZATION;
   const isMobilizationMarching = mob.status === 'marching';
   const isMobilizationReady = mob.status === 'ready';
+  const stationedGarrison = mob.garrison && mob.garrison.active ? mob.garrison : null;
   const mobStatusLabel = isMobilizationMarching
     ? 'Im Einsatz'
+    : stationedGarrison && !isMobilizationReady
+    ? 'Garnison aktiv'
     : isMobilizationReady
     ? 'Einsatzbereit'
     : 'Nicht zugewiesen';
-  const mobFillPct = isMobilizationMarching
-    ? 100
-    : mob.availableTotal > 0
-    ? Math.min(100, Math.max(0, (mob.assignedTotal / mob.availableTotal) * 100))
+  const targetPower = isOwnRuler
+    ? Math.max(380, Math.round(Math.max(effective.garrisonPower || 380, stationedGarrison?.squadPower || 0) * 1.15))
+    : Math.max(80, Math.round(effective.garrisonPower || 380));
+  const stationedPower = isOwnRuler
+    ? Math.max(effective.garrisonPower || 0, stationedGarrison?.squadPower || 0)
     : 0;
   const canFillAll = !isMobilizationMarching && mob.availableTotal > 0 && mob.assignedTotal < mob.availableTotal;
   const canClearAll = !isMobilizationMarching && mob.assignedTotal > 0;
@@ -468,7 +473,11 @@ export const VolcanoStatusWidget: React.FC<VolcanoStatusWidgetProps> = ({
                   <h3 className="volc-section-heading">Mobilisierungs-Status</h3>
                   <span
                     className={`volc-mob-state${
-                      isMobilizationMarching ? ' is-marching' : isMobilizationReady ? ' is-ready' : ''
+                      isMobilizationMarching
+                        ? ' is-marching'
+                        : isMobilizationReady || stationedGarrison
+                        ? ' is-ready'
+                        : ''
                     }`}
                   >
                     <svg
@@ -484,7 +493,7 @@ export const VolcanoStatusWidget: React.FC<VolcanoStatusWidgetProps> = ({
                     >
                       {isMobilizationMarching ? (
                         <path d="M14.5 17.5 3 6V3h3l11.5 11.5M13 19l6-6M16 16l4 4M19 21l2-2" />
-                      ) : isMobilizationReady ? (
+                      ) : isMobilizationReady || stationedGarrison ? (
                         <path d="M20 6 9 17l-5-5" />
                       ) : (
                         <path d="M12 8v4m0 4h.01M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z" />
@@ -494,11 +503,48 @@ export const VolcanoStatusWidget: React.FC<VolcanoStatusWidgetProps> = ({
                   </span>
                 </div>
 
+                {/* D3-Balkendiagramm: Stärke des eigenen Stammes vs. Zielwert */}
+                <VolcanoStrengthChart
+                  mobilizedPower={mob.squadPower}
+                  stationedPower={stationedPower}
+                  targetPower={targetPower}
+                  isOwnRuler={isOwnRuler}
+                />
+
+                {/* Aktive eigene Besatzung im Vulkan (bleibt bis zur Vertreibung) */}
+                {stationedGarrison ? (
+                  <div className="volc-garrison-block">
+                    <div className="volc-garrison-head">
+                      <span className="volc-garrison-title">Im Vulkan stationiert</span>
+                      <span className="volc-garrison-count mono">
+                        {formatNumberDe(stationedGarrison.totalTroops)} Soldaten · {stationedGarrison.heroIds.length}/3 Helden
+                      </span>
+                    </div>
+                    <div className="volc-garrison-meta mono">
+                      <span>
+                        {stationedGarrison.troops.slinger} S · {stationedGarrison.troops.clubman} K · {stationedGarrison.troops.dinorider} R
+                      </span>
+                      {stationedGarrison.heroNames.length > 0 ? (
+                        <>
+                          <span aria-hidden="true">·</span>
+                          <span className="volc-mob-heroes">{stationedGarrison.heroNames.join(', ')}</span>
+                        </>
+                      ) : null}
+                    </div>
+                    <p className="volc-garrison-note">
+                      Bleibt im Vulkan bis zur Vertreibung. Verletzte aus abgewehrten Angriffen landen direkt im Krankenzelt
+                      {mob.injuredTotal && mob.injuredTotal > 0 ? ` (${formatNumberDe(mob.injuredTotal)} derzeit verletzt).` : '.'}
+                    </p>
+                  </div>
+                ) : null}
+
                 <div className="volc-mob-summary">
                   <div className="volc-mob-main">
                     <span className="volc-mob-count mono">
                       {isMobilizationMarching
                         ? `${formatNumberDe(mob.assignedTotal)} Einheiten im Einsatz`
+                        : isOwnRuler
+                        ? `${formatNumberDe(mob.assignedTotal)} / ${formatNumberDe(mob.availableTotal)} Verstärkung bereit`
                         : `${formatNumberDe(mob.assignedTotal)} / ${formatNumberDe(mob.availableTotal)} Einheiten zugewiesen`}
                     </span>
                     <span className="volc-mob-meta">
@@ -528,25 +574,9 @@ export const VolcanoStatusWidget: React.FC<VolcanoStatusWidgetProps> = ({
                     </span>
                   </div>
                   <div className="volc-power-readout">
-                    <span className="volc-power-label">Truppstärke</span>
+                    <span className="volc-power-label">{isOwnRuler ? 'Verstärkung' : 'Truppstärke'}</span>
                     <span className="volc-mob-power mono">{formatNumberDe(mob.squadPower)} KK</span>
                   </div>
-                </div>
-
-                <div
-                  className="volc-progress-track"
-                  role="progressbar"
-                  aria-label="Zugewiesene Einheiten für den Vulkan-Kampf"
-                  aria-valuenow={Math.round(mobFillPct)}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                >
-                  <div
-                    className={`volc-progress-fill${
-                      isMobilizationMarching ? ' is-battle' : ' is-mob'
-                    }`}
-                    style={{ width: `${mobFillPct.toFixed(1)}%` }}
-                  />
                 </div>
 
                 {mob.availableTotal === 0 && mob.assignedTotal === 0 ? (
@@ -697,6 +727,11 @@ export const VolcanoStatusWidget: React.FC<VolcanoStatusWidgetProps> = ({
                     {recentBattles.slice(0, 5).map((entry) => {
                       const isReinforce = Boolean(entry.reinforced);
                       const isConquest = Boolean(entry.attackerWon && !isReinforce);
+                      const woundedCount = entry.defenderWounded
+                        ? (entry.defenderWounded.slinger || 0) +
+                          (entry.defenderWounded.clubman || 0) +
+                          (entry.defenderWounded.dinorider || 0)
+                        : 0;
                       const outcome = isReinforce
                         ? 'Verstärkt'
                         : isConquest
@@ -716,6 +751,9 @@ export const VolcanoStatusWidget: React.FC<VolcanoStatusWidgetProps> = ({
                           <div className="volc-chronicle-meta mono">
                             Angriff {formatNumberDe(entry.attackerPower)} KK · Verteidigung{' '}
                             {formatNumberDe(entry.defenderPower)} KK
+                            {!isReinforce && woundedCount > 0
+                              ? ` · ${formatNumberDe(woundedCount)} Besetzer verletzt`
+                              : ''}
                           </div>
                         </li>
                       );

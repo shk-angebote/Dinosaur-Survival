@@ -37,6 +37,16 @@ export interface TroopCounts {
   dinorider: number;
 }
 
+export interface VolcanoGarrisonSnapshot {
+  active: boolean;
+  troops: TroopCounts;
+  totalTroops: number;
+  heroIds: string[];
+  heroNames: string[];
+  squadPower: number;
+  since: number | null;
+}
+
 export interface VolcanoMobilizationSnapshot {
   status: 'marching' | 'ready' | 'idle';
   marchPhase?: 'marching_out' | 'attacking' | 'marching_back' | null;
@@ -49,6 +59,8 @@ export interface VolcanoMobilizationSnapshot {
   assignedHeroNames: string[];
   maxHeroes: number;
   squadPower: number;
+  garrison?: VolcanoGarrisonSnapshot;
+  injuredTotal?: number;
 }
 
 export interface GameRuntimeSnapshot {

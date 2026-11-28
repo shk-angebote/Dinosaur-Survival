@@ -21,7 +21,20 @@ function isSameMobilization(
 ): boolean {
   if (!b) return a === null;
   if (!a) return false;
+  const ag = a.garrison;
+  const bg = b.garrison;
+  const sameGarrison =
+    Boolean(ag?.active) === Boolean(bg?.active) &&
+    (ag?.totalTroops || 0) === (bg?.totalTroops || 0) &&
+    (ag?.squadPower || 0) === (bg?.squadPower || 0) &&
+    (ag?.troops?.slinger || 0) === (bg?.troops?.slinger || 0) &&
+    (ag?.troops?.clubman || 0) === (bg?.troops?.clubman || 0) &&
+    (ag?.troops?.dinorider || 0) === (bg?.troops?.dinorider || 0) &&
+    (ag?.heroNames?.length || 0) === (bg?.heroNames?.length || 0) &&
+    (ag?.heroNames || []).every((n, i) => n === (bg?.heroNames || [])[i]);
   return (
+    sameGarrison &&
+    (a.injuredTotal || 0) === (b.injuredTotal || 0) &&
     a.status === b.status &&
     a.marchPhase === b.marchPhase &&
     a.assignedTotal === b.assignedTotal &&

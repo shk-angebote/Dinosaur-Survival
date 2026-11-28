@@ -861,6 +861,11 @@ async function startServer() {
       return;
     }
     const squadPower = Math.max(10, Math.min(250000, rawPower));
+    const heroIds = Array.isArray(body.heroIds)
+      ? body.heroIds
+          .slice(0, 3)
+          .filter((id): id is string => isValidId(id))
+      : [];
     const heroNames = Array.isArray(body.heroNames)
       ? body.heroNames
           .slice(0, 3)
@@ -873,12 +878,53 @@ async function startServer() {
       dinorider: Math.max(0, Math.min(20000, Math.floor(Number(body.troops?.dinorider || 0)))),
     };
 
-    // Bereits Herrscher der Zitadelle → Garnison verstärken!
+    const computeUnitCasualties = (
+      source: { slinger: number; clubman: number; dinorider: number },
+      rate: number,
+      guaranteeOne: boolean
+    ) => {
+      const out = { slinger: 0, clubman: 0, dinorider: 0 };
+      const clampedRate = Math.max(0, Math.min(0.9, rate));
+      if (clampedRate <= 0) return out;
+      const keys: Array<'slinger' | 'clubman' | 'dinorider'> = ['slinger', 'clubman', 'dinorider'];
+      let totalLost = 0;
+      for (const k of keys) {
+        const count = Math.max(0, Math.floor(Number(source[k] || 0)));
+        if (count <= 0) continue;
+        let lost = Math.min(count, Math.round(count * clampedRate));
+        if (lost === 0 && clampedRate >= 0.08 && count >= 2) lost = 1;
+        out[k] = lost;
+        totalLost += lost;
+      }
+      if (guaranteeOne && totalLost === 0) {
+        const largestKey = keys.reduce((best, k) => ((source[k] || 0) > (source[best] || 0) ? k : best), 'slinger' as 'slinger' | 'clubman' | 'dinorider');
+        if ((source[largestKey] || 0) > 0) {
+          out[largestKey] = 1;
+        }
+      }
+      return out;
+    };
+
+    // Bereits Herrscher der Zitadelle → Garnison verstärken (Verstärkung bleibt im Vulkan)
     if (v.holderUid && v.holderUid === identity.uid) {
-      const nextGarrisonPower = Math.max(v.garrisonPower, Math.round(v.garrisonPower * 0.65 + squadPower * 0.55));
+      const existingHeroIds = Array.isArray(v.garrisonHeroIds) ? [...v.garrisonHeroIds] : [];
+      const existingHeroNames = Array.isArray(v.garrisonHeroNames) ? [...v.garrisonHeroNames] : [];
+      for (let i = 0; i < heroIds.length; i++) {
+        const hId = heroIds[i];
+        if (!existingHeroIds.includes(hId) && existingHeroIds.length < 3) {
+          existingHeroIds.push(hId);
+          const hName = heroNames[i] || hId;
+          if (!existingHeroNames.includes(hName)) existingHeroNames.push(hName);
+        }
+      }
       v.holderTribeName = tribeName;
-      v.garrisonPower = Math.min(350000, nextGarrisonPower);
-      if (heroNames.length > 0) v.garrisonHeroNames = heroNames;
+      v.garrisonPower = Math.min(350000, Math.round((v.garrisonPower || 0) + squadPower));
+      v.garrisonHeroIds = existingHeroIds.slice(0, 3);
+      if (existingHeroNames.length > 0) {
+        v.garrisonHeroNames = existingHeroNames.slice(0, 3);
+      } else if (heroNames.length > 0) {
+        v.garrisonHeroNames = heroNames.slice(0, 3);
+      }
       v.garrisonTroops = {
         slinger: Math.min(30000, (v.garrisonTroops?.slinger || 0) + troops.slinger),
         clubman: Math.min(30000, (v.garrisonTroops?.clubman || 0) + troops.clubman),
@@ -901,7 +947,7 @@ async function startServer() {
         defenderLossRate: 0,
         timestamp: nowMs,
       };
-      v.recentBattles = [reinforceLog, ...(v.recentBattles || [])].slice(0, 12);
+      v.recentBattles = [reinforceLog, ...(v.recentBattles || [])].slice(0, 24);
       worldStore.setVolcanoState(v);
       broadcast({ type: 'world:volcano', payload: v });
       res.json({
@@ -910,6 +956,7 @@ async function startServer() {
         reinforced: true,
         attackerLossRate: 0,
         defenderLossRate: 0,
+        attackerSurvivingTroops: troops,
         defenderName: tribeName,
         defenderPower: v.garrisonPower,
         battle: reinforceLog,
@@ -923,6 +970,12 @@ async function startServer() {
     const defenderUid = v.holderUid || null;
     const defenderName = v.holderTribeName || 'Vulkan-Wächter';
     const defenderPower = Math.max(80, v.garrisonPower || VOLCANO_GUARDIAN_POWER);
+    const prevGarrisonTroops = {
+      slinger: Math.max(0, Math.floor(Number(v.garrisonTroops?.slinger || 0))),
+      clubman: Math.max(0, Math.floor(Number(v.garrisonTroops?.clubman || 0))),
+      dinorider: Math.max(0, Math.floor(Number(v.garrisonTroops?.dinorider || 0))),
+    };
+
     const atkRoll = 0.9 + Math.random() * 0.2; // ±10% Schlachtglück
     const defRoll = 0.9 + Math.random() * 0.2;
     const attackerWon = squadPower * atkRoll >= defenderPower * defRoll;
@@ -935,6 +988,24 @@ async function startServer() {
     const attackerLossRate = attackerWon ? winnerLossRate : loserLossRate;
     const defenderLossRate = attackerWon ? loserLossRate : winnerLossRate;
 
+    const attackerLosses = computeUnitCasualties(troops, attackerLossRate, false);
+    const attackerSurvivingTroops = {
+      slinger: Math.max(0, troops.slinger - attackerLosses.slinger),
+      clubman: Math.max(0, troops.clubman - attackerLosses.clubman),
+      dinorider: Math.max(0, troops.dinorider - attackerLosses.dinorider),
+    };
+
+    // Bei nicht siegreichen Angriffen wird ein Teil der stationierten Besetzer-Soldaten verletzt
+    // und landet im Krankenhaus (Krankenzelt) des Besetzers; bei Eroberung werden Verluste verbucht
+    // und die restliche Besetzer-Garnison kehrt nach Hause zurück.
+    const defenderWounded = defenderUid
+      ? computeUnitCasualties(
+          prevGarrisonTroops,
+          attackerWon ? defenderLossRate : Math.max(0.08, defenderLossRate * 0.85),
+          true
+        )
+      : { slinger: 0, clubman: 0, dinorider: 0 };
+
     const battle: WorldVolcanoBattleLogDTO = {
       battleId: `volc_${nowMs}_${Math.floor(Math.random() * 9999)}`,
       cycleNumber: v.cycleNumber,
@@ -945,34 +1016,39 @@ async function startServer() {
       defenderTribeName: defenderName,
       defenderPower,
       attackerWon,
+      evicted: Boolean(attackerWon && defenderUid),
       attackerLossRate,
       defenderLossRate,
+      defenderWounded,
       timestamp: nowMs,
     };
 
     if (attackerWon) {
+      // Eroberer-Soldaten & Helden bleiben im Vulkan stationiert, bis ein anderer Stamm sie vertreibt
       v.holderUid = identity.uid;
       v.holderTribeName = tribeName;
       v.holderSince = nowMs;
       v.garrisonPower = Math.max(120, Math.round(squadPower * (1 - attackerLossRate * 0.45)));
+      v.garrisonHeroIds = heroIds;
       v.garrisonHeroNames = heroNames.length > 0 ? heroNames : ['Stammes-Garde'];
-      v.garrisonTroops = {
-        slinger: Math.max(0, troops.slinger - Math.floor(troops.slinger * attackerLossRate)),
-        clubman: Math.max(0, troops.clubman - Math.floor(troops.clubman * attackerLossRate)),
-        dinorider: Math.max(0, troops.dinorider - Math.floor(troops.dinorider * attackerLossRate)),
-      };
+      v.garrisonTroops = attackerSurvivingTroops;
     } else {
-      v.garrisonPower = Math.max(80, Math.round(defenderPower * (1 - defenderLossRate * 0.35)));
-      if (v.garrisonTroops) {
-        v.garrisonTroops = {
-          slinger: Math.max(0, Math.floor((v.garrisonTroops.slinger || 0) * (1 - defenderLossRate * 0.4))),
-          clubman: Math.max(0, Math.floor((v.garrisonTroops.clubman || 0) * (1 - defenderLossRate * 0.4))),
-          dinorider: Math.max(0, Math.floor((v.garrisonTroops.dinorider || 0) * (1 - defenderLossRate * 0.4))),
-        };
-      }
+      // Angriff abgewehrt: Verletzte Besetzer-Soldaten verlassen den Vulkan ins Krankenzelt, Rest bleibt stationiert
+      const prevTotal = prevGarrisonTroops.slinger + prevGarrisonTroops.clubman + prevGarrisonTroops.dinorider;
+      const woundedTotal = defenderWounded.slinger + defenderWounded.clubman + defenderWounded.dinorider;
+      const powerScale =
+        prevTotal > 0
+          ? Math.max(0.55, 1 - (woundedTotal / prevTotal) * 0.55)
+          : Math.max(0.65, 1 - defenderLossRate * 0.35);
+      v.garrisonPower = Math.max(80, Math.round(defenderPower * powerScale));
+      v.garrisonTroops = {
+        slinger: Math.max(0, prevGarrisonTroops.slinger - defenderWounded.slinger),
+        clubman: Math.max(0, prevGarrisonTroops.clubman - defenderWounded.clubman),
+        dinorider: Math.max(0, prevGarrisonTroops.dinorider - defenderWounded.dinorider),
+      };
     }
 
-    v.recentBattles = [battle, ...(v.recentBattles || [])].slice(0, 12);
+    v.recentBattles = [battle, ...(v.recentBattles || [])].slice(0, 24);
     v.updatedAt = nowMs;
     worldStore.setVolcanoState(v);
     broadcast({ type: 'world:volcano', payload: v });
@@ -997,6 +1073,8 @@ async function startServer() {
       won: attackerWon,
       attackerLossRate,
       defenderLossRate,
+      attackerSurvivingTroops,
+      defenderWounded,
       defenderName,
       defenderPower,
       battle,

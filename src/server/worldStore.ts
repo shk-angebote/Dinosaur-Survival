@@ -67,6 +67,7 @@ function createInitialVolcanoState(nowMs: number): WorldVolcanoStateDTO {
     holderTribeName: null,
     holderSince: null,
     garrisonPower: VOLCANO_GUARDIAN_POWER,
+    garrisonHeroIds: [],
     garrisonHeroNames: ['Vulkan-Wächter'],
     garrisonTroops: { slinger: 20, clubman: 24, dinorider: 10 },
     reignCount: 0,
@@ -150,9 +151,10 @@ export class PersistentWorldStore {
         this.volcanoState = {
           ...createInitialVolcanoState(Date.now()),
           ...vs,
+          garrisonHeroIds: Array.isArray(vs.garrisonHeroIds) ? vs.garrisonHeroIds.slice(0, 3) : [],
           cycleIntervalMs: VOLCANO_CYCLE_INTERVAL_MS,
           battleDurationMs: VOLCANO_BATTLE_DURATION_MS,
-          recentBattles: Array.isArray(vs.recentBattles) ? vs.recentBattles.slice(0, 16) : [],
+          recentBattles: Array.isArray(vs.recentBattles) ? vs.recentBattles.slice(0, 24) : [],
         };
       }
     } catch (err) {
@@ -369,7 +371,14 @@ export class PersistentWorldStore {
       this.playerSaves.delete(guestUid);
     }
 
-    if (removedGuestUid || guestSave) {
+    let migratedVolcano = false;
+    if (this.volcanoState.holderUid === guestUid) {
+      this.volcanoState.holderUid = verifiedUid;
+      this.volcanoState.updatedAt = Date.now();
+      migratedVolcano = true;
+    }
+
+    if (removedGuestUid || guestSave || migratedVolcano) {
       this.schedulePersist();
     }
     return { removedGuestUid, migratedSettlement };
